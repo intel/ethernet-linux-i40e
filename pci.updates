@@ -32,3 +32,4 @@
 		8086 0002  Ethernet Converged Network Adapter XL710-Q1
 		8086 0003  Ethernet I/O Module XL710-Q1
 	1585  Ethernet Controller XL710 for 10GbE QSFP+
+	1586  Ethernet Controller X710 for 10GBASE-T

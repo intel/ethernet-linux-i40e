@@ -47,8 +47,8 @@ static const char i40e_driver_string[] =
 #define DRV_KERN
 
 #define DRV_VERSION_MAJOR 1
-#define DRV_VERSION_MINOR 0
-#define DRV_VERSION_BUILD 15
+#define DRV_VERSION_MINOR 1
+#define DRV_VERSION_BUILD 23
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	     __stringify(DRV_VERSION_MINOR) "." \
 	     __stringify(DRV_VERSION_BUILD) DRV_HW_PERF DRV_FPGA DRV_A0 DRV_KERN
@@ -81,6 +81,7 @@ static DEFINE_PCI_DEVICE_TABLE(i40e_pci_tbl) = {
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_QSFP_A), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_QSFP_B), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_QSFP_C), 0},
+	{PCI_VDEVICE(INTEL, I40E_DEV_ID_10G_BASE_T), 0},
 	/* required last entry */
 	{0, }
 };
@@ -4446,6 +4447,9 @@ static void i40e_print_link_message(struct i40e_vsi *vsi, bool isup)
 	case I40E_LINK_SPEED_1GB:
 		strncpy(speed, "1000 Mbps", SPEED_SIZE);
 		break;
+	case I40E_LINK_SPEED_100MB:
+		strncpy(speed, "100 Mbps", SPEED_SIZE);
+		break;
 	default:
 		break;
 	}
@@ -4476,21 +4480,7 @@ static void i40e_print_link_message(struct i40e_vsi *vsi, bool isup)
 static int i40e_up_complete(struct i40e_vsi *vsi)
 {
 	struct i40e_pf *pf = vsi->back;
-	u8 set_fc_aq_fail = 0;
-	int status;
 	int err;
-
-	/* force flow control off */
-	status = i40e_set_fc(&pf->hw, &set_fc_aq_fail, true);
-	if (status)
-		netdev_info(vsi->netdev, "set fc fail, aq_err %d\n", status);
-
-	msleep(75);
-	status = i40e_aq_set_link_restart_an(&pf->hw, true, NULL);
-	if (status) {
-		netdev_info(vsi->netdev, "link restart failed, aq_err=%d\n",
-			    pf->hw.aq.asq_last_status);
-	}
 
 	if (pf->flags & I40E_FLAG_MSIX_ENABLED)
 		i40e_vsi_configure_msix(vsi);
@@ -5220,6 +5210,7 @@ static void i40e_veb_link_event(struct i40e_veb *veb, bool link_up)
 static void i40e_link_event(struct i40e_pf *pf)
 {
 	bool new_link, old_link;
+	struct i40e_vsi *vsi = pf->vsi[pf->lan_vsi];
 
 	/* set this to force the get_link_status call to refresh state */
 	pf->hw.phy.get_link_info = true;
@@ -5228,10 +5219,12 @@ static void i40e_link_event(struct i40e_pf *pf)
 	new_link = i40e_get_link_status(&pf->hw);
 
 	if (new_link == old_link &&
-	    new_link == netif_carrier_ok(pf->vsi[pf->lan_vsi]->netdev))
+	    (test_bit(__I40E_DOWN, &vsi->state) ||
+	     new_link == netif_carrier_ok(vsi->netdev)))
 		return;
-	if (!test_bit(__I40E_DOWN, &pf->vsi[pf->lan_vsi]->state))
-		i40e_print_link_message(pf->vsi[pf->lan_vsi], new_link);
+
+	if (!test_bit(__I40E_DOWN, &vsi->state))
+		i40e_print_link_message(vsi, new_link);
 
 	/* Notify the base of the switch tree connected to
 	 * the link.  Floating VEBs are not notified.
@@ -5239,7 +5232,7 @@ static void i40e_link_event(struct i40e_pf *pf)
 	if (pf->lan_veb != I40E_NO_VEB && pf->veb[pf->lan_veb])
 		i40e_veb_link_event(pf->veb[pf->lan_veb], new_link);
 	else
-		i40e_vsi_link_event(pf->vsi[pf->lan_vsi], new_link);
+		i40e_vsi_link_event(vsi, new_link);
 
 	if (pf->vf)
 		i40e_vc_notify_link_state(pf);
@@ -5807,6 +5800,7 @@ static void i40e_send_version(struct i40e_pf *pf)
 static void i40e_reset_and_rebuild(struct i40e_pf *pf, bool reinit)
 {
 	struct i40e_hw *hw = &pf->hw;
+	u8 set_fc_aq_fail = 0;
 	i40e_status ret;
 	u32 v;
 
@@ -5874,6 +5868,11 @@ static void i40e_reset_and_rebuild(struct i40e_pf *pf, bool reinit)
 	if (ret)
 		dev_info(&pf->pdev->dev, "set phy mask fail, aq_err %d\n", ret);
 
+	/* make sure our flow control settings are restored */
+	ret = i40e_set_fc(&pf->hw, &set_fc_aq_fail, true);
+	if (ret)
+		dev_info(&pf->pdev->dev, "set fc fail, aq_err %d\n", ret);
+
 	/* Rebuild the VSIs and VEBs that existed before reset.
 	 * They are still in our local switch element arrays, so only
 	 * need to rebuild the switch model in the HW.
@@ -5926,6 +5925,13 @@ static void i40e_reset_and_rebuild(struct i40e_pf *pf, bool reinit)
 				 "rebuild of Main VSI failed: %d\n", ret);
 			goto end_core_reset;
 		}
+	}
+
+	msleep(75);
+	ret = i40e_aq_set_link_restart_an(&pf->hw, true, NULL);
+	if (ret) {
+		dev_info(&pf->pdev->dev, "link restart failed, aq_err=%d\n",
+			 pf->hw.aq.asq_last_status);
 	}
 
 	/* reinit the misc interrupt */
@@ -9107,6 +9113,13 @@ static int i40e_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 				       I40E_AQ_EVENT_MODULE_QUAL_FAIL, NULL);
 	if (err)
 		dev_info(&pf->pdev->dev, "set phy mask fail, aq_err %d\n", err);
+
+	msleep(75);
+	err = i40e_aq_set_link_restart_an(&pf->hw, true, NULL);
+	if (err) {
+		dev_info(&pf->pdev->dev, "link restart failed, aq_err=%d\n",
+			 pf->hw.aq.asq_last_status);
+	}
 
 	/* The main driver is (mostly) up and happy. We need to set this state
 	 * before setting up the misc vector or we get a race and the vector

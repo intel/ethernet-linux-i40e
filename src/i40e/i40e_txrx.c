@@ -2199,12 +2199,12 @@ static void i40e_tx_map(struct i40e_ring *tx_ring, struct sk_buff *skb,
 			struct i40e_tx_buffer *first, u32 tx_flags,
 			const u8 hdr_len, u32 td_cmd, u32 td_offset)
 {
-	unsigned int data_len = skb->data_len;
-	unsigned int size = skb_headlen(skb);
 	struct skb_frag_struct *frag;
 	struct i40e_tx_buffer *tx_bi;
 	struct i40e_tx_desc *tx_desc;
 	u16 i = tx_ring->next_to_use;
+	unsigned int data_len;
+	unsigned int size;
 	u32 td_tag = 0;
 	dma_addr_t dma;
 	u16 gso_segs;
@@ -2222,7 +2222,12 @@ static void i40e_tx_map(struct i40e_ring *tx_ring, struct sk_buff *skb,
 #endif
 	} else {
 		gso_segs = 1;
+		if (skb_shinfo(skb)->nr_frags >= I40E_MAX_BUFFER_TXD)
+			skb_linearize(skb);
 	}
+
+	data_len = skb->data_len;
+	size = skb_headlen(skb);
 
 	/* multiply data chunks by size of headers */
 	first->bytecount = skb->len - hdr_len + (gso_segs * hdr_len);

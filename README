@@ -4,7 +4,7 @@ i40e Linux* Base Driver for the Intel(R) XL710 Ethernet Controller Family
 
 ===============================================================================
 
-July 17, 2014
+September 29, 2014
 
 ===============================================================================
 
@@ -432,10 +432,26 @@ Ethernet Converged Network Adapters" (Intel Networking Division, August 2013):
 
 
 ===============================================================================
-
+********************************************************************************
 
 Known Issues
 ------------
+
+Virtual machine does not get link
+---------------------------------
+If the virtual machine has more than one virtual port assigned to it, and those
+virtual ports are bound to different physical ports, you may not get link on all
+of the virtual ports. The following command may work around the issue:
+  ethtool –r <PF>
+Where <PF> is the PF interface in the host, for example: p5p1. You may need to
+run the command more than once to get link on all virtual ports.
+
+
+Enabling TSO may cause data integrity issues
+--------------------------------------------
+Enabling TSO on kernel 3.14 or newer may cause data integrity issues. 
+Kernel 3.10 and older do not exhibit this behavior.
+
 
 Changing the number of Rx or Tx queues with ethtool -L may cause a kernel panic
 -------------------------------------------------------------------------------

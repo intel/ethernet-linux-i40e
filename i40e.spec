@@ -1,6 +1,6 @@
 Name: i40e
 Summary: Intel(R) Ethernet Connection XL710 Linux Driver
-Version: 1.0.15
+Version: 1.1.23
 Release: 1
 Source: %{name}-%{version}.tar.gz
 Vendor: Intel Corporation
