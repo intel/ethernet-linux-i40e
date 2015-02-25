@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel Ethernet Controller XL710 Family Linux Driver
- * Copyright(c) 2013 - 2014 Intel Corporation.
+ * Copyright(c) 2013 - 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -129,4 +129,7 @@ struct i40e_spinlock {
 #define i40e_memcpy(a, b, c, d)  memcpy((a), (b), (c))
 
 typedef enum i40e_status_code i40e_status;
+#if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
+#define I40E_FCOE
+#endif /* CONFIG_FCOE or CONFIG_FCOE_MODULE */
 #endif /* _I40E_OSDEP_H_ */

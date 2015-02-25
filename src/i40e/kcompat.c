@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel Ethernet Controller XL710 Family Linux Driver
- * Copyright(c) 2013 - 2014 Intel Corporation.
+ * Copyright(c) 2013 - 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -1128,8 +1128,6 @@ int _kc_pci_num_vf(struct pci_dev __maybe_unused *dev)
 #endif /* < 2.6.34 */
 
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,35) )
-#if defined(DRIVER_IXGBE) || defined(DRIVER_IGB) || defined(DRIVER_I40E) || \
-	defined(DRIVER_IXGBEVF) || defined(DRIVER_FM10K)
 #ifdef HAVE_TX_MQ
 #if (!(RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(6,0)))
 #ifndef CONFIG_NETDEVICES_MULTIQUEUE
@@ -1179,7 +1177,6 @@ ssize_t _kc_simple_write_to_buffer(void *to, size_t available, loff_t *ppos,
         return count;
 }
 
-#endif /* defined(DRIVER_IXGBE) || defined(DRIVER_IGB) || defined(DRIVER_I40E) */
 #endif /* < 2.6.35 */
 
 /*****************************************************************************/
@@ -1238,7 +1235,6 @@ u16 ___kc_skb_tx_hash(struct net_device *dev, const struct sk_buff *skb,
 	return (u16) (((u64) hash * qcount) >> 32) + qoffset;
 }
 #endif /* HAVE_NETDEV_SELECT_QUEUE */
-
 
 u8 _kc_netdev_get_num_tc(struct net_device *dev)
 {

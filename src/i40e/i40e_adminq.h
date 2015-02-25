@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel Ethernet Controller XL710 Family Linux Driver
- * Copyright(c) 2013 - 2014 Intel Corporation.
+ * Copyright(c) 2013 - 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -28,6 +28,7 @@
 #define _I40E_ADMINQ_H_
 
 #include "i40e_osdep.h"
+#include "i40e_status.h"
 #include "i40e_adminq_cmd.h"
 
 #define I40E_ADMINQ_DESC(R, i)   \
@@ -76,7 +77,8 @@ struct i40e_asq_cmd_details {
 /* ARQ event information */
 struct i40e_arq_event_info {
 	struct i40e_aq_desc desc;
-	u16 msg_size;
+	u16 msg_len;
+	u16 buf_len;
 	u8 *msg_buf;
 };
 
@@ -91,9 +93,9 @@ struct i40e_adminq_info {
 	u16 asq_buf_size;               /* send queue buffer size */
 	u16 fw_maj_ver;                 /* firmware major version */
 	u16 fw_min_ver;                 /* firmware minor version */
+	u32 fw_build;                   /* firmware build number */
 	u16 api_maj_ver;                /* api major version */
 	u16 api_min_ver;                /* api minor version */
-	bool nvm_busy;
 	bool nvm_release_on_done;
 
 	struct i40e_spinlock asq_spinlock; /* Send queue spinlock */
@@ -108,7 +110,7 @@ struct i40e_adminq_info {
  * i40e_aq_rc_to_posix - convert errors to user-land codes
  * aq_rc: AdminQ error code to convert
  **/
-static inline int i40e_aq_rc_to_posix(u16 aq_rc)
+static inline int i40e_aq_rc_to_posix(u32 aq_ret, u16 aq_rc)
 {
 	int aq_to_posix[] = {
 		0,           /* I40E_AQ_RC_OK */
@@ -136,12 +138,18 @@ static inline int i40e_aq_rc_to_posix(u16 aq_rc)
 		-EFBIG,      /* I40E_AQ_RC_EFBIG */
 	};
 
+	/* aq_rc is invalid if AQ timed out */
+	if (aq_ret == I40E_ERR_ADMIN_QUEUE_TIMEOUT)
+		return -EAGAIN;
+
+	if (aq_rc >= (sizeof(aq_to_posix) / sizeof((aq_to_posix)[0])))
+		return -ERANGE;
 	return aq_to_posix[aq_rc];
 }
 
 /* general information */
 #define I40E_AQ_LARGE_BUF		512
-#define I40E_ASQ_CMD_TIMEOUT		100000 /* usecs */
+#define I40E_ASQ_CMD_TIMEOUT		250  /* msecs */
 
 void i40e_fill_default_direct_cmd_desc(struct i40e_aq_desc *desc,
 				       u16 opcode);

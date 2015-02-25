@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel Ethernet Controller XL710 Family Linux Driver
- * Copyright(c) 2013 - 2014 Intel Corporation.
+ * Copyright(c) 2013 - 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -49,7 +49,7 @@ static INLINE bool i40e_is_nvm_update_op(struct i40e_aq_desc *desc)
 static void i40e_adminq_init_regs(struct i40e_hw *hw)
 {
 	/* set head and tail registers in our local struct */
-	if (hw->mac.type == I40E_MAC_VF) {
+	if (i40e_is_vf(hw)) {
 		hw->aq.asq.tail = I40E_VF_ATQT1;
 		hw->aq.asq.head = I40E_VF_ATQH1;
 		hw->aq.asq.len  = I40E_VF_ATQLEN1;
@@ -552,7 +552,6 @@ i40e_status i40e_init_adminq(struct i40e_hw *hw)
 	i40e_status ret_code;
 	u16 eetrack_lo, eetrack_hi;
 	int retry = 0;
-
 	/* verify input for valid configuration */
 	if ((hw->aq.num_arq_entries == 0) ||
 	    (hw->aq.num_asq_entries == 0) ||
@@ -590,6 +589,7 @@ i40e_status i40e_init_adminq(struct i40e_hw *hw)
 		ret_code = i40e_aq_get_firmware_version(hw,
 							&hw->aq.fw_maj_ver,
 							&hw->aq.fw_min_ver,
+							&hw->aq.fw_build,
 							&hw->aq.api_maj_ver,
 							&hw->aq.api_min_ver,
 							NULL);
@@ -603,7 +603,8 @@ i40e_status i40e_init_adminq(struct i40e_hw *hw)
 		goto init_adminq_free_arq;
 
 	/* get the NVM version info */
-	i40e_read_nvm_word(hw, I40E_SR_NVM_IMAGE_VERSION, &hw->nvm.version);
+	i40e_read_nvm_word(hw, I40E_SR_NVM_DEV_STARTER_VERSION,
+			   &hw->nvm.version);
 	i40e_read_nvm_word(hw, I40E_SR_NVM_EETRACK_LO, &eetrack_lo);
 	i40e_read_nvm_word(hw, I40E_SR_NVM_EETRACK_HI, &eetrack_hi);
 	hw->nvm.eetrack = (eetrack_hi << 16) | eetrack_lo;
@@ -615,7 +616,8 @@ i40e_status i40e_init_adminq(struct i40e_hw *hw)
 
 	/* pre-emptive resource lock release */
 	i40e_aq_release_resource(hw, I40E_NVM_RESOURCE_ID, 0, NULL);
-	hw->aq.nvm_busy = false;
+	hw->aq.nvm_release_on_done = false;
+	hw->nvmupd_state = I40E_NVMUPD_STATE_INIT;
 
 	ret_code = i40e_aq_set_hmc_resource_profile(hw,
 						    I40E_HMC_PROFILE_DEFAULT,
@@ -757,12 +759,6 @@ i40e_status i40e_asq_send_command(struct i40e_hw *hw,
 		goto asq_send_command_exit;
 	}
 
-	if (i40e_is_nvm_update_op(desc) && hw->aq.nvm_busy) {
-		i40e_debug(hw, I40E_DEBUG_AQ_MESSAGE, "AQTX: NVM busy.\n");
-		status = I40E_ERR_NVM;
-		goto asq_send_command_exit;
-	}
-
 	details = I40E_ADMINQ_DETAILS(hw->aq.asq, hw->aq.asq.next_to_use);
 	if (cmd_details) {
 		i40e_memcpy(details,
@@ -863,7 +859,6 @@ i40e_status i40e_asq_send_command(struct i40e_hw *hw,
 	 */
 	if (!details->async && !details->postpone) {
 		u32 total_delay = 0;
-		u32 delay_len = 10;
 
 		do {
 			/* AQ designers suggest use of head for better
@@ -872,8 +867,8 @@ i40e_status i40e_asq_send_command(struct i40e_hw *hw,
 			if (i40e_asq_done(hw))
 				break;
 			/* ugh! delay while spin_lock */
-			udelay(delay_len);
-			total_delay += delay_len;
+			usleep_range(1000, 2000);
+			total_delay++;
 		} while (total_delay < hw->aq.asq_cmd_timeout);
 	}
 
@@ -914,9 +909,6 @@ i40e_status i40e_asq_send_command(struct i40e_hw *hw,
 			   "AQTX: Writeback timeout.\n");
 		status = I40E_ERR_ADMIN_QUEUE_TIMEOUT;
 	}
-
-	if (!status && i40e_is_nvm_update_op(desc))
-		hw->aq.nvm_busy = true;
 
 asq_send_command_error:
 	i40e_release_spinlock(&hw->aq.asq_spinlock);
@@ -971,9 +963,6 @@ i40e_status i40e_clean_arq_element(struct i40e_hw *hw,
 	ntu = (rd32(hw, hw->aq.arq.head) & I40E_PF_ARQH_ARQH_MASK);
 	if (ntu == ntc) {
 		/* nothing to do - shouldn't need to update ring's values */
-		i40e_debug(hw,
-			   I40E_DEBUG_AQ_MESSAGE,
-			   "AQRX: Queue is empty.\n");
 		ret_code = I40E_ERR_ADMIN_QUEUE_NO_WORK;
 		goto clean_arq_element_out;
 	}
@@ -996,11 +985,11 @@ i40e_status i40e_clean_arq_element(struct i40e_hw *hw,
 	i40e_memcpy(&e->desc, desc, sizeof(struct i40e_aq_desc),
 		    I40E_DMA_TO_NONDMA);
 	datalen = LE16_TO_CPU(desc->datalen);
-	e->msg_size = min(datalen, e->msg_size);
-	if (e->msg_buf != NULL && (e->msg_size != 0))
+	e->msg_len = min(datalen, e->buf_len);
+	if (e->msg_buf != NULL && (e->msg_len != 0))
 		i40e_memcpy(e->msg_buf,
 			    hw->aq.arq.r.arq_bi[desc_idx].va,
-			    e->msg_size, I40E_DMA_TO_NONDMA);
+			    e->msg_len, I40E_DMA_TO_NONDMA);
 
 	i40e_debug(hw, I40E_DEBUG_AQ_MESSAGE, "AQRX: desc and buffer:\n");
 	i40e_debug_aq(hw, I40E_DEBUG_AQ_COMMAND, (void *)desc, e->msg_buf,
@@ -1036,7 +1025,6 @@ clean_arq_element_out:
 	i40e_release_spinlock(&hw->aq.arq_spinlock);
 
 	if (i40e_is_nvm_update_op(&e->desc)) {
-		hw->aq.nvm_busy = false;
 		if (hw->aq.nvm_release_on_done) {
 			i40e_release_nvm(hw);
 			hw->aq.nvm_release_on_done = false;

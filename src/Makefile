@@ -11,6 +11,7 @@ else
 	DRIVERS :=  $(shell ls -ld i40e i40evf | awk '/^d/ { print $$9 }')
 endif
 DIRS :=  $(patsubst %,%/,$(DRIVERS))
+SOURCES := $(shell find $(DRIVERS) -name "*.[ch]" | grep -v "\.mod\.c")
 MODULES := $(patsubst %,%.ko,$(DRIVERS))
 TARGETS := $(join $(DIRS), $(MODULES))
 MANFILES := $(patsubst %,%.7,$(DRIVERS))
@@ -154,49 +155,50 @@ kernelbuild = $(shell (\
 
 # We can't use the kernelbuild macro in verbose targets because it gobbles the
 # output of the shell.
-noisy: clean
+
+$(MODULES): $(TARGETS)
+	@cp $(TARGETS) .
+
+$(TARGETS): $(SOURCES)
 	@for s in $(DRIVERS) ; do \
 		if [ -n "$(KOBJ)" ]; then \
 			$(MAKE) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s modules ; \
 		else \
 			$(MAKE) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) -O $(KOBJ) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s modules ; \
 		fi ; \
-		cp $$s/*.ko . ; \
 	done
 
-noisier: clean
+noisy: $(SOURCES)
 	@for s in $(DRIVERS) ; do \
 		if [ -n "$(KOBJ)" ]; then \
 			$(MAKE) -C $(KSRC) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s V=1 modules ; \
 		else \
 			$(MAKE) -C $(KSRC) -O $(KOBJ) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s V=1 modules ; \
 		fi ; \
-		cp $$s/*.ko . ; \
 	done
+	@cp $(TARGETS) .
 
-silent: clean
+silent: $(SOURCES)
 	$(foreach d, $(DRIVERS), $(call kernelbuild,$(d),modules))
-	@for s in $(DRIVERS) ; do \
-		cp $$s/*.ko . ; \
-		done
+	@cp $(TARGETS) .
 
-sparse: clean
+sparse: clean $(SOURCES)
 	@for s in $(DRIVERS) ; do \
 		if [ -n "$(KOBJ)" ]; then \
 			$(MAKE) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s C=2 CF="-D__CHECK_ENDIAN__ -Wbitwise -Wcontext" modules ; \
 		else \
 			$(MAKE) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) -O $(KOBJ) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s C=2 CF="-D__CHECK_ENDIAN_ -Wbitwise -Wcontext" modules ; \
 		fi ; \
-		done
+	done
 
-ccc: clean
+ccc: clean $(SOURCES)
 	@for s in $(DRIVERS) ; do \
 		if [ -n "$(KOBJ)" ]; then \
 			$(MAKE) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s coccicheck MODE=report; \
 		else \
 			$(MAKE) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) -O $(KOBJ) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s coccicheck MODE=report; \
 		fi ; \
-		done
+	done
 
 manfile:
 	$(foreach m, $(DRIVERS), $(shell gzip -c ../$(m).$(MANSECTION) > $(m).$(MANSECTION).gz))
@@ -205,10 +207,11 @@ clean:
 	$(foreach d, $(DRIVERS), $(call kernelbuild,$(d),clean))
 	@-rm -rf *.$(MANSECTION).gz *.ko
 
-install: noisy manfile
+install: $(MODULES) manfile
 # remove all old versions of the driver
 	$(foreach d, $(DRIVERS), $(shell rm -f $(INSTALL_MOD_PATH)$(INSTDIR)/$(d)/$(d).ko))
 	$(foreach d, $(DRIVERS), $(shell rm -f $(INSTALL_MOD_PATH)$(INSTDIR)/$(d)/$(d).gz))
+	$(foreach d, $(DRIVERS), $(shell rm -f $(INSTALL_MOD_PATH)$(INSTDIR)/$(d)/$(d).xz))
 	$(foreach m, $(DRIVERS), $(shell \
 		install -D -m 644 $(m).$(MANSECTION).gz $(INSTALL_MOD_PATH)$(MANDIR)/man$(MANSECTION)/$(m).$(MANSECTION).gz ; \
 		install -D -m 644 $(m).ko $(INSTALL_MOD_PATH)$(INSTDIR)/$(m)/$(m).ko))
@@ -221,11 +224,13 @@ endif
 uninstall:
 	$(foreach d, $(DRIVERS), $(shell rm -f $(INSTALL_MOD_PATH)$(INSTDIR)/$(d)/$(d).ko))
 	$(foreach d, $(DRIVERS), $(shell rm -f $(INSTALL_MOD_PATH)$(INSTDIR)/$(d)/$(d).gz))
+	$(foreach d, $(DRIVERS), $(shell rm -f $(INSTALL_MOD_PATH)$(INSTDIR)/$(d)/$(d).xz))
 	@-/sbin/depmod -a $(KVER)
 	$(foreach m, $(DRIVERS), $(shell \
 		if [ -e $(INSTALL_MOD_PATH)$(MANDIR)/man$(MANSECTION)/$(m).$(MANSECTION).gz ] ; then \
 			rm -f $(INSTALL_MOD_PATH)$(MANDIR)/man$(MANSECTION)/$(m).$(MANSECTION).gz ; \
 		fi))
 
-.PHONY: noisy clean manfile
+.PHONY: noisy clean manfile silent sparse ccc install uninstall
+.NOTPARALLEL:
 

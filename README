@@ -4,7 +4,7 @@ i40e Linux* Base Driver for the Intel(R) XL710 Ethernet Controller Family
 
 ===============================================================================
 
-September 29, 2014
+February 17, 2015
 
 ===============================================================================
 
@@ -58,7 +58,9 @@ For more information on how to identify your adapter, go to the Adapter &
 Driver ID Guide at:
 http://support.intel.com/support/go/network/adapter/proidguide.htm
 
-For the latest Intel network drivers for Linux, refer to the following
+For the best performance, make sure the latest NVM/FW is installed on
+your device and that you are using the newest drivers. For the latest 
+NVM/FW images and Intel network drivers for Linux, refer to the following
 website. Select the link for your adapter.
 http://support.intel.com/support/go/network/adapter/home.htm
 
@@ -430,12 +432,120 @@ Ethernet Converged Network Adapters" (Intel Networking Division, August 2013):
   http://www.intel.com/content/dam/www/public/us/en/documents/technology-briefs/
   overlay-networks-using-converged-network-adapters-brief.pdf
 
+Multiple Functions per Port
+---------------------------
+On X710/XL710 based adapters that support it, you can set up multiple functions
+on each physical port. You configure these functions through the System 
+Setup/BIOS. 
+
+Minimum TX Bandwidth is the guaranteed minimum data transmission bandwidth, as 
+a percentage of the full physical port link speed, that the partition will 
+receive. The bandwidth the partition is awarded will never fall below the level 
+you specify here.
+
+The range for the minimum bandwidth values is:
+1 to ((100 minus # of partitions on the physical port) plus 1)
+For example, if a physical port has 4 partitions, the range would be 
+1 to ((100 - 4) + 1 = 97)
+
+The Maximum Bandwidth percentage represents the maximum transmit 
+bandwidth allocated to the partition as a percentage of the full physical port 
+link speed. The accepted range of values is 1-100. The value can be used as a 
+limiter, should you chose that any one particular function not be able to 
+consume 100% of a port's bandwidth (should it be available). The sum of 
+all the values for Maximum Bandwidth is not restricted, because no more than 
+100% of a port's bandwidth can ever be used.
+
+Once the initial configuration is complete, you can set different 
+bandwidth allocations on each function as follows:
+ 1. Make a new directory named /config
+ 2. edit etc/fstab to include:
+    
+     configfs  /config  configfs  defaults
+
+ 3. Mount /config
+ 4. Load (or reload) the i40e driver
+ 5. Make a new directory under config for each partition upon which you wish
+    to configure the bandwidth.
+ 6. Three files will appear under the config/partition directory:
+    - max_bw
+    - min_bw
+    - commit
+    read from max_bw to get display the current maximum bandwidth setting.
+    write to max_bw to set the maximum bandwidth for this function.
+    read from min_bw to display the current minimum bandwidth setting.
+    Write to min_bw to set the minimum bandwidth for this function.
+    Write a '1' to commit to save your changes.
+
+Notes: -commit is write only. Attempting to read it will result in an
+        error. 
+       -Writing to commit is only supported on the first function of
+        a given port. Writing to a subsequent function will result in an
+        error.
+       -Oversubscribing the minimum bandwidth is not supported. The underlaying
+        device's NVM will set the minimum bandwidth to supported values in an
+        indeterminate manner. Remove all of the directories under config and
+        reload them to see what the actual values are.
+       -To unload the driver you must first remove the directories created in
+        step 5, above.
+
+Example of Setting the minimum and maximum bandwidth (assume there are four
+function on the port eth6-eth9, and that eth6 is the first function on 
+the port):
+
+ # mkdir /config/eth6
+ # mkdir /config/eth7
+ # mkdir /config/eth8
+ # mkdir /config/eth9
+
+ # echo 50 > /config/eth6/min_bw
+ # echo 100 > /config/eth6/max_bw
+ # echo 20 > /config/eth7/min_bw
+ # echo 100 > /config/eth7/max_bw
+ # echo 20 > /config/eth8/min_bw
+ # echo 100 > /config/eth8/max_bw
+ # echo 10 > /config/eth9/min_bw
+ # echo 25 > /config/eth9/max_bw
+
+ # echo 1 > /config/eth6/commit
+
+Data Center Bridging (DCB)
+--------------------------
+DCB is a configuration Quality of Service implementation in hardware.
+It uses the VLAN priority tag (802.1p) to filter traffic.  That means
+that there are 8 different priorities that traffic can be filtered into.
+It also enables priority flow control (802.1Qbb) which can limit or 
+eliminate the number of dropped packets during network stress. Bandwidth
+can be allocated to each of these priorities, which is enforced at the
+hardware level (802.1Qaz).
+
+Adapter firmware implements LLDP and DCBX protocol agents as per 802.1AB
+and 802.1Qaz respectively. The firmward is also responsible for configuring
+the hardware for DCB.
+
+The i40e driver implements the DCB netlink interface layer to allow
+user-space to communicate with the driver and query DCB configuration for
+the port.
 
 ===============================================================================
-********************************************************************************
+
 
 Known Issues
 ------------
+
+Incomplete messages in the system log
+-------------------------------------
+The NVMUpdate utility may write several incomplete messages in the system log.
+These messages take the form:
+  in the driver Pci Ex config function byte index 114
+  in the driver Pci Ex config function byte index 115
+These messages can be ignored.
+
+Bad checksum counter incorrectly increments when using VxLAN
+------------------------------------------------------------
+When passing non-UDP traffic over a VxLAN interface, the port.rx_csum_bad
+counter increments for the packets.
+
 
 Virtual machine does not get link
 ---------------------------------
@@ -523,7 +633,7 @@ Disable GRO when routing/bridging
 Due to a known kernel issue, GRO must be turned off when routing/bridging.
 GRO can be disabled using ethtool:
 
-  # ethtool -K ethXgro off
+  # ethtool -K ethX gro off
 
 where ethX is the Ethernet interface to be modified.
 

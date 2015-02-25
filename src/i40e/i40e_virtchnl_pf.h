@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel Ethernet Controller XL710 Family Linux Driver
- * Copyright(c) 2013 - 2014 Intel Corporation.
+ * Copyright(c) 2013 - 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -65,18 +65,21 @@ enum i40e_vf_states {
 enum i40e_vf_capabilities {
 	I40E_VIRTCHNL_VF_CAP_PRIVILEGE = 0,
 	I40E_VIRTCHNL_VF_CAP_L2,
+#ifdef I40E_FCOE
+	I40E_VIRTCHNL_VF_CAP_FCOE,
+#endif
 };
 
 /* VF information structure */
 struct i40e_vf {
 	struct i40e_pf *pf;
 
-	/* vf id in the pf space */
+	/* VF id in the PF space */
 	u16 vf_id;
-	/* all vf vsis connect to the same parent */
+	/* all VF vsis connect to the same parent */
 	enum i40e_switch_element_types parent_type;
 
-	/* vf Port Extender (PE) stag if used */
+	/* VF Port Extender (PE) stag if used */
 	u16 stag;
 
 	struct i40e_virtchnl_ether_addr default_lan_addr;
@@ -90,8 +93,12 @@ struct i40e_vf {
 	 */
 	u8 lan_vsi_index;	/* index into PF struct */
 	u8 lan_vsi_id;		/* ID as used by firmware */
+#ifdef I40E_FCOE
+	u8 fcoe_vsi_index;
+	u8 fcoe_vsi_id;
+#endif
 
-	u8 num_queue_pairs;	/* num of qps assigned to vf vsis */
+	u8 num_queue_pairs;	/* num of qps assigned to VF vsis */
 	u64 num_mdd_events;	/* num of mdd events detected */
 	u64 num_invalid_msgs;	/* num of malformed or invalid msgs detected */
 	u64 num_valid_msgs;	/* num of valid msgs detected */
@@ -101,7 +108,7 @@ struct i40e_vf {
 	unsigned int tx_rate;	/* tx bandwidth limit in Mbps */
 #ifdef HAVE_NDO_SET_VF_LINK_STATE
 	bool link_forced;
-	bool link_up;		/* only valid if vf link is forced */
+	bool link_up;		/* only valid if VF link is forced */
 #endif
 #ifdef HAVE_VF_SPOOFCHK_CONFIGURE
 	bool spoofchk;
@@ -109,7 +116,7 @@ struct i40e_vf {
 };
 
 void i40e_free_vfs(struct i40e_pf *pf);
-#ifdef HAVE_SRIOV_CONFIGURE
+#if defined(HAVE_SRIOV_CONFIGURE) || defined(HAVE_RHEL6_SRIOV_CONFIGURE)
 int i40e_pci_sriov_configure(struct pci_dev *dev, int num_vfs);
 #endif
 int i40e_alloc_vfs(struct i40e_pf *pf, u16 num_alloc_vfs);
@@ -119,7 +126,7 @@ int i40e_vc_process_vflr_event(struct i40e_pf *pf);
 void i40e_reset_vf(struct i40e_vf *vf, bool flr);
 void i40e_vc_notify_vf_reset(struct i40e_vf *vf);
 
-/* vf configuration related iplink handlers */
+/* VF configuration related iplink handlers */
 int i40e_ndo_set_vf_mac(struct net_device *netdev, int vf_id, u8 *mac);
 int i40e_ndo_set_vf_port_vlan(struct net_device *netdev,
 			      int vf_id, u16 vlan_id, u8 qos);

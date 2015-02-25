@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel Ethernet Controller XL710 Family Linux Driver
- * Copyright(c) 2013 - 2014 Intel Corporation.
+ * Copyright(c) 2013 - 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -34,10 +34,6 @@
 #define ETH_GSTRING_LEN 32
 
 #endif
-#ifdef ETHTOOL_OPS_COMPAT
-#include "kcompat_ethtool.c"
-
-#endif
 #ifdef ETHTOOL_GSTATS
 struct i40e_stats {
 	char stat_string[ETH_GSTRING_LEN];
@@ -50,8 +46,14 @@ struct i40e_stats {
 	.sizeof_stat = FIELD_SIZEOF(_type, _stat), \
 	.stat_offset = offsetof(_type, _stat) \
 }
+
+#ifdef HAVE_NDO_GET_STATS64
+#define I40E_NETDEV_STAT(_net_stat) \
+		I40E_STAT(struct rtnl_link_stats64, #_net_stat, _net_stat)
+#else
 #define I40E_NETDEV_STAT(_net_stat) \
 		I40E_STAT(struct net_device_stats, #_net_stat, _net_stat)
+#endif
 #define I40E_PF_STAT(_name, _stat) \
 		I40E_STAT(struct i40e_pf, _name, _stat)
 #define I40E_VSI_STAT(_name, _stat) \
@@ -122,7 +124,6 @@ static struct i40e_stats i40e_gstrings_stats[] = {
 	I40E_PF_STAT("tx_broadcast", stats.eth.tx_broadcast),
 	I40E_PF_STAT("tx_errors", stats.eth.tx_errors),
 	I40E_PF_STAT("rx_dropped", stats.eth.rx_discards),
-	I40E_PF_STAT("tx_dropped", stats.eth.tx_discards),
 	I40E_PF_STAT("tx_dropped_link_down", stats.tx_dropped_link_down),
 	I40E_PF_STAT("crc_errors", stats.crc_errors),
 	I40E_PF_STAT("illegal_bytes", stats.illegal_bytes),
@@ -183,6 +184,19 @@ static struct i40e_stats i40e_gstrings_stats[] = {
 	I40E_PF_STAT("rx_lpi_count", stats.rx_lpi_count),
 };
 
+#ifdef I40E_FCOE
+static const struct i40e_stats i40e_gstrings_fcoe_stats[] = {
+	I40E_VSI_STAT("fcoe_bad_fccrc", fcoe_stats.fcoe_bad_fccrc),
+	I40E_VSI_STAT("rx_fcoe_dropped", fcoe_stats.rx_fcoe_dropped),
+	I40E_VSI_STAT("rx_fcoe_packets", fcoe_stats.rx_fcoe_packets),
+	I40E_VSI_STAT("rx_fcoe_dwords", fcoe_stats.rx_fcoe_dwords),
+	I40E_VSI_STAT("fcoe_ddp_count", fcoe_stats.fcoe_ddp_count),
+	I40E_VSI_STAT("fcoe_last_error", fcoe_stats.fcoe_last_error),
+	I40E_VSI_STAT("tx_fcoe_packets", fcoe_stats.tx_fcoe_packets),
+	I40E_VSI_STAT("tx_fcoe_dwords", fcoe_stats.tx_fcoe_dwords),
+};
+
+#endif /* I40E_FCOE */
 #define I40E_QUEUE_STATS_LEN(n) \
 	(((struct i40e_netdev_priv *)netdev_priv((n)))->vsi->num_queue_pairs \
 	    * 2 /* tx and rx together */                                     \
@@ -190,9 +204,17 @@ static struct i40e_stats i40e_gstrings_stats[] = {
 #define I40E_GLOBAL_STATS_LEN	ARRAY_SIZE(i40e_gstrings_stats)
 #define I40E_NETDEV_STATS_LEN   ARRAY_SIZE(i40e_gstrings_net_stats)
 #define I40E_MISC_STATS_LEN   ARRAY_SIZE(i40e_gstrings_misc_stats)
+#ifdef I40E_FCOE
+#define I40E_FCOE_STATS_LEN	ARRAY_SIZE(i40e_gstrings_fcoe_stats)
+#define I40E_VSI_STATS_LEN(n)	(I40E_NETDEV_STATS_LEN + \
+				 I40E_FCOE_STATS_LEN + \
+				 I40E_MISC_STATS_LEN + \
+				 I40E_QUEUE_STATS_LEN((n)))
+#else
 #define I40E_VSI_STATS_LEN(n)   (I40E_NETDEV_STATS_LEN + \
 				 I40E_MISC_STATS_LEN + \
 				 I40E_QUEUE_STATS_LEN((n)))
+#endif /* I40E_FCOE */
 #define I40E_PFC_STATS_LEN ( \
 		(FIELD_SIZEOF(struct i40e_pf, stats.priority_xoff_rx) + \
 		 FIELD_SIZEOF(struct i40e_pf, stats.priority_xon_rx) + \
@@ -226,74 +248,43 @@ static const char i40e_gstrings_test[][ETH_GSTRING_LEN] = {
 #define I40E_TEST_LEN (sizeof(i40e_gstrings_test) / ETH_GSTRING_LEN)
 
 #endif /* ETHTOOL_TEST */
+
+#ifdef HAVE_ETHTOOL_GET_SSET_COUNT
+static const char i40e_priv_flags_strings[][ETH_GSTRING_LEN] = {
+	"NPAR",
+};
+
+#define I40E_PRIV_FLAGS_STR_LEN \
+	(sizeof(i40e_priv_flags_strings) / ETH_GSTRING_LEN)
+
+#endif /* HAVE_ETHTOOL_GET_SSET_COUNT */
+
 /**
- * i40e_get_settings - Get Link Speed and Duplex settings
- * @netdev: network interface device structure
- * @ecmd: ethtool command
- *
- * Reports speed/duplex settings based on media_type
+ * i40e_partition_setting_complaint - generic complaint for MFP restriction
+ * @pf: the PF struct
  **/
-static int i40e_get_settings(struct net_device *netdev,
-			     struct ethtool_cmd *ecmd)
+static void i40e_partition_setting_complaint(struct i40e_pf *pf)
 {
-	struct i40e_netdev_priv *np = netdev_priv(netdev);
-	struct i40e_pf *pf = np->vsi->back;
-	struct i40e_hw *hw = &pf->hw;
+	dev_info(&pf->pdev->dev,
+		 "The link settings are allowed to be changed only from the first partition of a given port. Please switch to the first partition in order to change the setting.\n");
+}
+
+/**
+ * i40e_get_settings_link_up - Get the Link settings for when link is up
+ * @hw: hw structure
+ * @ecmd: ethtool command to fill in
+ * @netdev: network interface device structure
+ *
+ * Reports link settings that can be determined when link is up
+ **/
+static void i40e_get_settings_link_up(struct i40e_hw *hw,
+				      struct ethtool_cmd *ecmd,
+				      struct net_device *netdev)
+{
 	struct i40e_link_status *hw_link_info = &hw->phy.link_info;
-	bool link_up = hw_link_info->link_info & I40E_AQ_LINK_UP;
 	u32 link_speed = hw_link_info->link_speed;
 
-	/* hardware is either in 40G mode or 10G mode
-	 * NOTE: this section initializes supported and advertising
-	 */
-	if (!link_up) {
-		/* link is down and the driver needs to fall back on
-		 * device ID to determine what kinds of info to display,
-		 * it's mostly a guess that may change when link is up
-		 */
-		switch(hw->device_id) {
-		case I40E_DEV_ID_QSFP_A:
-		case I40E_DEV_ID_QSFP_B:
-		case I40E_DEV_ID_QSFP_C:
-			/* pluggable QSFP */
-			ecmd->supported = SUPPORTED_40000baseSR4_Full |
-					  SUPPORTED_40000baseCR4_Full |
-					  SUPPORTED_40000baseLR4_Full;
-			ecmd->advertising = ADVERTISED_40000baseSR4_Full |
-					    ADVERTISED_40000baseCR4_Full |
-					    ADVERTISED_40000baseLR4_Full;
-			break;
-		case I40E_DEV_ID_KX_B:
-			/* backplane 40G */
-			ecmd->supported = SUPPORTED_40000baseKR4_Full;
-			ecmd->advertising = ADVERTISED_40000baseKR4_Full;
-			break;
-		case I40E_DEV_ID_KX_C:
-			/* backplane 10G */
-			ecmd->supported = SUPPORTED_10000baseKR_Full;
-			ecmd->advertising = ADVERTISED_10000baseKR_Full;
-			break;
-		case I40E_DEV_ID_10G_BASE_T:
-			ecmd->supported = SUPPORTED_10000baseT_Full |
-					  SUPPORTED_1000baseT_Full |
-					  SUPPORTED_100baseT_Full;
-			ecmd->advertising = ADVERTISED_10000baseT_Full |
-					    ADVERTISED_1000baseT_Full |
-					    ADVERTISED_100baseT_Full;
-			break;
-		default:
-			/* all the rest are 10G/1G */
-			ecmd->supported = SUPPORTED_10000baseT_Full |
-					  SUPPORTED_1000baseT_Full;
-			ecmd->advertising = ADVERTISED_10000baseT_Full |
-					    ADVERTISED_1000baseT_Full;
-			break;
-		}
-
-		/* skip phy_type use as it is zero when link is down */
-		goto no_valid_phy_type;
-	}
-
+	/* Initialize supported and advertised settings based on phy settings */
 	switch (hw_link_info->phy_type) {
 	case I40E_PHY_TYPE_40GBASE_CR4:
 	case I40E_PHY_TYPE_40GBASE_CR4_CU:
@@ -302,6 +293,11 @@ static int i40e_get_settings(struct net_device *netdev,
 		ecmd->advertising = ADVERTISED_Autoneg |
 				    ADVERTISED_40000baseCR4_Full;
 		break;
+	case I40E_PHY_TYPE_XLAUI:
+	case I40E_PHY_TYPE_XLPPI:
+	case I40E_PHY_TYPE_40GBASE_AOC:
+		ecmd->supported = SUPPORTED_40000baseCR4_Full;
+		break;
 	case I40E_PHY_TYPE_40GBASE_KR4:
 		ecmd->supported = SUPPORTED_Autoneg |
 				  SUPPORTED_40000baseKR4_Full;
@@ -309,8 +305,6 @@ static int i40e_get_settings(struct net_device *netdev,
 				    ADVERTISED_40000baseKR4_Full;
 		break;
 	case I40E_PHY_TYPE_40GBASE_SR4:
-	case I40E_PHY_TYPE_XLPPI:
-	case I40E_PHY_TYPE_XLAUI:
 		ecmd->supported = SUPPORTED_40000baseSR4_Full;
 		break;
 	case I40E_PHY_TYPE_40GBASE_LR4:
@@ -332,66 +326,197 @@ static int i40e_get_settings(struct net_device *netdev,
 	case I40E_PHY_TYPE_10GBASE_LR:
 	case I40E_PHY_TYPE_1000BASE_SX:
 	case I40E_PHY_TYPE_1000BASE_LX:
-		ecmd->supported = SUPPORTED_10000baseT_Full;
-		ecmd->supported |= SUPPORTED_1000baseT_Full;
-		break;
-	case I40E_PHY_TYPE_10GBASE_CR1_CU:
-	case I40E_PHY_TYPE_10GBASE_CR1:
-	case I40E_PHY_TYPE_10GBASE_T:
-		ecmd->supported = SUPPORTED_Autoneg |
-				  SUPPORTED_10000baseT_Full |
-				  SUPPORTED_1000baseT_Full |
-				  SUPPORTED_100baseT_Full;
-		ecmd->advertising = ADVERTISED_Autoneg |
-				    ADVERTISED_10000baseT_Full |
-				    ADVERTISED_1000baseT_Full |
-				    ADVERTISED_100baseT_Full;
-		break;
-	case I40E_PHY_TYPE_XAUI:
-	case I40E_PHY_TYPE_XFI:
-	case I40E_PHY_TYPE_SFI:
-	case I40E_PHY_TYPE_10GBASE_SFPP_CU:
-		ecmd->supported = SUPPORTED_10000baseT_Full;
+		ecmd->supported = SUPPORTED_10000baseT_Full |
+				  SUPPORTED_1000baseT_Full;
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
+			ecmd->advertising |= ADVERTISED_10000baseT_Full;
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
+			ecmd->advertising |= ADVERTISED_1000baseT_Full;
 		break;
 	case I40E_PHY_TYPE_1000BASE_KX:
-	case I40E_PHY_TYPE_1000BASE_T:
 		ecmd->supported = SUPPORTED_Autoneg |
-				  SUPPORTED_10000baseT_Full |
-				  SUPPORTED_1000baseT_Full |
-				  SUPPORTED_100baseT_Full;
+				  SUPPORTED_1000baseKX_Full;
 		ecmd->advertising = ADVERTISED_Autoneg |
-				    ADVERTISED_10000baseT_Full |
-				    ADVERTISED_1000baseT_Full |
-				    ADVERTISED_100baseT_Full;
+				    ADVERTISED_1000baseKX_Full;
 		break;
+	case I40E_PHY_TYPE_10GBASE_T:
+	case I40E_PHY_TYPE_1000BASE_T:
 	case I40E_PHY_TYPE_100BASE_TX:
 		ecmd->supported = SUPPORTED_Autoneg |
 				  SUPPORTED_10000baseT_Full |
 				  SUPPORTED_1000baseT_Full |
 				  SUPPORTED_100baseT_Full;
+		ecmd->advertising = ADVERTISED_Autoneg;
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
+			ecmd->advertising |= ADVERTISED_10000baseT_Full;
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
+			ecmd->advertising |= ADVERTISED_1000baseT_Full;
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_100MB)
+			ecmd->advertising |= ADVERTISED_100baseT_Full;
+		break;
+	case I40E_PHY_TYPE_10GBASE_CR1_CU:
+	case I40E_PHY_TYPE_10GBASE_CR1:
+		ecmd->supported = SUPPORTED_Autoneg |
+				  SUPPORTED_10000baseT_Full;
 		ecmd->advertising = ADVERTISED_Autoneg |
-				    ADVERTISED_10000baseT_Full |
-				    ADVERTISED_1000baseT_Full |
-				    ADVERTISED_100baseT_Full;
+				    ADVERTISED_10000baseT_Full;
+		break;
+	case I40E_PHY_TYPE_XAUI:
+	case I40E_PHY_TYPE_XFI:
+	case I40E_PHY_TYPE_SFI:
+	case I40E_PHY_TYPE_10GBASE_SFPP_CU:
+	case I40E_PHY_TYPE_10GBASE_AOC:
+		ecmd->supported = SUPPORTED_10000baseT_Full;
 		break;
 	case I40E_PHY_TYPE_SGMII:
 		ecmd->supported = SUPPORTED_Autoneg |
 				  SUPPORTED_1000baseT_Full |
 				  SUPPORTED_100baseT_Full;
-		ecmd->advertising = ADVERTISED_Autoneg |
-				    ADVERTISED_1000baseT_Full |
-				    ADVERTISED_100baseT_Full;
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
+			ecmd->advertising |= ADVERTISED_1000baseT_Full;
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_100MB)
+			ecmd->advertising |= ADVERTISED_100baseT_Full;
+		break;
 	default:
 		/* if we got here and link is up something bad is afoot */
 		netdev_info(netdev, "WARNING: Link is up but PHY type 0x%x is not recognized.\n",
 			    hw_link_info->phy_type);
 	}
 
-no_valid_phy_type:
-	/* this is if autoneg is enabled or disabled */
+	/* Set speed and duplex */
+	switch (link_speed) {
+	case I40E_LINK_SPEED_40GB:
+		/* need a SPEED_40000 in ethtool.h */
+		ethtool_cmd_speed_set(ecmd, 40000);
+		break;
+	case I40E_LINK_SPEED_10GB:
+		ethtool_cmd_speed_set(ecmd, SPEED_10000);
+		break;
+	case I40E_LINK_SPEED_1GB:
+		ethtool_cmd_speed_set(ecmd, SPEED_1000);
+		break;
+	case I40E_LINK_SPEED_100MB:
+		ethtool_cmd_speed_set(ecmd, SPEED_100);
+		break;
+	default:
+		break;
+	}
+	ecmd->duplex = DUPLEX_FULL;
+}
+
+/**
+ * i40e_get_settings_link_down - Get the Link settings for when link is down 
+ * @hw: hw structure
+ * @ecmd: ethtool command to fill in
+ *
+ * Reports link settings that can be determined when link is down
+ **/
+static void i40e_get_settings_link_down(struct i40e_hw *hw,
+				      struct ethtool_cmd *ecmd)
+{
+	struct i40e_link_status *hw_link_info = &hw->phy.link_info;
+
+	/* link is down and the driver needs to fall back on
+	 * device ID to determine what kinds of info to display,
+	 * it's mostly a guess that may change when link is up
+	 */
+	switch(hw->device_id) {
+	case I40E_DEV_ID_QSFP_A:
+	case I40E_DEV_ID_QSFP_B:
+	case I40E_DEV_ID_QSFP_C:
+		/* pluggable QSFP */
+		ecmd->supported = SUPPORTED_40000baseSR4_Full |
+				  SUPPORTED_40000baseCR4_Full |
+				  SUPPORTED_40000baseLR4_Full;
+		ecmd->advertising = ADVERTISED_40000baseSR4_Full |
+				    ADVERTISED_40000baseCR4_Full |
+				    ADVERTISED_40000baseLR4_Full;
+		break;
+	case I40E_DEV_ID_KX_B:
+		/* backplane 40G */
+		ecmd->supported = SUPPORTED_40000baseKR4_Full;
+		ecmd->advertising = ADVERTISED_40000baseKR4_Full;
+		break;
+	case I40E_DEV_ID_KX_C:
+		/* backplane 10G */
+		ecmd->supported = SUPPORTED_10000baseKR_Full;
+		ecmd->advertising = ADVERTISED_10000baseKR_Full;
+		break;
+	case I40E_DEV_ID_10G_BASE_T:
+		ecmd->supported = SUPPORTED_10000baseT_Full |
+				  SUPPORTED_1000baseT_Full |
+				  SUPPORTED_100baseT_Full;
+		break;
+		/* If we haven't requested speeds then default
+		 * to everything supported
+		 */
+		if (!hw_link_info->requested_speeds) {
+			ecmd->advertising |= ADVERTISED_10000baseT_Full |
+					     ADVERTISED_1000baseT_Full |
+					     ADVERTISED_100baseT_Full;
+			break;
+		}
+		/* Otherwise figure out what has been requested */
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
+			ecmd->advertising |= ADVERTISED_10000baseT_Full;
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
+			ecmd->advertising |= ADVERTISED_1000baseT_Full;
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_100MB)
+			ecmd->advertising |= ADVERTISED_100baseT_Full;
+		break;
+	default:
+		/* all the rest are 10G/1G */
+		ecmd->supported = SUPPORTED_10000baseT_Full |
+				  SUPPORTED_1000baseT_Full;
+		/* If we haven't requested speeds then default
+		 * to everything supported
+		 */
+		if (!hw_link_info->requested_speeds) {
+			ecmd->advertising |= ADVERTISED_10000baseT_Full |
+					     ADVERTISED_1000baseT_Full;
+			break;
+		}
+		/* Otherwise figure out what has been requested */
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
+			ecmd->advertising |= ADVERTISED_10000baseT_Full;
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
+			ecmd->advertising |= ADVERTISED_1000baseT_Full;
+		break;
+	}
+
+	/* With no link speed and duplex are unknown */
+	ethtool_cmd_speed_set(ecmd, SPEED_UNKNOWN);
+	ecmd->duplex = DUPLEX_UNKNOWN;
+}
+
+/**
+ * i40e_get_settings - Get Link Speed and Duplex settings
+ * @netdev: network interface device structure
+ * @ecmd: ethtool command
+ *
+ * Reports speed/duplex settings based on media_type
+ **/
+static int i40e_get_settings(struct net_device *netdev,
+			     struct ethtool_cmd *ecmd)
+{
+	struct i40e_netdev_priv *np = netdev_priv(netdev);
+	struct i40e_pf *pf = np->vsi->back;
+	struct i40e_hw *hw = &pf->hw;
+	struct i40e_link_status *hw_link_info = &hw->phy.link_info;
+	bool link_up = hw_link_info->link_info & I40E_AQ_LINK_UP;
+
+	if (link_up)
+		i40e_get_settings_link_up(hw, ecmd, netdev);
+	else
+		i40e_get_settings_link_down(hw, ecmd);
+
+	/* Now set the settings that don't rely on link being up/down */
+
+	/* Set autoneg settings */
 	ecmd->autoneg = (hw_link_info->an_info & I40E_AQ_AN_COMPLETED ?
 			  AUTONEG_ENABLE : AUTONEG_DISABLE);
 
+	/* Set media type settings */
 	switch (hw->phy.media_type) {
 	case I40E_MEDIA_TYPE_BACKPLANE:
 		ecmd->supported |= SUPPORTED_Autoneg |
@@ -421,11 +546,13 @@ no_valid_phy_type:
 		break;
 	}
 
+	/* Set transceiver */
 	ecmd->transceiver = XCVR_EXTERNAL;
 
+	/* Set flow control settings */
 	ecmd->supported |= SUPPORTED_Pause;
 
-	switch (hw->fc.current_mode) {
+	switch (hw->fc.requested_mode) {
 	case I40E_FC_FULL:
 		ecmd->advertising |= ADVERTISED_Pause;
 		break;
@@ -440,30 +567,6 @@ no_valid_phy_type:
 		ecmd->advertising &= ~(ADVERTISED_Pause |
 				       ADVERTISED_Asym_Pause);
 		break;
-	}
-
-	if (link_up) {
-		switch (link_speed) {
-		case I40E_LINK_SPEED_40GB:
-			/* need a SPEED_40000 in ethtool.h */
-			ethtool_cmd_speed_set(ecmd, 40000);
-			break;
-		case I40E_LINK_SPEED_10GB:
-			ethtool_cmd_speed_set(ecmd, SPEED_10000);
-			break;
-		case I40E_LINK_SPEED_1GB:
-			ethtool_cmd_speed_set(ecmd, SPEED_1000);
-			break;
-		case I40E_LINK_SPEED_100MB:
-			ethtool_cmd_speed_set(ecmd, SPEED_100);
-			break;
-		default:
-			break;
-		}
-		ecmd->duplex = DUPLEX_FULL;
-	} else {
-		ethtool_cmd_speed_set(ecmd, SPEED_UNKNOWN);
-		ecmd->duplex = DUPLEX_UNKNOWN;
 	}
 
 	return 0;
@@ -492,6 +595,14 @@ static int i40e_set_settings(struct net_device *netdev,
 	u8 autoneg;
 	u32 advertise;
 	u32 old_ethtool_advertising = 0;
+
+	/* Changing port settings is not supported if this isn't the
+	 * port's controlling PF
+	 */
+	if (hw->partition_id != 1) {
+		i40e_partition_setting_complaint(pf);
+		return -EOPNOTSUPP;
+	}
 
 	if (vsi != pf->vsi[pf->lan_vsi])
 		return -EOPNOTSUPP;
@@ -605,6 +716,8 @@ static int i40e_set_settings(struct net_device *netdev,
 		config.eeer = abilities.eeer_val;
 		config.low_power_ctrl = abilities.d3_lpan;
 
+		/* save the requested speeds */
+		hw->phy.link_info.requested_speeds = config.link_speed;
 		/* set link and an so changes take effect */
 		config.abilities |= I40E_AQ_PHY_ENABLE_ATOMIC_LINK;
 		/* If link is up put link down */
@@ -625,7 +738,7 @@ static int i40e_set_settings(struct net_device *netdev,
 			return -EAGAIN;
 		}
 
-		status = i40e_update_link_info(hw, true);
+		status = i40e_aq_get_link_info(hw, true, NULL, NULL);
 		if (status)
 			netdev_info(netdev, "Updating link info failed with error %d\n",
 					status);
@@ -666,8 +779,16 @@ static void i40e_get_pauseparam(struct net_device *netdev,
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_pf *pf = np->vsi->back;
 	struct i40e_hw *hw = &pf->hw;
+	struct i40e_dcbx_config *dcbx_cfg = &hw->local_dcbx_config;
 
 	pause->autoneg = hw->phy.link_info.an_info & I40E_AQ_AN_COMPLETED;
+
+	/* PFC enabled so report LFC as off */
+	if (dcbx_cfg->pfc.pfcenable) {
+		pause->rx_pause = 0;
+		pause->tx_pause = 0;
+		return;
+	}
 
 	if (hw->fc.current_mode == I40E_FC_RX_PAUSE) {
 		pause->rx_pause = 1;
@@ -692,10 +813,19 @@ static int i40e_set_pauseparam(struct net_device *netdev,
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_hw *hw = &pf->hw;
 	struct i40e_link_status *hw_link_info = &hw->phy.link_info;
+	struct i40e_dcbx_config *dcbx_cfg = &hw->local_dcbx_config;
 	bool link_up = hw_link_info->link_info & I40E_AQ_LINK_UP;
 	i40e_status status;
 	u8 aq_failures;
 	int err = 0;
+
+	/* Changing the port's flow control is not supported if this isn't the
+	 * port's controlling PF
+	 */
+	if (hw->partition_id != 1) {
+		i40e_partition_setting_complaint(pf);
+		return -EOPNOTSUPP;
+	}
 
 	if (vsi != pf->vsi[pf->lan_vsi])
 		return -EOPNOTSUPP;
@@ -714,7 +844,7 @@ static int i40e_set_pauseparam(struct net_device *netdev,
 			 "Autoneg did not complete so changing settings may not result in an actual change.\n");
 	}
 
-	if (hw->fc.current_mode == I40E_FC_PFC) {
+	if (dcbx_cfg->pfc.pfcenable) {
 		netdev_info(netdev,
 			 "Priority flow control enabled. Cannot set link flow control.\n");
 		return -EOPNOTSUPP;
@@ -752,7 +882,7 @@ static int i40e_set_pauseparam(struct net_device *netdev,
 		err = -EAGAIN;
 	}
 	if (aq_failures & I40E_SET_FC_AQ_FAIL_UPDATE) {
-		netdev_info(netdev, "Set fc failed on the update_link_info call with error %d and status %d\n",
+		netdev_info(netdev, "Set fc failed on the get_link_info call with error %d and status %d\n",
 			 status, hw->aq.asq_last_status);
 		err = -EAGAIN;
 	}
@@ -953,7 +1083,7 @@ static int i40e_get_eeprom(struct net_device *netdev,
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_hw *hw = &np->vsi->back->hw;
 	struct i40e_pf *pf = np->vsi->back;
-	int ret_val = 0, len;
+	int ret_val = 0, len, offset;
 	u8 *eeprom_buff;
 	u16 i, sectors;
 	bool last;
@@ -966,19 +1096,23 @@ static int i40e_get_eeprom(struct net_device *netdev,
 	/* check for NVMUpdate access method */
 	magic = hw->vendor_id | (hw->device_id << 16);
 	if (eeprom->magic && eeprom->magic != magic) {
+		struct i40e_nvm_access *cmd;
 		int errno;
 
 		/* make sure it is the right magic for NVMUpdate */
 		if ((eeprom->magic >> 16) != hw->device_id)
 			return -EINVAL;
 
-		ret_val = i40e_nvmupd_command(hw,
-					      (struct i40e_nvm_access *)eeprom,
-					      bytes, &errno);
-		if (ret_val)
+		cmd = (struct i40e_nvm_access *)eeprom;
+		ret_val = i40e_nvmupd_command(hw, cmd, bytes, &errno);
+		if (ret_val && 
+		    ((hw->aq.asq_last_status != I40E_AQ_RC_EACCES) ||
+		     (hw->debug_mask & I40E_DEBUG_NVM)))
 			dev_info(&pf->pdev->dev,
-				 "NVMUpdate read failed err=%d status=0x%x\n",
-				 ret_val, hw->aq.asq_last_status);
+				 "NVMUpdate read failed err=%d status=0x%x errno=%d module=%d offset=0x%x size=%d\n",
+				 ret_val, hw->aq.asq_last_status, errno,
+				 (u8)(cmd->config & I40E_NVM_MOD_PNT_MASK),
+				 cmd->offset, cmd->data_size);
 
 		return errno;
 	}
@@ -1007,20 +1141,29 @@ static int i40e_get_eeprom(struct net_device *netdev,
 			len = eeprom->len - (I40E_NVM_SECTOR_SIZE * i);
 			last = true;
 		}
-		ret_val = i40e_aq_read_nvm(hw, 0x0,
-				eeprom->offset + (I40E_NVM_SECTOR_SIZE * i),
-				len,
+		offset = eeprom->offset + (I40E_NVM_SECTOR_SIZE * i),
+		ret_val = i40e_aq_read_nvm(hw, 0x0, offset, len,
 				(u8 *)eeprom_buff + (I40E_NVM_SECTOR_SIZE * i),
 				last, NULL);
-		if (ret_val) {
+		if (ret_val && hw->aq.asq_last_status == I40E_AQ_RC_EPERM) {
 			dev_info(&pf->pdev->dev,
-				 "read NVM failed err=%d status=0x%x\n",
-				 ret_val, hw->aq.asq_last_status);
-			goto release_nvm;
+				 "read NVM failed, invalid offset 0x%x\n",
+				 offset);
+			break;
+		} else if (ret_val &&
+			   hw->aq.asq_last_status == I40E_AQ_RC_EACCES) {
+			dev_info(&pf->pdev->dev,
+				 "read NVM failed, access, offset 0x%x\n",
+				 offset);
+			break;
+		} else if (ret_val) {
+			dev_info(&pf->pdev->dev,
+				 "read NVM failed offset %d err=%d status=0x%x\n",
+				 offset, ret_val, hw->aq.asq_last_status);
+			break;
 		}
 	}
 
-release_nvm:
 	i40e_release_nvm(hw);
 	memcpy(bytes, (u8 *)eeprom_buff, eeprom->len);
 free_buff:
@@ -1048,6 +1191,7 @@ static int i40e_set_eeprom(struct net_device *netdev,
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_hw *hw = &np->vsi->back->hw;
 	struct i40e_pf *pf = np->vsi->back;
+	struct i40e_nvm_access *cmd;
 	int ret_val = 0;
 	int errno;
 	u32 magic;
@@ -1065,12 +1209,17 @@ static int i40e_set_eeprom(struct net_device *netdev,
 	    test_bit(__I40E_RESET_INTR_RECEIVED, &pf->state))
 		return -EBUSY;
 
-	ret_val = i40e_nvmupd_command(hw, (struct i40e_nvm_access *)eeprom,
-				      bytes, &errno);
-	if (ret_val)
+	cmd = (struct i40e_nvm_access *)eeprom;
+	ret_val = i40e_nvmupd_command(hw, cmd, bytes, &errno);
+	if (ret_val && 
+	    ((hw->aq.asq_last_status != I40E_AQ_RC_EPERM &&
+	      hw->aq.asq_last_status != I40E_AQ_RC_EBUSY) ||
+	     (hw->debug_mask & I40E_DEBUG_NVM)))
 		dev_info(&pf->pdev->dev,
-			 "NVMUpdate write failed err=%d status=0x%x\n",
-			 ret_val, hw->aq.asq_last_status);
+			 "NVMUpdate write failed err=%d status=0x%x errno=%d module=%d offset=0x%x size=%d\n",
+			 ret_val, hw->aq.asq_last_status, errno,
+			 (u8)(cmd->config & I40E_NVM_MOD_PNT_MASK),
+			 cmd->offset, cmd->data_size);
 
 	return errno;
 }
@@ -1089,6 +1238,9 @@ static void i40e_get_drvinfo(struct net_device *netdev,
 		sizeof(drvinfo->fw_version));
 	strlcpy(drvinfo->bus_info, pci_name(pf->pdev),
 		sizeof(drvinfo->bus_info));
+#ifdef HAVE_ETHTOOL_GET_SSET_COUNT
+	drvinfo->n_priv_flags = I40E_PRIV_FLAGS_STR_LEN;
+#endif
 }
 
 static void i40e_get_ringparam(struct net_device *netdev,
@@ -1264,7 +1416,7 @@ static int i40e_get_stats_count(struct net_device *netdev)
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_pf *pf = vsi->back;
 
-	if (vsi == pf->vsi[pf->lan_vsi]) {
+	if (vsi == pf->vsi[pf->lan_vsi] && pf->hw.partition_id == 1) {
 		if (pf->lan_veb != I40E_NO_VEB)
 			return I40E_PF_STATS_LEN(netdev) + I40E_VEB_STATS_LEN;
 		else
@@ -1284,7 +1436,7 @@ static int i40e_get_sset_count(struct net_device *netdev, int sset)
 	case ETH_SS_TEST:
 		return I40E_TEST_LEN;
 	case ETH_SS_STATS:
-		if (vsi == pf->vsi[pf->lan_vsi]) {
+		if (vsi == pf->vsi[pf->lan_vsi] && pf->hw.partition_id == 1) {
 			int len = I40E_PF_STATS_LEN(netdev);
 			if (pf->lan_veb != I40E_NO_VEB)
 				len += I40E_VEB_STATS_LEN;
@@ -1292,6 +1444,8 @@ static int i40e_get_sset_count(struct net_device *netdev, int sset)
 		} else {
 			return I40E_VSI_STATS_LEN(netdev);
 		}
+	case ETH_SS_PRIV_FLAGS:
+		return I40E_PRIV_FLAGS_STR_LEN;
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -1327,6 +1481,13 @@ static void i40e_get_ethtool_stats(struct net_device *netdev,
 		data[i++] = (i40e_gstrings_misc_stats[j].sizeof_stat ==
 			sizeof(u64)) ? *(u64 *)p : *(u32 *)p;
 	}
+#ifdef I40E_FCOE
+	for (j = 0; j < I40E_FCOE_STATS_LEN; j++) {
+		p = (char *)vsi + i40e_gstrings_fcoe_stats[j].stat_offset;
+		data[i++] = (i40e_gstrings_fcoe_stats[j].sizeof_stat ==
+			sizeof(u64)) ? *(u64 *)p : *(u32 *)p;
+	}
+#endif
 	rcu_read_lock();
 	for (j = 0; j < vsi->num_queue_pairs; j++) {
 		tx_ring = ACCESS_ONCE(vsi->tx_rings[j]);
@@ -1360,7 +1521,7 @@ static void i40e_get_ethtool_stats(struct net_device *netdev,
 		i += 2;
 	}
 	rcu_read_unlock();
-	if (vsi == pf->vsi[pf->lan_vsi]) {
+	if (vsi == pf->vsi[pf->lan_vsi] && pf->hw.partition_id == 1) {
 		if (pf->lan_veb != I40E_NO_VEB) {
 			struct i40e_veb *veb = pf->veb[pf->lan_veb];
 			for (j = 0; j < I40E_VEB_STATS_LEN; j++) {
@@ -1414,6 +1575,13 @@ static void i40e_get_strings(struct net_device *netdev, u32 stringset,
 				 i40e_gstrings_misc_stats[i].stat_string);
 			p += ETH_GSTRING_LEN;
 		}
+#ifdef I40E_FCOE
+		for (i = 0; i < I40E_FCOE_STATS_LEN; i++) {
+			snprintf(p, ETH_GSTRING_LEN, "%s",
+				 i40e_gstrings_fcoe_stats[i].stat_string);
+			p += ETH_GSTRING_LEN;
+		}
+#endif
 		for (i = 0; i < vsi->num_queue_pairs; i++) {
 			snprintf(p, ETH_GSTRING_LEN, "tx-%u.tx_packets", i);
 			p += ETH_GSTRING_LEN;
@@ -1424,7 +1592,7 @@ static void i40e_get_strings(struct net_device *netdev, u32 stringset,
 			snprintf(p, ETH_GSTRING_LEN, "rx-%u.rx_bytes", i);
 			p += ETH_GSTRING_LEN;
 		}
-		if (vsi == pf->vsi[pf->lan_vsi]) {
+		if (vsi == pf->vsi[pf->lan_vsi] && pf->hw.partition_id == 1) {
 			if (pf->lan_veb != I40E_NO_VEB) {
 				for (i = 0; i < I40E_VEB_STATS_LEN; i++) {
 					snprintf(p, ETH_GSTRING_LEN, "veb.%s",
@@ -1461,6 +1629,17 @@ static void i40e_get_strings(struct net_device *netdev, u32 stringset,
 		}
 		/* BUG_ON(p - data != I40E_STATS_LEN * ETH_GSTRING_LEN); */
 		break;
+#ifdef HAVE_ETHTOOL_GET_SSET_COUNT
+	case ETH_SS_PRIV_FLAGS:
+		for (i = 0; i < I40E_PRIV_FLAGS_STR_LEN; i++) {
+			memcpy(data, i40e_priv_flags_strings[i],
+			       ETH_GSTRING_LEN);
+			data += ETH_GSTRING_LEN;
+		}
+		break;
+#endif
+	default:
+		break;
 	}
 }
 
@@ -1470,6 +1649,10 @@ static int i40e_get_ts_info(struct net_device *dev,
 {
 #ifdef HAVE_PTP_1588_CLOCK
 	struct i40e_pf *pf = i40e_netdev_to_pf(dev);
+
+	/* only report HW timestamping if PTP is enabled */
+	if (!(pf->flags & I40E_FLAG_PTP))
+		return ethtool_op_get_ts_info(dev, info);
 
 	info->so_timestamping = SOF_TIMESTAMPING_TX_SOFTWARE |
 				SOF_TIMESTAMPING_RX_SOFTWARE |
@@ -1538,6 +1721,9 @@ static int i40e_eeprom_test(struct net_device *netdev, u64 *data)
 	netif_info(pf, hw, netdev, "eeprom test\n");
 	*data = i40e_diag_eeprom_test(&pf->hw);
 
+	/* forcebly clear the NVM Update state machine */
+	pf->hw.nvmupd_state = I40E_NVMUPD_STATE_INIT;
+
 	return *data;
 }
 
@@ -1550,7 +1736,10 @@ static int i40e_intr_test(struct net_device *netdev, u64 *data)
 	netif_info(pf, hw, netdev, "interrupt test\n");
 	wr32(&pf->hw, I40E_PFINT_DYN_CTL0,
 	     (I40E_PFINT_DYN_CTL0_INTENA_MASK |
-	      I40E_PFINT_DYN_CTL0_SWINT_TRIG_MASK));
+	      I40E_PFINT_DYN_CTL0_SWINT_TRIG_MASK |
+	      I40E_PFINT_DYN_CTL0_ITR_INDX_MASK |
+	      I40E_PFINT_DYN_CTL0_SW_ITR_INDX_ENA_MASK |
+	      I40E_PFINT_DYN_CTL0_SW_ITR_INDX_MASK));
 	usleep_range(1000, 2000);
 	*data = (swc_old == pf->sw_int_count);
 
@@ -1579,6 +1768,7 @@ static void i40e_diag_test(struct net_device *netdev,
 			   struct ethtool_test *eth_test, u64 *data)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
+	bool if_running = netif_running(netdev);
 	struct i40e_pf *pf = np->vsi->back;
 
 	if (eth_test->flags == ETH_TEST_FL_OFFLINE) {
@@ -1586,6 +1776,12 @@ static void i40e_diag_test(struct net_device *netdev,
 		netif_info(pf, drv, netdev, "offline testing starting\n");
 
 		set_bit(__I40E_TESTING, &pf->state);
+		/* If the device is online then take it offline */
+		if (if_running)
+			/* indicate we're in test mode */
+			dev_close(netdev);
+		else
+			i40e_do_reset(pf, (1 << __I40E_PF_RESET_REQUESTED));
 
 		/* Link test performed before hardware reset
 		 * so autoneg doesn't interfere with test result
@@ -1608,6 +1804,9 @@ static void i40e_diag_test(struct net_device *netdev,
 
 		clear_bit(__I40E_TESTING, &pf->state);
 		i40e_do_reset(pf, (1 << __I40E_PF_RESET_REQUESTED));
+
+		if (if_running)
+			dev_open(netdev);
 	} else {
 		/* Online tests */
 		netif_info(pf, drv, netdev, "online testing starting\n");
@@ -1635,7 +1834,7 @@ static void i40e_get_wol(struct net_device *netdev,
 
 	/* NVM bit on means WoL disabled for the port */
 	i40e_read_nvm_word(hw, I40E_SR_NVM_WAKE_ON_LAN, &wol_nvm_bits);
-	if ((1 << hw->port) & wol_nvm_bits) {
+	if ((1 << hw->port) & wol_nvm_bits || hw->partition_id != 1) {
 		wol->supported = 0;
 		wol->wolopts = 0;
 	} else {
@@ -1644,12 +1843,27 @@ static void i40e_get_wol(struct net_device *netdev,
 	}
 }
 
+/**
+ * i40e_set_wol - set the WakeOnLAN configuration
+ * @netdev: the netdev in question
+ * @wol: the ethtool WoL setting data
+ **/
 static int i40e_set_wol(struct net_device *netdev, struct ethtool_wolinfo *wol)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_pf *pf = np->vsi->back;
+	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_hw *hw = &pf->hw;
 	u16 wol_nvm_bits;
+
+	/* WoL not supported if this isn't the controlling PF on the port */
+	if (hw->partition_id != 1) {
+		i40e_partition_setting_complaint(pf);
+		return -EOPNOTSUPP;
+	}
+
+	if (vsi != pf->vsi[pf->lan_vsi])
+		return -EOPNOTSUPP;
 
 	/* NVM bit on means WoL disabled for the port */
 	i40e_read_nvm_word(hw, I40E_SR_NVM_WAKE_ON_LAN, &wol_nvm_bits);
@@ -1690,6 +1904,8 @@ static int i40e_set_phys_id(struct net_device *netdev,
 		break;
 	case ETHTOOL_ID_INACTIVE:
 		i40e_led_set(hw, pf->led_status, false);
+		break;
+	default:
 		break;
 	}
 
@@ -1767,13 +1983,10 @@ static int i40e_set_coalesce(struct net_device *netdev,
 		vsi->rx_itr_setting = ec->rx_coalesce_usecs;
 	} else if (ec->rx_coalesce_usecs == 0) {
 		vsi->rx_itr_setting = ec->rx_coalesce_usecs;
-		i40e_irq_dynamic_disable(vsi, vector);
 		if (ec->use_adaptive_rx_coalesce)
-			netif_info(pf, drv, netdev,
-			"rx-secs=0, need to disable adaptive-rx for a complete disable\n");
+			netif_info(pf, drv, netdev, "rx-usecs=0, need to disable adaptive-rx for a complete disable\n");
 	} else {
-		netif_info(pf, drv, netdev,
-			"Invalid value, rx-usecs range is 0, 8-8160\n");
+		netif_info(pf, drv, netdev, "Invalid value, rx-usecs range is 0-8160\n");
 		return -EINVAL;
 	}
 
@@ -1782,13 +1995,10 @@ static int i40e_set_coalesce(struct net_device *netdev,
 		vsi->tx_itr_setting = ec->tx_coalesce_usecs;
 	} else if (ec->tx_coalesce_usecs == 0) {
 		vsi->tx_itr_setting = ec->tx_coalesce_usecs;
-		i40e_irq_dynamic_disable(vsi, vector);
 		if (ec->use_adaptive_tx_coalesce)
-			netif_info(pf, drv, netdev,
-			"tx-secs=0, need to disable adaptive-tx for a complete disable\n");
+			netif_info(pf, drv, netdev, "tx-usecs=0, need to disable adaptive-tx for a complete disable\n");
 	} else {
-		netif_info(pf, drv, netdev,
-			"Invalid value, tx-usecs range is 0, 8-8160\n");
+		netif_info(pf, drv, netdev, "Invalid value, tx-usecs range is 0-8160\n");
 		return -EINVAL;
 	}
 
@@ -1838,6 +2048,11 @@ static int i40e_get_rss_hash_opts(struct i40e_pf *pf, struct ethtool_rxnfc *cmd)
 {
 	cmd->data = 0;
 
+	if (pf->vsi[pf->lan_vsi]->rxnfc.data != 0) {
+		cmd->data = pf->vsi[pf->lan_vsi]->rxnfc.data;
+		cmd->flow_type = pf->vsi[pf->lan_vsi]->rxnfc.flow_type;
+		return 0;
+	}
 	/* Report default options for RSS on i40e */
 	switch (cmd->flow_type) {
 	case TCP_V4_FLOW:
@@ -2116,6 +2331,9 @@ static int i40e_set_rss_hash_opt(struct i40e_pf *pf, struct ethtool_rxnfc *nfc)
 	wr32(hw, I40E_PFQF_HENA(0), (u32)hena);
 	wr32(hw, I40E_PFQF_HENA(1), (u32)(hena >> 32));
 	i40e_flush(hw);
+
+	/* Save setting for future output/update */
+	pf->vsi[pf->lan_vsi]->rxnfc = *nfc;
 
 	return 0;
 }
@@ -2427,10 +2645,6 @@ static int i40e_set_channels(struct net_device *dev,
 	/* update feature limits from largest to smallest supported values */
 	/* TODO: Flow director limit, DCB etc */
 
-	/* cap RSS limit */
-	if (count > pf->rss_size_max)
-		count = pf->rss_size_max;
-
 	/* use rss_reconfig to rebuild with new queue count and update traffic
 	 * class queue mapping
 	 */
@@ -2442,6 +2656,245 @@ static int i40e_set_channels(struct net_device *dev,
 }
 
 #endif /* ETHTOOL_SCHANNELS */
+#define I40E_HLUT_ARRAY_SIZE ((I40E_PFQF_HLUT_MAX_INDEX + 1) * 4)
+#define I40E_HKEY_ARRAY_SIZE ((I40E_PFQF_HKEY_MAX_INDEX + 1) * 4)
+#if defined(ETHTOOL_GRSSH) && !defined(HAVE_ETHTOOL_GSRSSH)
+/**
+ * i40e_get_rxfh_key_size - get the RSS hash key size
+ * @netdev: network interface device structure
+ *
+ * Returns the table size.
+ **/
+static u32 i40e_get_rxfh_key_size(struct net_device *netdev)
+{
+	return I40E_HKEY_ARRAY_SIZE;
+}
+#endif /* ETHTOOL_GRSSH */
+
+#ifdef ETHTOOL_GRXFHINDIR
+#ifdef HAVE_ETHTOOL_GRXFHINDIR_SIZE
+/**
+ * i40e_get_rxfh_indir_size - get the rx flow hash indirection table size
+ * @netdev: network interface device structure
+ *
+ * Returns the table size.
+ **/
+static u32 i40e_get_rxfh_indir_size(struct net_device *netdev)
+{
+	return I40E_HLUT_ARRAY_SIZE;
+}
+
+#if defined(ETHTOOL_GRSSH) && !defined(HAVE_ETHTOOL_GSRSSH)
+/**
+ * i40e_get_rxfh - get the rx flow hash indirection table
+ * @netdev: network interface device structure
+ * @indir: indirection table
+ * @key: hash key
+ *
+ * Reads the indirection table directly from the hardware. Always returns 0.
+ **/
+static int i40e_get_rxfh(struct net_device *netdev, u32 *indir, u8 *key)
+#else
+/**
+ * i40e_get_rxfh - get the rx flow hash indirection table
+ * @netdev: network interface device structure
+ * @indir: indirection table
+ *
+ * Reads the indirection table directly from the hardware. Always returns 0.
+ **/
+static int i40e_get_rxfh_indir(struct net_device *netdev, u32 *indir)
+#endif /* ETHTOOL_GRSSH */
+{
+	struct i40e_netdev_priv *np = netdev_priv(netdev);
+	struct i40e_vsi *vsi = np->vsi;
+	struct i40e_pf *pf = vsi->back;
+	struct i40e_hw *hw = &pf->hw;
+	u32 reg_val;
+	int i, j;
+
+	if (indir) {
+		for (i = 0, j = 0; i <= I40E_PFQF_HLUT_MAX_INDEX; i++) {
+			reg_val = rd32(hw, I40E_PFQF_HLUT(i));
+			indir[j++] = reg_val & 0xff;
+			indir[j++] = (reg_val >> 8) & 0xff;
+			indir[j++] = (reg_val >> 16) & 0xff;
+			indir[j++] = (reg_val >> 24) & 0xff;
+		}
+	}
+#if defined(ETHTOOL_GRSSH) && !defined(HAVE_ETHTOOL_GSRSSH)
+	if (key) {
+		for (i = 0, j = 0; i <= I40E_PFQF_HKEY_MAX_INDEX; i++) {
+			reg_val = rd32(hw, I40E_PFQF_HKEY(i));
+			key[j++] = (u8)(reg_val & 0xff);
+			key[j++] = (u8)((reg_val >> 8) & 0xff);
+			key[j++] = (u8)((reg_val >> 16) & 0xff);
+			key[j++] = (u8)((reg_val >> 24) & 0xff);
+		}
+	}
+#endif
+	return 0;
+}
+#else
+/**
+ * i40e_get_rxfh_indir - get the rx flow hash indirection table
+ * @netdev: network interface device structure
+ * @indir: indirection table
+ *
+ * Reads the indirection table directly from the hardware. Returns 0 or -EINVAL
+ * if the supplied table isn't large enough.
+ **/
+static int i40e_get_rxfh_indir(struct net_device *netdev,
+			       struct ethtool_rxfh_indir *indir)
+{
+	struct i40e_netdev_priv *np = netdev_priv(netdev);
+	struct i40e_vsi *vsi = np->vsi;
+	struct i40e_pf *pf = vsi->back;
+	struct i40e_hw *hw = &pf->hw;
+	u32 reg_val;
+	int i, j;
+
+	if (indir->size < I40E_HLUT_ARRAY_SIZE)
+		return -EINVAL;
+
+	for (i = 0, j = 0; i <= I40E_PFQF_HLUT_MAX_INDEX; i++) {
+		reg_val = rd32(hw, I40E_PFQF_HLUT(i));
+		indir->ring_index[j++] = reg_val & 0xff;
+		indir->ring_index[j++] = (reg_val >> 8) & 0xff;
+		indir->ring_index[j++] = (reg_val >> 16) & 0xff;
+		indir->ring_index[j++] = (reg_val >> 24) & 0xff;
+	}
+	indir->size = ((I40E_PFQF_HLUT_MAX_INDEX + 1) * 4);
+	return 0;
+}
+#endif /* HAVE_ETHTOOL_GRXFHINDIR_SIZE */
+#endif /* ETHTOOL_GRXFHINDIR */
+#ifdef ETHTOOL_SRXFHINDIR
+#ifdef HAVE_ETHTOOL_GRXFHINDIR_SIZE
+#if defined(ETHTOOL_SRSSH) && !defined(HAVE_ETHTOOL_GSRSSH)
+/**
+ * i40e_set_rxfh - set the rx flow hash indirection table
+ * @netdev: network interface device structure
+ * @indir: indirection table
+ * @key: hash key
+ *
+ * Returns -EINVAL if the table specifies an inavlid queue id, otherwise
+ * returns 0 after programming the table.
+ **/
+static int i40e_set_rxfh(struct net_device *netdev, const u32 *indir,
+			 const u8 *key)
+#else
+/**
+ * i40e_set_rxfh_indir - set the rx flow hash indirection table
+ * @netdev: network interface device structure
+ * @indir: indirection table
+ *
+ * Returns -EINVAL if the table specifies an inavlid queue id, otherwise
+ * returns 0 after programming the table.
+ **/
+static int i40e_set_rxfh_indir(struct net_device *netdev, const u32 *indir)
+#endif /* EHTTOOL_SRSSH */
+{
+	struct i40e_netdev_priv *np = netdev_priv(netdev);
+	struct i40e_vsi *vsi = np->vsi;
+	struct i40e_pf *pf = vsi->back;
+	struct i40e_hw *hw = &pf->hw;
+	u32 reg_val;
+	int i, j;
+
+	if (indir) {
+		/* Verify user input. */
+		for (i = 0; i < I40E_HLUT_ARRAY_SIZE; i++) {
+			if (indir[i] >= pf->rss_size)
+				return -EINVAL;
+		}
+
+		for (i = 0, j = 0; i <= I40E_PFQF_HLUT_MAX_INDEX; i++) {
+			reg_val = indir[j++];
+			reg_val |= indir[j++] << 8;
+			reg_val |= indir[j++] << 16;
+			reg_val |= indir[j++] << 24;
+			wr32(hw, I40E_PFQF_HLUT(i), reg_val);
+		}
+	}
+#if defined(ETHTOOL_SRSSH) && !defined(HAVE_ETHTOOL_GSRSSH)
+	if (key) {
+		for (i = 0, j = 0; i <= I40E_PFQF_HKEY_MAX_INDEX; i++) {
+			reg_val = key[j++];
+			reg_val |= key[j++] << 8;
+			reg_val |= key[j++] << 16;
+			reg_val |= key[j++] << 24;
+			wr32(hw, I40E_PFQF_HKEY(i), reg_val);
+		}
+	}
+#endif
+	return 0;
+}
+#else
+/**
+ * i40e_set_rxfh_indir - set the rx flow hash indirection table
+ * @netdev: network interface device structure
+ * @indir: indirection table
+ *
+ * Returns -EINVAL if the table specifies an inavlid queue id, otherwise
+ * returns 0 after programming the table.
+ **/
+static int i40e_set_rxfh_indir(struct net_device *netdev,
+				 const struct ethtool_rxfh_indir *indir)
+{
+	struct i40e_netdev_priv *np = netdev_priv(netdev);
+	struct i40e_vsi *vsi = np->vsi;
+	struct i40e_pf *pf = vsi->back;
+	struct i40e_hw *hw = &pf->hw;
+	u32 reg_val;
+	int i, j;
+
+	if (indir->size < I40E_HLUT_ARRAY_SIZE)
+		return -EINVAL;
+
+	/* Verify user input. */
+	for (i = 0; i < (I40E_PFQF_HLUT_MAX_INDEX + 1) * 4; i++) {
+		if (indir->ring_index[i] >= pf->rss_size)
+			return -EINVAL;
+	}
+
+	for (i = 0, j = 0; i <= I40E_PFQF_HLUT_MAX_INDEX; i++) {
+		reg_val = indir->ring_index[j++];
+		reg_val |= indir->ring_index[j++] << 8;
+		reg_val |= indir->ring_index[j++] << 16;
+		reg_val |= indir->ring_index[j++] << 24;
+		wr32(hw, I40E_PFQF_HLUT(i), reg_val);
+	}
+
+	return 0;
+}
+#endif /* HAVE_ETHTOOL_GRXFHINDIR_SIZE */
+#endif /* ETHTOOL_SRXFHINDIR */
+
+#ifdef HAVE_ETHTOOL_GET_SSET_COUNT
+/**
+ * i40e_get_priv_flags - report device private flags
+ * @dev: network interface device structure
+ *
+ * The get string set count and the string set should be matched for each
+ * flag returned.  Add new strings for each flag to the i40e_priv_flags_strings
+ * array.
+ *
+ * Returns a u32 bitmap of flags.
+ **/
+static u32 i40e_get_priv_flags(struct net_device *dev)
+{
+	struct i40e_netdev_priv *np = netdev_priv(dev);
+	struct i40e_vsi *vsi = np->vsi;
+	struct i40e_pf *pf = vsi->back;
+	u32 ret_flags = 0;
+
+	ret_flags |= pf->hw.func_caps.npar_enable ?
+		I40E_PRIV_FLAGS_NPAR_FLAG : 0;
+
+	return ret_flags;
+}
+#endif /* HAVE_ETHTOOL_GET_SSET_COUNT */
+
 static const struct ethtool_ops i40e_ethtool_ops = {
 	.get_settings		= i40e_get_settings,
 	.set_settings		= i40e_set_settings,
@@ -2500,6 +2953,7 @@ static const struct ethtool_ops i40e_ethtool_ops = {
 	.get_stats_count	= i40e_get_stats_count,
 #else /* HAVE_ETHTOOL_GET_SSET_COUNT */
 	.get_sset_count		= i40e_get_sset_count,
+	.get_priv_flags		= i40e_get_priv_flags,
 #endif /* HAVE_ETHTOOL_GET_SSET_COUNT */
 	.get_ethtool_stats	= i40e_get_ethtool_stats,
 #ifdef HAVE_ETHTOOL_GET_PERM_ADDR
@@ -2507,7 +2961,27 @@ static const struct ethtool_ops i40e_ethtool_ops = {
 #endif
 	.get_coalesce		= i40e_get_coalesce,
 	.set_coalesce		= i40e_set_coalesce,
+#if defined(ETHTOOL_SRSSH) && !defined(HAVE_ETHTOOL_GSRSSH)
+	.get_rxfh_key_size	= i40e_get_rxfh_key_size,
+#endif
 #ifndef HAVE_RHEL6_ETHTOOL_OPS_EXT_STRUCT
+#ifdef ETHTOOL_GRXFHINDIR
+#ifdef HAVE_ETHTOOL_GRXFHINDIR_SIZE
+	.get_rxfh_indir_size	= i40e_get_rxfh_indir_size,
+#endif /* HAVE_ETHTOOL_GRXFHINDIR_SIZE */
+#ifdef ETHTOOL_GRSSH
+	.get_rxfh		= i40e_get_rxfh,
+#else
+	.get_rxfh_indir		= i40e_get_rxfh_indir,
+#endif /* ETHTOOL_GRSSH */
+#endif /* ETHTOOL_GRXFHINDIR */
+#ifdef ETHTOOL_SRXFHINDIR
+#ifdef ETHTOOL_SRSSH
+	.set_rxfh		= i40e_set_rxfh,
+#else
+	.set_rxfh_indir		= i40e_set_rxfh_indir,
+#endif /* ETHTOOL_SRSSH */
+#endif /* ETHTOOL_SRXFHINDIR */
 #ifdef ETHTOOL_SCHANNELS
 	.get_channels		= i40e_get_channels,
 	.set_channels		= i40e_set_channels,
@@ -2525,6 +2999,9 @@ static const struct ethtool_ops_ext i40e_ethtool_ops_ext = {
 	.set_phys_id		= i40e_set_phys_id,
 	.get_channels		= i40e_get_channels,
 	.set_channels		= i40e_set_channels,
+	.get_rxfh_indir_size	= i40e_get_rxfh_indir_size,
+	.get_rxfh_indir		= i40e_get_rxfh_indir,
+	.set_rxfh_indir		= i40e_set_rxfh_indir,
 };
 
 void i40e_set_ethtool_ops(struct net_device *netdev)

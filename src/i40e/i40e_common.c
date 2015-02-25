@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel Ethernet Controller XL710 Family Linux Driver
- * Copyright(c) 2013 - 2014 Intel Corporation.
+ * Copyright(c) 2013 - 2015 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -85,47 +85,51 @@ void i40e_debug_aq(struct i40e_hw *hw, enum i40e_debug_mask mask, void *desc,
 {
 	struct i40e_aq_desc *aq_desc = (struct i40e_aq_desc *)desc;
 	u16 len = LE16_TO_CPU(aq_desc->datalen);
-	u8 *aq_buffer = (u8 *)buffer;
-	u32 data[4];
-	u32 i = 0;
+	u8 *buf = (u8 *)buffer;
+	u16 i = 0;
 
 	if ((!(mask & hw->debug_mask)) || (desc == NULL))
 		return;
 
 	i40e_debug(hw, mask,
 		   "AQ CMD: opcode 0x%04X, flags 0x%04X, datalen 0x%04X, retval 0x%04X\n",
-		   aq_desc->opcode, aq_desc->flags, aq_desc->datalen,
-		   aq_desc->retval);
+		   LE16_TO_CPU(aq_desc->opcode),
+		   LE16_TO_CPU(aq_desc->flags),
+		   LE16_TO_CPU(aq_desc->datalen),
+		   LE16_TO_CPU(aq_desc->retval));
 	i40e_debug(hw, mask, "\tcookie (h,l) 0x%08X 0x%08X\n",
-		   aq_desc->cookie_high, aq_desc->cookie_low);
+		   LE32_TO_CPU(aq_desc->cookie_high),
+		   LE32_TO_CPU(aq_desc->cookie_low));
 	i40e_debug(hw, mask, "\tparam (0,1)  0x%08X 0x%08X\n",
-		   aq_desc->params.internal.param0,
-		   aq_desc->params.internal.param1);
+		   LE32_TO_CPU(aq_desc->params.internal.param0),
+		   LE32_TO_CPU(aq_desc->params.internal.param1));
 	i40e_debug(hw, mask, "\taddr (h,l)   0x%08X 0x%08X\n",
-		   aq_desc->params.external.addr_high,
-		   aq_desc->params.external.addr_low);
+		   LE32_TO_CPU(aq_desc->params.external.addr_high),
+		   LE32_TO_CPU(aq_desc->params.external.addr_low));
 
 	if ((buffer != NULL) && (aq_desc->datalen != 0)) {
-		i40e_memset(data, 0, sizeof(data), I40E_NONDMA_MEM);
 		i40e_debug(hw, mask, "AQ CMD Buffer:\n");
 		if (buf_len < len)
 			len = buf_len;
-		for (i = 0; i < len; i++) {
-			data[((i % 16) / 4)] |=
-				((u32)aq_buffer[i]) << (8 * (i % 4));
-			if ((i % 16) == 15) {
-				i40e_debug(hw, mask,
-					   "\t0x%04X  %08X %08X %08X %08X\n",
-					   i - 15, data[0], data[1], data[2],
-					   data[3]);
-				i40e_memset(data, 0, sizeof(data),
-					    I40E_NONDMA_MEM);
-			}
+		/* write the full 16-byte chunks */
+		for (i = 0; i < (len - 16); i += 16)
+			i40e_debug(hw, mask,
+				   "\t0x%04X  %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
+				   i, buf[i], buf[i+1], buf[i+2], buf[i+3],
+				   buf[i+4], buf[i+5], buf[i+6], buf[i+7],
+				   buf[i+8], buf[i+9], buf[i+10], buf[i+11],
+				   buf[i+12], buf[i+13], buf[i+14], buf[i+15]);
+		/* write whatever's left over without overrunning the buffer */
+		if (i < len) {
+			char d_buf[80];
+			int j = 0;
+
+			memset(d_buf, 0, sizeof(d_buf));
+			j += sprintf(d_buf, "\t0x%04X ", i);
+			while (i < len)
+				j += sprintf(&d_buf[j], " %02X", buf[i++]);
+			i40e_debug(hw, mask, "%s\n", d_buf);
 		}
-		if ((i % 16) != 0)
-			i40e_debug(hw, mask, "\t0x%04X  %08X %08X %08X %08X\n",
-				   i - (i % 16), data[0], data[1], data[2],
-				   data[3]);
 	}
 }
 
@@ -534,6 +538,27 @@ struct i40e_rx_ptype_decoded i40e_ptype_lookup[] = {
 	I40E_PTT_UNUSED_ENTRY(255)
 };
 
+/**
+ * i40e_validate_mac_addr - Validate unicast MAC address
+ * @mac_addr: pointer to MAC address
+ *
+ * Tests a MAC address to ensure it is a valid Individual Address
+ **/
+i40e_status i40e_validate_mac_addr(u8 *mac_addr)
+{
+	i40e_status status = I40E_SUCCESS;
+
+	/* Broadcast addresses ARE multicast addresses
+	 * Make sure it is not a multicast address
+	 * Reject the zero address
+	 */
+	if (I40E_IS_MULTICAST(mac_addr) ||
+	    (mac_addr[0] == 0 && mac_addr[1] == 0 && mac_addr[2] == 0 &&
+	      mac_addr[3] == 0 && mac_addr[4] == 0 && mac_addr[5] == 0))
+		status = I40E_ERR_INVALID_MAC_ADDR;
+
+	return status;
+}
 
 /**
  * i40e_init_shared_code - Initialize the shared code
@@ -550,7 +575,7 @@ struct i40e_rx_ptype_decoded i40e_ptype_lookup[] = {
 i40e_status i40e_init_shared_code(struct i40e_hw *hw)
 {
 	i40e_status status = I40E_SUCCESS;
-	u32 reg;
+	u32 port, ari, func_rid;
 
 	i40e_set_mac_type(hw);
 
@@ -563,18 +588,17 @@ i40e_status i40e_init_shared_code(struct i40e_hw *hw)
 
 	hw->phy.get_link_info = true;
 
-	/* Determine port number */
-	reg = rd32(hw, I40E_PFGEN_PORTNUM);
-	reg = ((reg & I40E_PFGEN_PORTNUM_PORT_NUM_MASK) >>
-	       I40E_PFGEN_PORTNUM_PORT_NUM_SHIFT);
-	hw->port = (u8)reg;
-
-	/* Determine the PF number based on the PCI fn */
-	reg = rd32(hw, I40E_GLPCI_CAPSUP);
-	if (reg & I40E_GLPCI_CAPSUP_ARI_EN_MASK)
-		hw->pf_id = (u8)((hw->bus.device << 3) | hw->bus.func);
+	/* Determine port number and PF number*/
+	port = (rd32(hw, I40E_PFGEN_PORTNUM) & I40E_PFGEN_PORTNUM_PORT_NUM_MASK)
+					   >> I40E_PFGEN_PORTNUM_PORT_NUM_SHIFT;
+	hw->port = (u8)port;
+	ari = (rd32(hw, I40E_GLPCI_CAPSUP) & I40E_GLPCI_CAPSUP_ARI_EN_MASK) >>
+						 I40E_GLPCI_CAPSUP_ARI_EN_SHIFT;
+	func_rid = rd32(hw, I40E_PF_FUNC_RID);
+	if (ari)
+		hw->pf_id = (u8)(func_rid & 0xff);
 	else
-		hw->pf_id = (u8)hw->bus.func;
+		hw->pf_id = (u8)(func_rid & 0x7);
 
 	status = i40e_init_nvm(hw);
 	return status;
@@ -714,25 +738,90 @@ void i40e_pre_tx_queue_cfg(struct i40e_hw *hw, u32 queue, bool enable)
 
 	wr32(hw, I40E_GLLAN_TXPRE_QDIS(reg_block), reg_val);
 }
+#ifdef I40E_FCOE
 
 /**
- * i40e_validate_mac_addr - Validate unicast MAC address
- * @mac_addr: pointer to MAC address
+ * i40e_get_san_mac_addr - get SAN MAC address
+ * @hw: pointer to the HW structure
+ * @mac_addr: pointer to SAN MAC address
  *
- * Tests a MAC address to ensure it is a valid Individual Address
+ * Reads the adapter's SAN MAC address from NVM
  **/
-i40e_status i40e_validate_mac_addr(u8 *mac_addr)
+i40e_status i40e_get_san_mac_addr(struct i40e_hw *hw,
+					    u8 *mac_addr)
+{
+	struct i40e_aqc_mac_address_read_data addrs;
+	i40e_status status;
+	u16 flags = 0;
+
+	status = i40e_aq_mac_address_read(hw, &flags, &addrs, NULL);
+	if (status)
+		return status;
+
+	if (flags & I40E_AQC_SAN_ADDR_VALID)
+		memcpy(mac_addr, &addrs.pf_san_mac, sizeof(addrs.pf_san_mac));
+	else
+		status = I40E_ERR_INVALID_MAC_ADDR;
+
+	return status;
+}
+#endif
+
+/**
+ *  i40e_read_pba_string - Reads part number string from EEPROM
+ *  @hw: pointer to hardware structure
+ *  @pba_num: stores the part number string from the EEPROM
+ *  @pba_num_size: part number string buffer length
+ *
+ *  Reads the part number string from the EEPROM.
+ **/
+i40e_status i40e_read_pba_string(struct i40e_hw *hw, u8 *pba_num,
+					    u32 pba_num_size)
 {
 	i40e_status status = I40E_SUCCESS;
+	u16 pba_word = 0;
+	u16 pba_size = 0;
+	u16 pba_ptr = 0;
+	u16 i = 0;
 
-	/* Broadcast addresses ARE multicast addresses
-	 * Make sure it is not a multicast address
-	 * Reject the zero address
+	status = i40e_read_nvm_word(hw, I40E_SR_PBA_FLAGS, &pba_word);
+	if ((status != I40E_SUCCESS) || (pba_word != 0xFAFA)) {
+		hw_dbg(hw, "Failed to read PBA flags or flag is invalid.\n");
+		return status;
+	}
+
+	status = i40e_read_nvm_word(hw, I40E_SR_PBA_BLOCK_PTR, &pba_ptr);
+	if (status != I40E_SUCCESS) {
+		hw_dbg(hw, "Failed to read PBA Block pointer.\n");
+		return status;
+	}
+
+	status = i40e_read_nvm_word(hw, pba_ptr, &pba_size);
+	if (status != I40E_SUCCESS) {
+		hw_dbg(hw, "Failed to read PBA Block size.\n");
+		return status;
+	}
+
+	/* Subtract one to get PBA word count (PBA Size word is included in
+	 * total size)
 	 */
-	if (I40E_IS_MULTICAST(mac_addr) ||
-	    (mac_addr[0] == 0 && mac_addr[1] == 0 && mac_addr[2] == 0 &&
-	      mac_addr[3] == 0 && mac_addr[4] == 0 && mac_addr[5] == 0))
-		status = I40E_ERR_INVALID_MAC_ADDR;
+	pba_size--;
+	if (pba_num_size < (((u32)pba_size * 2) + 1)) {
+		hw_dbg(hw, "Buffer to small for PBA data.\n");
+		return I40E_ERR_PARAM;
+	}
+
+	for (i = 0; i < pba_size; i++) {
+		status = i40e_read_nvm_word(hw, (pba_ptr + 1) + i, &pba_word);
+		if (status != I40E_SUCCESS) {
+			hw_dbg(hw, "Failed to read PBA Block word %d.\n", i);
+			return status;
+		}
+
+		pba_num[(i * 2)] = (pba_word >> 8) & 0xFF;
+		pba_num[(i * 2) + 1] = pba_word & 0xFF;
+	}
+	pba_num[(pba_size * 2)] = '\0';
 
 	return status;
 }
@@ -764,6 +853,8 @@ static enum i40e_media_type i40e_get_media_type(struct i40e_hw *hw)
 	case I40E_PHY_TYPE_10GBASE_CR1:
 	case I40E_PHY_TYPE_40GBASE_CR4:
 	case I40E_PHY_TYPE_10GBASE_SFPP_CU:
+	case I40E_PHY_TYPE_40GBASE_AOC:
+	case I40E_PHY_TYPE_10GBASE_AOC:
 		media = I40E_MEDIA_TYPE_DA;
 		break;
 	case I40E_PHY_TYPE_1000BASE_KX:
@@ -785,7 +876,7 @@ static enum i40e_media_type i40e_get_media_type(struct i40e_hw *hw)
 	return media;
 }
 
-#define I40E_PF_RESET_WAIT_COUNT	100
+#define I40E_PF_RESET_WAIT_COUNT	110
 /**
  * i40e_pf_reset - Reset the PF
  * @hw: pointer to the hardware structure
@@ -804,8 +895,9 @@ i40e_status i40e_pf_reset(struct i40e_hw *hw)
 	 * The grst delay value is in 100ms units, and we'll wait a
 	 * couple counts longer to be sure we don't just miss the end.
 	 */
-	grst_del = rd32(hw, I40E_GLGEN_RSTCTL) & I40E_GLGEN_RSTCTL_GRSTDEL_MASK
-			>> I40E_GLGEN_RSTCTL_GRSTDEL_SHIFT;
+	grst_del = (rd32(hw, I40E_GLGEN_RSTCTL) &
+			I40E_GLGEN_RSTCTL_GRSTDEL_MASK) >>
+			I40E_GLGEN_RSTCTL_GRSTDEL_SHIFT;
 	for (cnt = 0; cnt < grst_del + 2; cnt++) {
 		reg = rd32(hw, I40E_GLGEN_RSTAT);
 		if (!(reg & I40E_GLGEN_RSTAT_DEVSTATE_MASK))
@@ -856,7 +948,6 @@ i40e_status i40e_pf_reset(struct i40e_hw *hw)
 	}
 
 	i40e_clear_pxe_mode(hw);
-
 
 	return I40E_SUCCESS;
 }
@@ -996,8 +1087,11 @@ static u32 i40e_led_is_mine(struct i40e_hw *hw, int idx)
 	return gpio_val;
 }
 
-#define I40E_LED0 22
+#define I40E_COMBINED_ACTIVITY 0xA
+#define I40E_FILTER_ACTIVITY 0xE
 #define I40E_LINK_ACTIVITY 0xC
+#define I40E_MAC_ACTIVITY 0xD
+#define I40E_LED0 22
 
 /**
  * i40e_led_get - return current on/off mode
@@ -1010,6 +1104,7 @@ static u32 i40e_led_is_mine(struct i40e_hw *hw, int idx)
  **/
 u32 i40e_led_get(struct i40e_hw *hw)
 {
+	u32 current_mode = 0;
 	u32 mode = 0;
 	int i;
 
@@ -1021,6 +1116,18 @@ u32 i40e_led_get(struct i40e_hw *hw)
 
 		if (!gpio_val)
 			continue;
+
+		/* ignore gpio LED src mode entries related to the activity LEDs */
+		current_mode = ((gpio_val & I40E_GLGEN_GPIO_CTL_LED_MODE_MASK) >>
+			I40E_GLGEN_GPIO_CTL_LED_MODE_SHIFT);
+		switch (current_mode) {
+		case I40E_COMBINED_ACTIVITY:
+		case I40E_FILTER_ACTIVITY:
+		case I40E_MAC_ACTIVITY:
+			continue;
+		default:
+			break;
+		}
 
 		mode = (gpio_val & I40E_GLGEN_GPIO_CTL_LED_MODE_MASK) >>
 			I40E_GLGEN_GPIO_CTL_LED_MODE_SHIFT;
@@ -1041,6 +1148,7 @@ u32 i40e_led_get(struct i40e_hw *hw)
  **/
 void i40e_led_set(struct i40e_hw *hw, u32 mode, bool blink)
 {
+	u32 current_mode = 0;
 	int i;
 
 	if (mode & 0xfffffff0)
@@ -1055,6 +1163,18 @@ void i40e_led_set(struct i40e_hw *hw, u32 mode, bool blink)
 		if (!gpio_val)
 			continue;
 
+		/* ignore gpio LED src mode entries related to the activity LEDs */
+		current_mode = ((gpio_val & I40E_GLGEN_GPIO_CTL_LED_MODE_MASK) >>
+			I40E_GLGEN_GPIO_CTL_LED_MODE_SHIFT);
+		switch (current_mode) {
+		case I40E_COMBINED_ACTIVITY:
+		case I40E_FILTER_ACTIVITY:
+		case I40E_MAC_ACTIVITY:
+			continue;
+		default:
+			break;
+		}
+
 		gpio_val &= ~I40E_GLGEN_GPIO_CTL_LED_MODE_MASK;
 		/* this & is a bit of paranoia, but serves as a range check */
 		gpio_val |= ((mode << I40E_GLGEN_GPIO_CTL_LED_MODE_SHIFT) &
@@ -1063,8 +1183,10 @@ void i40e_led_set(struct i40e_hw *hw, u32 mode, bool blink)
 		if (mode == I40E_LINK_ACTIVITY)
 			blink = false;
 
-		gpio_val |= (blink ? 1 : 0) <<
-			    I40E_GLGEN_GPIO_CTL_LED_BLINK_SHIFT;
+		if (blink)
+			gpio_val |= (1 << I40E_GLGEN_GPIO_CTL_LED_BLINK_SHIFT);
+		else
+			gpio_val &= ~(1 << I40E_GLGEN_GPIO_CTL_LED_BLINK_SHIFT);
 
 		wr32(hw, I40E_GLGEN_GPIO_CTL(i), gpio_val);
 		break;
@@ -1193,7 +1315,7 @@ i40e_status i40e_set_fc(struct i40e_hw *hw, u8 *aq_failures,
 		return status;
 	}
 
-	memset(&config, 0, sizeof(struct i40e_aq_set_phy_config));
+	memset(&config, 0, sizeof(config));
 	/* clear the old pause settings */
 	config.abilities = abilities.abilities & ~(I40E_AQ_PHY_FLAG_PAUSE_TX) &
 			   ~(I40E_AQ_PHY_FLAG_PAUSE_RX);
@@ -1216,14 +1338,14 @@ i40e_status i40e_set_fc(struct i40e_hw *hw, u8 *aq_failures,
 			*aq_failures |= I40E_SET_FC_AQ_FAIL_SET;
 	}
 	/* Update the link info */
-	status = i40e_update_link_info(hw, true);
+	status = i40e_aq_get_link_info(hw, true, NULL, NULL);
 	if (status) {
 		/* Wait a little bit (on 40G cards it sometimes takes a really
 		 * long time for link to come back from the atomic reset)
 		 * and try once more
 		 */
 		msleep(1000);
-		status = i40e_update_link_info(hw, true);
+		status = i40e_aq_get_link_info(hw, true, NULL, NULL);
 	}
 	if (status)
 		*aq_failures |= I40E_SET_FC_AQ_FAIL_UPDATE;
@@ -1361,7 +1483,7 @@ i40e_status i40e_aq_get_link_info(struct i40e_hw *hw,
 
 	/* save off old link status information */
 	i40e_memcpy(&hw->phy.link_info_old, hw_link_info,
-		    sizeof(struct i40e_link_status), I40E_NONDMA_TO_NONDMA);
+		    sizeof(*hw_link_info), I40E_NONDMA_TO_NONDMA);
 
 	/* update link status */
 	hw_link_info->phy_type = (enum i40e_aq_phy_type)resp->phy_type;
@@ -1396,9 +1518,13 @@ i40e_status i40e_aq_get_link_info(struct i40e_hw *hw,
 	else
 		hw_link_info->lse_enable = false;
 
+	if ((hw->aq.fw_maj_ver < 4 || (hw->aq.fw_maj_ver == 4 &&
+	     hw->aq.fw_min_ver < 40)) && hw_link_info->phy_type == 0xE)
+		hw_link_info->phy_type = I40E_PHY_TYPE_10GBASE_SFPP_CU;
+
 	/* save link status information */
 	if (link)
-		i40e_memcpy(link, hw_link_info, sizeof(struct i40e_link_status),
+		i40e_memcpy(link, hw_link_info, sizeof(*hw_link_info),
 			    I40E_NONDMA_TO_NONDMA);
 
 	/* flag cleared so helper functions don't call AQ again */
@@ -1408,35 +1534,6 @@ aq_get_link_info_exit:
 	return status;
 }
 
-/**
- * i40e_update_link_info
- * @hw: pointer to the hw struct
- * @enable_lse: enable/disable LinkStatusEvent reporting
- *
- * Returns the link status of the adapter
- **/
-i40e_status i40e_update_link_info(struct i40e_hw *hw,
-					     bool enable_lse)
-{
-	struct i40e_aq_get_phy_abilities_resp abilities;
-	i40e_status status;
-
-	status = i40e_aq_get_link_info(hw, enable_lse, NULL, NULL);
-	if (status)
-		return status;
-
-	status = i40e_aq_get_phy_capabilities(hw, false, false,
-					      &abilities, NULL);
-	if (status)
-		return status;
-
-	if (abilities.abilities & I40E_AQ_PHY_AN_ENABLED)
-		hw->phy.link_info.an_enabled = true;
-	else
-		hw->phy.link_info.an_enabled = false;
-
-	return status;
-}
 
 /**
  * i40e_aq_set_phy_int_mask
@@ -1890,6 +1987,7 @@ i40e_status i40e_aq_get_switch_config(struct i40e_hw *hw,
  * @hw: pointer to the hw struct
  * @fw_major_version: firmware major version
  * @fw_minor_version: firmware minor version
+ * @fw_build: firmware build number
  * @api_major_version: major queue version
  * @api_minor_version: minor queue version
  * @cmd_details: pointer to command details structure or NULL
@@ -1898,6 +1996,7 @@ i40e_status i40e_aq_get_switch_config(struct i40e_hw *hw,
  **/
 i40e_status i40e_aq_get_firmware_version(struct i40e_hw *hw,
 				u16 *fw_major_version, u16 *fw_minor_version,
+				u32 *fw_build,
 				u16 *api_major_version, u16 *api_minor_version,
 				struct i40e_asq_cmd_details *cmd_details)
 {
@@ -1915,6 +2014,8 @@ i40e_status i40e_aq_get_firmware_version(struct i40e_hw *hw,
 			*fw_major_version = LE16_TO_CPU(resp->fw_major);
 		if (fw_minor_version != NULL)
 			*fw_minor_version = LE16_TO_CPU(resp->fw_minor);
+		if (fw_build != NULL)
+			*fw_build = LE32_TO_CPU(resp->fw_build);
 		if (api_major_version != NULL)
 			*api_major_version = LE16_TO_CPU(resp->api_major);
 		if (api_minor_version != NULL)
@@ -1955,7 +2056,7 @@ i40e_status i40e_aq_send_driver_version(struct i40e_hw *hw,
 
 	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_driver_version);
 
-	desc.flags |= CPU_TO_LE16(I40E_AQ_FLAG_SI);
+	desc.flags |= CPU_TO_LE16(I40E_AQ_FLAG_BUF | I40E_AQ_FLAG_RD);
 	cmd->driver_major_ver = dv->major_version;
 	cmd->driver_minor_ver = dv->minor_version;
 	cmd->driver_build_ver = dv->build_version;
@@ -2159,7 +2260,7 @@ i40e_status i40e_aq_add_macvlan(struct i40e_hw *hw, u16 seid,
 	if (count == 0 || !mv_list || !hw)
 		return I40E_ERR_PARAM;
 
-	buf_size = count * sizeof(struct i40e_aqc_add_macvlan_element_data);
+	buf_size = count * sizeof(*mv_list);
 
 	/* prep the rest of the request */
 	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_add_macvlan);
@@ -2201,7 +2302,7 @@ i40e_status i40e_aq_remove_macvlan(struct i40e_hw *hw, u16 seid,
 	if (count == 0 || !mv_list || !hw)
 		return I40E_ERR_PARAM;
 
-	buf_size = count * sizeof(struct i40e_aqc_remove_macvlan_element_data);
+	buf_size = count * sizeof(*mv_list);
 
 	/* prep the rest of the request */
 	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_remove_macvlan);
@@ -2241,7 +2342,7 @@ i40e_status i40e_aq_add_vlan(struct i40e_hw *hw, u16 seid,
 	if (count == 0 || !v_list || !hw)
 		return I40E_ERR_PARAM;
 
-	buf_size = count * sizeof(struct i40e_aqc_add_remove_vlan_element_data);
+	buf_size = count * sizeof(*v_list);
 
 	/* prep the rest of the request */
 	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_add_vlan);
@@ -2281,7 +2382,7 @@ i40e_status i40e_aq_remove_vlan(struct i40e_hw *hw, u16 seid,
 	if (count == 0 || !v_list || !hw)
 		return I40E_ERR_PARAM;
 
-	buf_size = count * sizeof(struct i40e_aqc_add_remove_vlan_element_data);
+	buf_size = count * sizeof(*v_list);
 
 	/* prep the rest of the request */
 	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_remove_vlan);
@@ -2334,6 +2435,41 @@ i40e_status i40e_aq_send_msg_to_vf(struct i40e_hw *hw, u16 vfid,
 		desc.datalen = CPU_TO_LE16(msglen);
 	}
 	status = i40e_asq_send_command(hw, &desc, msg, msglen, cmd_details);
+
+	return status;
+}
+
+/**
+ * i40e_aq_debug_read_register
+ * @hw: pointer to the hw struct
+ * @reg_addr: register address
+ * @reg_val: register value
+ * @cmd_details: pointer to command details structure or NULL
+ *
+ * Read the register using the admin queue commands
+ **/
+i40e_status i40e_aq_debug_read_register(struct i40e_hw *hw,
+				u32 reg_addr, u64 *reg_val,
+				struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aq_desc desc;
+	struct i40e_aqc_debug_reg_read_write *cmd_resp =
+		(struct i40e_aqc_debug_reg_read_write *)&desc.params.raw;
+	i40e_status status;
+
+	if (reg_val == NULL)
+		return I40E_ERR_PARAM;
+
+	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_debug_read_reg);
+
+	cmd_resp->address = CPU_TO_LE32(reg_addr);
+
+	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
+
+	if (status == I40E_SUCCESS) {
+		*reg_val = ((u64)LE32_TO_CPU(cmd_resp->value_high) << 32) |
+			   (u64)LE32_TO_CPU(cmd_resp->value_low);
+	}
 
 	return status;
 }
@@ -2546,6 +2682,77 @@ i40e_aq_read_nvm_exit:
 }
 
 /**
+ * i40e_aq_read_nvm_config - read an nvm config block
+ * @hw: pointer to the hw struct
+ * @cmd_flags: NVM access admin command bits
+ * @field_id: field or feature id
+ * @data: buffer for result
+ * @buf_size: buffer size
+ * @element_count: pointer to count of elements read by FW
+ * @cmd_details: pointer to command details structure or NULL
+ **/
+i40e_status i40e_aq_read_nvm_config(struct i40e_hw *hw,
+				u8 cmd_flags, u32 field_id, void *data,
+				u16 buf_size, u16 *element_count,
+				struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aq_desc desc;
+	struct i40e_aqc_nvm_config_read *cmd =
+		(struct i40e_aqc_nvm_config_read *)&desc.params.raw;
+	i40e_status status;
+
+	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_nvm_config_read);
+	desc.flags |= CPU_TO_LE16((u16)(I40E_AQ_FLAG_BUF));
+	if (buf_size > I40E_AQ_LARGE_BUF)
+		desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_LB);
+
+	cmd->cmd_flags = CPU_TO_LE16(cmd_flags);
+	cmd->element_id = CPU_TO_LE16((u16)(0xffff & field_id));
+	if (cmd_flags & I40E_AQ_ANVM_FEATURE_OR_IMMEDIATE_MASK)
+		cmd->element_id_msw = CPU_TO_LE16((u16)(field_id >> 16));
+	else
+		cmd->element_id_msw = 0;
+
+	status = i40e_asq_send_command(hw, &desc, data, buf_size, cmd_details);
+
+	if (!status && element_count)
+		*element_count = LE16_TO_CPU(cmd->element_count);
+
+	return status;
+}
+
+/**
+ * i40e_aq_write_nvm_config - write an nvm config block
+ * @hw: pointer to the hw struct
+ * @cmd_flags: NVM access admin command bits
+ * @data: buffer for result
+ * @buf_size: buffer size
+ * @element_count: count of elements to be written
+ * @cmd_details: pointer to command details structure or NULL
+ **/
+i40e_status i40e_aq_write_nvm_config(struct i40e_hw *hw,
+				u8 cmd_flags, void *data, u16 buf_size,
+				u16 element_count,
+				struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aq_desc desc;
+	struct i40e_aqc_nvm_config_write *cmd =
+		(struct i40e_aqc_nvm_config_write *)&desc.params.raw;
+	i40e_status status;
+
+	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_nvm_config_write);
+	desc.flags |= CPU_TO_LE16((u16)(I40E_AQ_FLAG_BUF | I40E_AQ_FLAG_RD));
+	if (buf_size > I40E_AQ_LARGE_BUF)
+		desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_LB);
+
+	cmd->element_count = CPU_TO_LE16(element_count);
+	cmd->cmd_flags = CPU_TO_LE16(cmd_flags);
+	status = i40e_asq_send_command(hw, &desc, data, buf_size, cmd_details);
+
+	return status;
+}
+
+/**
  * i40e_aq_erase_nvm
  * @hw: pointer to the hw struct
  * @module_pointer: module pointer location in words from the NVM beginning
@@ -2599,6 +2806,7 @@ i40e_aq_erase_nvm_exit:
 #define I40E_DEV_FUNC_CAP_VSI		0x17
 #define I40E_DEV_FUNC_CAP_DCB		0x18
 #define I40E_DEV_FUNC_CAP_FCOE		0x21
+#define I40E_DEV_FUNC_CAP_ISCSI		0x22
 #define I40E_DEV_FUNC_CAP_RSS		0x40
 #define I40E_DEV_FUNC_CAP_RX_QUEUES	0x41
 #define I40E_DEV_FUNC_CAP_TX_QUEUES	0x42
@@ -2627,6 +2835,7 @@ static void i40e_parse_discover_capabilities(struct i40e_hw *hw, void *buff,
 				     enum i40e_admin_queue_opc list_type_opc)
 {
 	struct i40e_aqc_list_capabilities_element_resp *cap;
+	u32 valid_functions, num_functions;
 	u32 number, logical_id, phys_id;
 	struct i40e_hw_capabilities *p;
 	u32 i = 0;
@@ -2697,6 +2906,10 @@ static void i40e_parse_discover_capabilities(struct i40e_hw *hw, void *buff,
 			if (number == 1)
 				p->fcoe = true;
 			break;
+		case I40E_DEV_FUNC_CAP_ISCSI:
+			if (number == 1)
+				p->iscsi = true;
+			break;
 		case I40E_DEV_FUNC_CAP_RSS:
 			p->rss = true;
 			p->rss_table_size = number;
@@ -2756,11 +2969,44 @@ static void i40e_parse_discover_capabilities(struct i40e_hw *hw, void *buff,
 		}
 	}
 
+#ifdef I40E_FCOE_ENA
 	/* Software override ensuring FCoE is disabled if npar or mfp
 	 * mode because it is not supported in these modes.
 	 */
 	if (p->npar_enable || p->mfp_mode_1)
 		p->fcoe = false;
+#else
+	/* Always disable FCoE if compiled without the I40E_FCOE_ENA flag */
+	p->fcoe = false;
+#endif
+
+	/* count the enabled ports (aka the "not disabled" ports) */
+	hw->num_ports = 0;
+	for (i = 0; i < 4; i++) {
+		u32 port_cfg_reg = I40E_PRTGEN_CNF + (4 * i);
+		u64 port_cfg = 0;
+
+		/* use AQ read to get the physical register offset instead
+		 * of the port relative offset
+		 */
+		i40e_aq_debug_read_register(hw, port_cfg_reg, &port_cfg, NULL);
+		if (!(port_cfg & I40E_PRTGEN_CNF_PORT_DIS_MASK))
+			hw->num_ports++;
+	}
+
+	valid_functions = p->valid_functions;
+	num_functions = 0;
+	while (valid_functions) {
+		if (valid_functions & 1)
+			num_functions++;
+		valid_functions >>= 1;
+	}
+
+	/* partition id is 1-based, and functions are evenly spread
+	 * across the ports as partitions
+	 */
+	hw->partition_id = (hw->pf_id / hw->num_ports) + 1;
+	hw->num_partitions = num_functions / hw->num_ports;
 
 	/* additional HW specific goodies that might
 	 * someday be HW version specific
@@ -2912,6 +3158,45 @@ i40e_status i40e_aq_get_lldp_mib(struct i40e_hw *hw, u8 bridge_type,
 			*remote_len = LE16_TO_CPU(resp->remote_len);
 	}
 
+	return status;
+}
+
+ /**
+ * i40e_aq_set_lldp_mib - Set the LLDP MIB
+ * @hw: pointer to the hw struct
+ * @mib_type: Local, Remote or both Local and Remote MIBs
+ * @buff: pointer to a user supplied buffer to store the MIB block
+ * @buff_size: size of the buffer (in bytes)
+ * @cmd_details: pointer to command details structure or NULL
+ *
+ * Set the LLDP MIB.
+ **/
+i40e_status i40e_aq_set_lldp_mib(struct i40e_hw *hw,
+				u8 mib_type, void *buff, u16 buff_size,
+				struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aq_desc desc;
+	struct i40e_aqc_lldp_set_local_mib *cmd =
+		(struct i40e_aqc_lldp_set_local_mib *)&desc.params.raw;
+	i40e_status status;
+
+	if (buff_size == 0 || !buff)
+		return I40E_ERR_PARAM;
+
+	i40e_fill_default_direct_cmd_desc(&desc,
+				i40e_aqc_opc_lldp_set_local_mib);
+	/* Indirect Command */
+	desc.flags |= CPU_TO_LE16((u16)(I40E_AQ_FLAG_BUF | I40E_AQ_FLAG_RD));
+	if (buff_size > I40E_AQ_LARGE_BUF)
+		desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_LB);
+	desc.datalen = CPU_TO_LE16(buff_size);
+
+	cmd->type = mib_type;
+	cmd->length = CPU_TO_LE16(buff_size);
+	cmd->address_high = CPU_TO_LE32(high_16_bits((u64)buff));
+	cmd->address_low =  CPU_TO_LE32(lower_32_bits((u64)buff));
+
+	status = i40e_asq_send_command(hw, &desc, buff, buff_size, cmd_details);
 	return status;
 }
 
@@ -3144,6 +3429,64 @@ i40e_status i40e_aq_start_lldp(struct i40e_hw *hw,
 }
 
 /**
+ * i40e_aq_get_cee_dcb_config
+ * @hw: pointer to the hw struct
+ * @buff: response buffer that stores CEE operational configuration
+ * @buff_size: size of the buffer passed
+ * @cmd_details: pointer to command details structure or NULL
+ *
+ * Get CEE DCBX mode operational configuration from firmware
+ **/
+i40e_status i40e_aq_get_cee_dcb_config(struct i40e_hw *hw,
+				void *buff, u16 buff_size,
+				struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aq_desc desc;
+	i40e_status status;
+
+	if (buff_size == 0 || !buff)
+		return I40E_ERR_PARAM;
+
+	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_get_cee_dcb_cfg);
+
+	desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_BUF);
+	status = i40e_asq_send_command(hw, &desc, (void *)buff, buff_size,
+				       cmd_details);
+
+	return status;
+}
+
+/**
+ * i40e_aq_start_stop_dcbx - Start/Stop DCBx service in FW
+ * @hw: pointer to the hw struct
+ * @start_agent: True if DCBx Agent needs to be Started
+ *				False if DCBx Agent needs to be Stopped
+ * @cmd_details: pointer to command details structure or NULL
+ *
+ * Start/Stop the embedded dcbx Agent
+ **/
+i40e_status i40e_aq_start_stop_dcbx(struct i40e_hw *hw,
+				bool start_agent,
+				struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aq_desc desc;
+	struct i40e_aqc_lldp_stop_start_specific_agent *cmd =
+		(struct i40e_aqc_lldp_stop_start_specific_agent *)
+				&desc.params.raw;
+	i40e_status status;
+
+	i40e_fill_default_direct_cmd_desc(&desc,
+				i40e_aqc_opc_lldp_stop_start_spec_agent);
+
+	if (start_agent)
+		cmd->command = I40E_AQC_START_SPECIFIC_AGENT_MASK;
+
+	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
+
+	return status;
+}
+
+/**
  * i40e_aq_add_udp_tunnel
  * @hw: pointer to the hw struct
  * @udp_port: the UDP port to add
@@ -3171,7 +3514,7 @@ i40e_status i40e_aq_add_udp_tunnel(struct i40e_hw *hw,
 
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 
-	if (!status)
+	if (!status && filter_index)
 		*filter_index = resp->index;
 
 	return status;
@@ -3222,8 +3565,7 @@ i40e_status i40e_aq_get_switch_resource_alloc(struct i40e_hw *hw,
 	struct i40e_aqc_get_switch_resource_alloc *cmd_resp =
 		(struct i40e_aqc_get_switch_resource_alloc *)&desc.params.raw;
 	i40e_status status;
-	u16 length = count
-		   * sizeof(struct i40e_aqc_switch_resource_alloc_element_resp);
+	u16 length = count * sizeof(*buf);
 
 	i40e_fill_default_direct_cmd_desc(&desc,
 					i40e_aqc_opc_get_switch_resource_alloc);
@@ -3234,7 +3576,7 @@ i40e_status i40e_aq_get_switch_resource_alloc(struct i40e_hw *hw,
 
 	status = i40e_asq_send_command(hw, &desc, buf, length, cmd_details);
 
-	if (!status)
+	if (!status && num_entries)
 		*num_entries = cmd_resp->num_entries;
 
 	return status;
@@ -3649,7 +3991,7 @@ i40e_status i40e_aq_add_statistics(struct i40e_hw *hw, u16 seid,
 
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 
-	if (!status)
+	if (!status && stat_index)
 		*stat_index = LE16_TO_CPU(cmd_resp->stat_index);
 
 	return status;
@@ -3880,6 +4222,40 @@ i40e_status i40e_aq_config_vsi_tc_bw(struct i40e_hw *hw,
 	return i40e_aq_tx_sched_cmd(hw, seid, (void *)bw_data, sizeof(*bw_data),
 				    i40e_aqc_opc_configure_vsi_tc_bw,
 				    cmd_details);
+}
+
+/**
+ * i40e_aq_config_switch_comp_ets - Enable/Disable/Modify ETS on the port
+ * @hw: pointer to the hw struct
+ * @seid: seid of the switching component connected to Physical Port
+ * @ets_data: Buffer holding ETS parameters
+ * @cmd_details: pointer to command details structure or NULL
+ **/
+i40e_status i40e_aq_config_switch_comp_ets(struct i40e_hw *hw,
+		u16 seid,
+		struct i40e_aqc_configure_switching_comp_ets_data *ets_data,
+		enum i40e_admin_queue_opc opcode,
+		struct i40e_asq_cmd_details *cmd_details)
+{
+	return i40e_aq_tx_sched_cmd(hw, seid, (void *)ets_data,
+				    sizeof(*ets_data), opcode, cmd_details);
+}
+
+/**
+ * i40e_aq_config_switch_comp_bw_config - Config Switch comp BW Alloc per TC
+ * @hw: pointer to the hw struct
+ * @seid: seid of the switching component
+ * @bw_data: Buffer holding enabled TCs, relative/absolute TC BW limit/credits
+ * @cmd_details: pointer to command details structure or NULL
+ **/
+i40e_status i40e_aq_config_switch_comp_bw_config(struct i40e_hw *hw,
+	u16 seid,
+	struct i40e_aqc_configure_switching_comp_bw_config_data *bw_data,
+	struct i40e_asq_cmd_details *cmd_details)
+{
+	return i40e_aq_tx_sched_cmd(hw, seid, (void *)bw_data, sizeof(*bw_data),
+			    i40e_aqc_opc_configure_switching_comp_bw_config,
+			    cmd_details);
 }
 
 /**
@@ -4236,8 +4612,7 @@ i40e_status i40e_aq_add_cloud_filters(struct i40e_hw *hw,
 	i40e_fill_default_direct_cmd_desc(&desc,
 					  i40e_aqc_opc_add_cloud_filters);
 
-	buff_len = sizeof(struct i40e_aqc_add_remove_cloud_filters_element_data) *
-			  filter_count;
+	buff_len = filter_count * sizeof(*filters);
 	desc.datalen = CPU_TO_LE16(buff_len);
 	desc.flags |= CPU_TO_LE16((u16)(I40E_AQ_FLAG_BUF | I40E_AQ_FLAG_RD));
 	cmd->num_filters = filter_count;
@@ -4274,8 +4649,7 @@ i40e_status i40e_aq_remove_cloud_filters(struct i40e_hw *hw,
 	i40e_fill_default_direct_cmd_desc(&desc,
 					  i40e_aqc_opc_remove_cloud_filters);
 
-	buff_len = sizeof(struct i40e_aqc_add_remove_cloud_filters_element_data) *
-		filter_count;
+	buff_len = filter_count * sizeof(*filters);
 	desc.datalen = CPU_TO_LE16(buff_len);
 	desc.flags |= CPU_TO_LE16((u16)(I40E_AQ_FLAG_BUF | I40E_AQ_FLAG_RD));
 	cmd->num_filters = filter_count;
@@ -4490,7 +4864,7 @@ i40e_status i40e_aq_alternate_write_done(struct i40e_hw *hw,
 	cmd->cmd_flags = CPU_TO_LE16(bios_mode);
 
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, NULL);
-	if (!status)
+	if (!status && reset_needed)
 		*reset_needed = ((LE16_TO_CPU(cmd->cmd_flags) &
 				 I40E_AQ_ALTERNATE_RESET_NEEDED) != 0);
 
@@ -4645,7 +5019,7 @@ i40e_status i40e_aq_configure_partition_bw(struct i40e_hw *hw,
 {
 	i40e_status status;
 	struct i40e_aq_desc desc;
-	u16 bwd_size = sizeof(struct i40e_aqc_configure_partition_bw_data);
+	u16 bwd_size = sizeof(*bw_data);
 
 	i40e_fill_default_direct_cmd_desc(&desc,
 				i40e_aqc_opc_configure_partition_bw);
