@@ -56,6 +56,13 @@
 #include <linux/ethtool.h>
 #include <linux/if_vlan.h>
 
+/* utsrelease.h changed locations in 2.6.33 */
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,33) )
+#include <linux/utsrelease.h>
+#else
+#include <generated/utsrelease.h>
+#endif
+
 /* NAPI enable/disable flags here */
 #define NAPI
 
@@ -714,6 +721,58 @@ struct _kc_ethtool_pauseparam {
 /* NOTE: RHEL_RELEASE_* introduced in RHEL4.5 */
 #define RHEL_RELEASE_CODE 0
 #endif
+
+/* Ubuntu Release ABI is the 4th digit of their kernel version. You can find
+ * it in /usr/src/linux/$(uname -r)/include/generated/utsrelease.h for new
+ * enough versions of Ubuntu. Otherwise you can simply see it in the output of
+ * uname as the 4th digit of the kernel. The UTS_UBUNTU_RELEASE_ABI is not in
+ * the linux-source package, but in the linux-headers package. It begins to
+ * appear in later releases of 14.04 and 14.10.
+ *
+ * Ex:
+ * <Ubuntu 14.04.1>
+ *  $uname -r
+ *  3.13.0-45-generic
+ * ABI is 45
+ *
+ * <Ubuntu 14.10>
+ *  $uname -r
+ *  3.16.0-23-generic
+ * ABI is 23
+ */
+#ifndef UTS_UBUNTU_RELEASE_ABI
+#define UTS_UBUNTU_RELEASE_ABI 0
+#define UBUNTU_VERSION_CODE 0
+#else
+/* Ubuntu does not provide actual release version macro, so we use the kernel
+ * version plus the ABI to generate a unique version code specific to Ubuntu.
+ * In addition, we mask the lower 8 bits of LINUX_VERSION_CODE in order to
+ * ignore differences in sublevel which are not important since we have the
+ * ABI value. Otherwise, it becomes impossible to correlate ABI to version for
+ * ordering checks.
+ */
+#define UBUNTU_VERSION_CODE (((LINUX_VERSION_CODE & ~0xFF) << 8) + (UTS_UBUNTU_RELEASE_ABI))
+
+#if UTS_UBUNTU_RELEASE_ABI > 255
+#error UTS_UBUNTU_RELEASE_ABI is too large...
+#endif /* UTS_UBUNTU_RELEASE_ABI > 255 */
+
+#if ( LINUX_VERSION_CODE <= KERNEL_VERSION(3,0,0) )
+/* Our version code scheme does not make sense for non 3.x or newer kernels,
+ * and we have no support in kcompat for this scenario. Thus, treat this as a
+ * non-Ubuntu kernel. Possibly might be better to error here.
+ */
+#define UTS_UBUNTU_RELEASE_ABI 0
+#define UBUNTU_VERSION_CODE 0
+#endif
+
+#endif
+
+/* Note that the 3rd digit is always zero, and will be ignored. This is
+ * because Ubuntu kernels are based on x.y.0-ABI values, and while their linux
+ * version codes are 3 digit, this 3rd digit is superseded by the ABI value.
+ */
+#define UBUNTU_VERSION(a,b,c,d) ((KERNEL_VERSION(a,b,0) << 8) + (d))
 
 /* SuSE version macro is the same as Linux kernel version */
 #ifndef SLE_VERSION
@@ -4111,7 +4170,12 @@ extern int __kc_dma_set_mask_and_coherent(struct device *dev, u64 mask);
 #endif
 #else /* >= 3.13.0 */
 #define HAVE_VXLAN_CHECKS
+#if (UBUNTU_VERSION_CODE && UBUNTU_VERSION_CODE >= UBUNTU_VERSION(3,13,0,24))
+#define HAVE_NDO_SELECT_QUEUE_ACCEL_FALLBACK
+#else
 #define HAVE_NDO_SELECT_QUEUE_ACCEL
+#endif
+#define HAVE_NET_GET_RANDOM_ONCE
 #endif
 
 /*****************************************************************************/
@@ -4195,8 +4259,12 @@ static inline void __kc_ether_addr_copy(u8 *dst, const u8 *src)
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,15,0) )
+
+#if (!( UBUNTU_VERSION_CODE && UBUNTU_VERSION_CODE >= UBUNTU_VERSION(3,13,0,30)))
 #define u64_stats_fetch_begin_irq u64_stats_fetch_begin_bh
 #define u64_stats_fetch_retry_irq u64_stats_fetch_retry_bh
+#endif
+
 #else
 #define HAVE_PTP_1588_CLOCK_PINS
 #define HAVE_NETDEV_PORT
