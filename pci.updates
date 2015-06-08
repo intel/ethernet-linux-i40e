@@ -28,6 +28,7 @@
 		8086 0008  Ethernet Converged Network Adapter X710-2
 		8086 0009  Ethernet Converged Network Adapter X710-4
 		8086 000a  Ethernet Converged Network Adapter X710-2
+		8086 4005  Ethernet Controller XL710 for 10 Gigabit SFP+
 	1580  Ethernet Controller XL710 for 40GbE backplane
 	1581  Ethernet Controller X710 for 10GbE backplane
 		1028 0000  Ethernet 10G X710-k bNDC
@@ -51,3 +52,6 @@
 	1586  Ethernet Controller X710 for 10GBASE-T
 		108e 0000  Ethernet Controller X710 for 10GBASE-T
 		108e 4857  Ethernet Controller X710 for 10GBASE-T
+	1587  Ethernet Controller XL710 for 20GbE backplane
+		103c 0000  HP Flex-20 20Gb 2-port 660FLB Adapter
+		103c 22fe  HP Flex-20 20Gb 2-port 660FLB Adapter

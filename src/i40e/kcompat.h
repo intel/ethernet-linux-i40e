@@ -56,11 +56,14 @@
 #include <linux/ethtool.h>
 #include <linux/if_vlan.h>
 
+/* UTS_RELEASE is in a different header starting in kernel 2.6.18 */
+#ifndef UTS_RELEASE
 /* utsrelease.h changed locations in 2.6.33 */
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,33) )
 #include <linux/utsrelease.h>
 #else
 #include <generated/utsrelease.h>
+#endif
 #endif
 
 /* NAPI enable/disable flags here */
@@ -791,6 +794,9 @@ struct _kc_ethtool_pauseparam {
 #elif ((LINUX_VERSION_CODE == KERNEL_VERSION(3,0,76)))
 /* SLES11 SP3 is 3.0.76 based */
 #define SLE_VERSION_CODE SLE_VERSION(11,3,0)
+#elif ((LINUX_VERSION_CODE == KERNEL_VERSION(3,0,101)))
+/* SLES11 SP4 is 3.0.101 based */
+#define SLE_VERSION_CODE SLE_VERSION(11,4,0)
 /* new SLES kernels must be added here with >= based on kernel
  * the idea is to order from newest to oldest and just catch all
  * of them using the >=
@@ -3698,6 +3704,7 @@ typedef u32 netdev_features_t;
 #if (SLE_VERSION_CODE && SLE_VERSION_CODE >= SLE_VERSION(11,3,0))
 #define HAVE_ETHTOOL_GRXFHINDIR_SIZE
 #endif /* SLE_VERSION(11,3,0) */
+#define netif_xmit_stopped(_q) netif_tx_queue_stopped(_q)
 #else /* ! < 3.3.0 */
 #define HAVE_ETHTOOL_GRXFHINDIR_SIZE
 #define HAVE_INT_NDO_VLAN_RX_ADD_VID
@@ -3795,7 +3802,9 @@ static inline void _kc_eth_random_addr(u8 *addr)
         addr[0] &= 0xfe; /* clear multicast */
         addr[0] |= 0x02; /* set local assignment */
 }
-#endif
+#endif /* eth_random_addr */
+#else /* < 3.6.0 */
+#define HAVE_STRUCT_PAGE_PFMEMALLOC
 #endif /* < 3.6.0 */
 
 /******************************************************************************/
@@ -4143,6 +4152,7 @@ extern int __kc_ndo_dflt_fdb_del(struct ndmsg *ndm, struct net_device *dev,
 #else /* >= 3.10.0 */
 #define HAVE_ENCAP_TSO_OFFLOAD
 #define USE_DEFAULT_FDB_DEL_DUMP
+#define HAVE_SKB_INNER_NETWORK_HEADER
 #endif /* >= 3.10.0 */
 
 /*****************************************************************************/
@@ -4381,12 +4391,22 @@ extern unsigned int __kc_eth_get_headlen(unsigned char *data, unsigned int max_l
 #endif
 #else /*  3.18.0 */
 #define HAVE_SKBUFF_CSUM_LEVEL
-#define HAVE_NDO_GSO_CHECK
+#define HAVE_SKB_XMIT_MORE
 #endif /* 3.18.0 */
+
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,18,4) )
+#else
+#define HAVE_NDO_FEATURES_CHECK
+#endif /* 3.18.4 */
 
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,19,0) )
 /* netdev_phys_port_id renamed to netdev_phys_item_id */
 #define netdev_phys_item_id netdev_phys_port_id
+#define NETDEV_RSS_KEY_LEN (13 * 4)
+#define netdev_rss_key_fill(buffer, len) __kc_netdev_rss_key_fill(buffer, len)
+extern void __kc_netdev_rss_key_fill(void *buffer, size_t len);
+#define SPEED_20000 20000
+#define SPEED_40000 40000
 #else
 #define HAVE_NDO_FDB_ADD_VID
 /* ethtool get/set_rxfh function got a new argument */
@@ -4396,6 +4416,10 @@ extern unsigned int __kc_eth_get_headlen(unsigned char *data, unsigned int max_l
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,20,0) )
 #else
 #define HAVE_INCLUDE_LINUX_TIMECOUNTER_H
+/* vlan_tx_xx functions got renamed to skb_vlan */
+#define vlan_tx_tag_get skb_vlan_tag_get
+#define vlan_tx_tag_present skb_vlan_tag_present
+#define HAVE_NDO_BRIDGE_SET_DEL_LINK_FLAGS
 #endif /* 3.20.0 */
 
 #endif /* _KCOMPAT_H_ */

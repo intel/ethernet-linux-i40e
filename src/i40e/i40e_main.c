@@ -56,7 +56,7 @@ static const char i40e_driver_string[] =
 
 #define DRV_VERSION_MAJOR 1
 #define DRV_VERSION_MINOR 2
-#define DRV_VERSION_BUILD 38
+#define DRV_VERSION_BUILD 46
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	     __stringify(DRV_VERSION_MINOR) "." \
 	     __stringify(DRV_VERSION_BUILD) DRV_HW_PERF DRV_FPGA DRV_A0 DRV_KERN
@@ -91,6 +91,7 @@ static DEFINE_PCI_DEVICE_TABLE(i40e_pci_tbl) = {
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_QSFP_B), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_QSFP_C), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_10G_BASE_T), 0},
+	{PCI_VDEVICE(INTEL, I40E_DEV_ID_20G_KR2), 0},
 	/* required last entry */
 	{0, }
 };
@@ -4971,6 +4972,9 @@ static void i40e_print_link_message(struct i40e_vsi *vsi, bool isup)
 	case I40E_LINK_SPEED_40GB:
 		strncpy(speed, "40 Gbps", SPEED_SIZE);
 		break;
+	case I40E_LINK_SPEED_20GB:
+		strncpy(speed, "20 Gbps", SPEED_SIZE);
+		break;
 	case I40E_LINK_SPEED_10GB:
 		strncpy(speed, "10 Gbps", SPEED_SIZE);
 		break;
@@ -8282,7 +8286,7 @@ static void i40e_del_vxlan_port(struct net_device *netdev,
 #endif /* HAVE_VXLAN_RX_OFFLOAD */
 #ifdef HAVE_NDO_GET_PHYS_PORT_ID
 static int i40e_get_phys_port_id(struct net_device *netdev,
-				 struct netdev_phys_port_id *ppid)
+				 struct netdev_phys_item_id *ppid)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_pf *pf = np->vsi->back;
@@ -8304,11 +8308,17 @@ static int i40e_get_phys_port_id(struct net_device *netdev,
 static int i40e_ndo_fdb_add(struct ndmsg *ndm, struct nlattr *tb[],
 			     struct net_device *dev,
 			     const unsigned char *addr,
+#ifdef HAVE_NDO_FDB_ADD_VID
+			     u16 vid,
+#endif
 			     u16 flags)
 #else
 static int i40e_ndo_fdb_add(struct ndmsg *ndm,
 			     struct net_device *dev,
 			     unsigned char *addr,
+#ifdef HAVE_NDO_FDB_ADD_VID
+			     u16 vid,
+#endif
 			     u16 flags)
 #endif
 {
@@ -8345,11 +8355,17 @@ static int i40e_ndo_fdb_add(struct ndmsg *ndm,
 #ifdef USE_CONST_DEV_UC_CHAR
 static int i40e_ndo_fdb_del(struct ndmsg *ndm,
 			     struct net_device *dev,
-			     const unsigned char *addr)
+			     const unsigned char *addr,
+#ifdef HAVE_NDO_FDB_ADD_VID
+			     u16 vid)
+#endif
 #else
 static int i40e_ndo_fdb_del(struct ndmsg *ndm,
 			     struct net_device *dev,
-			     unsigned char *addr)
+			     unsigned char *addr,
+#ifdef HAVE_NDO_FDB_ADD_VID
+			     u16 vid)
+#endif
 #endif
 {
 	struct i40e_netdev_priv *np = netdev_priv(dev);
@@ -8496,7 +8512,11 @@ static int i40e_ndo_bridge_getlink(struct sk_buff *skb, u32 pid, u32 seq,
 	if (!veb)
 		return 0;
 
+#ifdef HAVE_NDO_FDB_ADD_VID
+	return ndo_dflt_bridge_getlink(skb, pid, seq, dev, veb->bridge_mode, 0, 0);
+#else
 	return ndo_dflt_bridge_getlink(skb, pid, seq, dev, veb->bridge_mode);
+#endif
 }
 #endif /* HAVE_BRIDGE_ATTRIBS */
 #endif /* HAVE_FDB_OPS */
@@ -10189,6 +10209,7 @@ static int i40e_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	struct i40e_pf *pf;
 	struct i40e_hw *hw;
 	static u16 pfs_found;
+	u16 wol_nvm_bits;
 	u32 ioremap_len;
 	u16 link_status;
 	int err = 0;
@@ -10396,8 +10417,12 @@ static int i40e_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	pf->flags |= I40E_FLAG_NEED_LINK_UPDATE;
 	pf->link_check_timeout = jiffies;
 
-	/* WoL defaults to disabled */
-	pf->wol_en = false;
+	/* NVM bit on means WoL disabled for the port */
+	i40e_read_nvm_word(hw, I40E_SR_NVM_WAKE_ON_LAN, &wol_nvm_bits);
+	if ((1 << hw->port) & wol_nvm_bits || hw->partition_id != 1)
+		pf->wol_en = false;
+	else
+		pf->wol_en = true;
 	device_set_wakeup_enable(&pf->pdev->dev, pf->wol_en);
 
 	/* set up the main switch operations */

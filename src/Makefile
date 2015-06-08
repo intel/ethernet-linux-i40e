@@ -103,11 +103,12 @@ endif
 KVER_CODE := $(shell $(CC) $(EXTRA_CFLAGS) -E -dM $(VSP) 2> /dev/null |\
 	grep -m 1 LINUX_VERSION_CODE | awk '{ print $$3 }' | sed 's/\"//g')
 
-# set the install path before and after 3.2.0
-ifeq (1,$(shell [ $(KVER_CODE) -lt 197120 ] && echo 1 || echo 0))
-INSTDIR := /lib/modules/$(KVER)/kernel/drivers/net
-else
+# set the install path before and after 3.2.0, and handle
+# distros like SLES 11 that backported the directories
+ifeq (1,$(shell [ -d /lib/modules/$(KVER)/kernel/drivers/net/ethernet/intel ] && echo 1 || echo 0))
 INSTDIR := /lib/modules/$(KVER)/kernel/drivers/net/ethernet/intel
+else
+INSTDIR := /lib/modules/$(KVER)/kernel/drivers/net
 endif
 
 # abort the build on kernels older than 2.6.32
