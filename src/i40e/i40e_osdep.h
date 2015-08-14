@@ -67,14 +67,12 @@ static inline void writeq(__u64 val, volatile void __iomem *addr)
 
 #define hw_dbg(hw, S, A...)	do {} while (0)
 
-#define I40E_TRACE_REG 0
 #define wr32(a, reg, value)	writel((value), ((a)->hw_addr + (reg)))
 #define rd32(a, reg)		readl((a)->hw_addr + (reg))
 
 #define wr64(a, reg, value)	writeq((value), ((a)->hw_addr + (reg)))
 #define rd64(a, reg)		readq((a)->hw_addr + (reg))
 #define i40e_flush(a)		readl((a)->hw_addr + I40E_GLGEN_STAT)
-
 /* memory allocation tracking */
 struct i40e_dma_mem {
 	void *va;

@@ -113,15 +113,15 @@ static ssize_t i40e_cfgfs_vsi_attr_show(struct config_item *item,
 	if (strncmp(attr->ca_name, "min_bw", 6) == 0)
 		count = sprintf(page, "%s %s %d%%\n",
 				i40e_cfgfs_vsi->vsi->netdev->name,
-				(pf->npar_min_bw & I40E_ALT_BW_RELATIVE_MASK) ?
+				(pf->min_bw & I40E_ALT_BW_RELATIVE_MASK) ?
 				"Relative Min BW" : "Absolute Min BW",
-				pf->npar_min_bw & I40E_ALT_BW_VALUE_MASK);
+				pf->min_bw & I40E_ALT_BW_VALUE_MASK);
 	else if (strncmp(attr->ca_name, "max_bw", 6) == 0)
 		count = sprintf(page, "%s %s %d%%\n",
 				i40e_cfgfs_vsi->vsi->netdev->name,
-				(pf->npar_max_bw & I40E_ALT_BW_RELATIVE_MASK) ?
+				(pf->max_bw & I40E_ALT_BW_RELATIVE_MASK) ?
 				"Relative Max BW" : "Absolute Max BW",
-				pf->npar_max_bw & I40E_ALT_BW_VALUE_MASK);
+				pf->max_bw & I40E_ALT_BW_VALUE_MASK);
 	else if (strncmp(attr->ca_name, "ports", 5) == 0)
 		count = sprintf(page, "%d\n",
 				pf->hw.num_ports);
@@ -163,28 +163,28 @@ static ssize_t i40e_cfgfs_vsi_attr_store(struct config_item *item,
 		return -ERANGE;
 
 	if (strncmp(attr->ca_name, "min_bw", 6) == 0) {
-		if (tmp > (pf->npar_max_bw & I40E_ALT_BW_VALUE_MASK))
+		if (tmp > (pf->max_bw & I40E_ALT_BW_VALUE_MASK))
 			return -ERANGE;
 		/* Preserve the valid and relative BW bits - the rest is
 		 * don't care.
 		 */
-		pf->npar_min_bw &= (I40E_ALT_BW_RELATIVE_MASK |
+		pf->min_bw &= (I40E_ALT_BW_RELATIVE_MASK |
 				    I40E_ALT_BW_VALID_MASK);
-		pf->npar_min_bw |= (tmp & I40E_ALT_BW_VALUE_MASK);
-		i40e_set_npar_bw_setting(pf);
+		pf->min_bw |= (tmp & I40E_ALT_BW_VALUE_MASK);
+		i40e_set_partition_bw_setting(pf);
 	} else if (strncmp(attr->ca_name, "max_bw", 6) == 0) {
 		if (tmp < 1 ||
-		    tmp < (pf->npar_min_bw & I40E_ALT_BW_VALUE_MASK))
+		    tmp < (pf->min_bw & I40E_ALT_BW_VALUE_MASK))
 			return -ERANGE;
 		/* Preserve the valid and relative BW bits - the rest is
 		 * don't care.
 		 */
-		pf->npar_max_bw &= (I40E_ALT_BW_RELATIVE_MASK |
+		pf->max_bw &= (I40E_ALT_BW_RELATIVE_MASK |
 				    I40E_ALT_BW_VALID_MASK);
-		pf->npar_max_bw |= (tmp & I40E_ALT_BW_VALUE_MASK);
-		i40e_set_npar_bw_setting(pf);
+		pf->max_bw |= (tmp & I40E_ALT_BW_VALUE_MASK);
+		i40e_set_partition_bw_setting(pf);
 	} else if (strncmp(attr->ca_name, "commit", 6) == 0 && tmp == 1) {
-		if (i40e_commit_npar_bw_setting(pf))
+		if (i40e_commit_partition_bw_setting(pf))
 			return -EIO;
 	}
 

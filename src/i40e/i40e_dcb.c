@@ -292,6 +292,188 @@ static void i40e_parse_ieee_tlv(struct i40e_lldp_org_tlv *tlv,
 }
 
 /**
+ * i40e_parse_cee_pgcfg_tlv
+ * @tlv: CEE DCBX PG CFG TLV
+ * @dcbcfg: Local store to update ETS CFG data
+ *
+ * Parses CEE DCBX PG CFG TLV
+ **/
+static void i40e_parse_cee_pgcfg_tlv(struct i40e_cee_feat_tlv *tlv,
+				     struct i40e_dcbx_config *dcbcfg)
+{
+	struct i40e_dcb_ets_config *etscfg;
+	u8 *buf = tlv->tlvinfo;
+	u16 offset = 0;
+	u8 priority;
+	int i;
+
+	etscfg = &dcbcfg->etscfg;
+
+	if (tlv->en_will_err & I40E_CEE_FEAT_TLV_WILLING_MASK)
+		etscfg->willing = 1;
+
+	etscfg->cbs = 0;
+	/* Priority Group Table (4 octets)
+	 * Octets:|    1    |    2    |    3    |    4    |
+	 *        -----------------------------------------
+	 *        |pri0|pri1|pri2|pri3|pri4|pri5|pri6|pri7|
+	 *        -----------------------------------------
+	 *   Bits:|7  4|3  0|7  4|3  0|7  4|3  0|7  4|3  0|
+	 *        -----------------------------------------
+	 */
+	for (i = 0; i < 4; i++) {
+		priority = (u8)((buf[offset] & I40E_CEE_PGID_PRIO_1_MASK) >>
+				 I40E_CEE_PGID_PRIO_1_SHIFT);
+		etscfg->prioritytable[i * 2] =  priority;
+		priority = (u8)((buf[offset] & I40E_CEE_PGID_PRIO_0_MASK) >>
+				 I40E_CEE_PGID_PRIO_0_SHIFT);
+		etscfg->prioritytable[i * 2 + 1] = priority;
+		offset++;
+	}
+
+	/* PG Percentage Table (8 octets)
+	 * Octets:| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+	 *        ---------------------------------
+	 *        |pg0|pg1|pg2|pg3|pg4|pg5|pg6|pg7|
+	 *        ---------------------------------
+	 */
+	for (i = 0; i < I40E_MAX_TRAFFIC_CLASS; i++)
+		etscfg->tcbwtable[i] = buf[offset++];
+
+	/* Number of TCs supported (1 octet) */
+	etscfg->maxtcs = buf[offset];
+}
+
+/**
+ * i40e_parse_cee_pfccfg_tlv
+ * @tlv: CEE DCBX PFC CFG TLV
+ * @dcbcfg: Local store to update PFC CFG data
+ *
+ * Parses CEE DCBX PFC CFG TLV
+ **/
+static void i40e_parse_cee_pfccfg_tlv(struct i40e_cee_feat_tlv *tlv,
+				      struct i40e_dcbx_config *dcbcfg)
+{
+	u8 *buf = tlv->tlvinfo;
+
+	if (tlv->en_will_err & I40E_CEE_FEAT_TLV_WILLING_MASK)
+		dcbcfg->pfc.willing = 1;
+
+	/* ------------------------
+	 * | PFC Enable | PFC TCs |
+	 * ------------------------
+	 * | 1 octet    | 1 octet |
+	 */
+	dcbcfg->pfc.pfcenable = buf[0];
+	dcbcfg->pfc.pfccap = buf[1];
+}
+
+/**
+ * i40e_parse_cee_app_tlv
+ * @tlv: CEE DCBX APP TLV
+ * @dcbcfg: Local store to update APP PRIO data
+ *
+ * Parses CEE DCBX APP PRIO TLV
+ **/
+static void i40e_parse_cee_app_tlv(struct i40e_cee_feat_tlv *tlv,
+				   struct i40e_dcbx_config *dcbcfg)
+{
+	u16 length, typelength, offset = 0;
+	struct i40e_cee_app_prio *app;
+	u8 i, up, selector;
+
+	typelength = ntohs(tlv->hdr.typelen);
+	length = (u16)((typelength & I40E_LLDP_TLV_LEN_MASK) >>
+		       I40E_LLDP_TLV_LEN_SHIFT);
+
+	dcbcfg->numapps = length/sizeof(*app);
+	if (!dcbcfg->numapps)
+		return;
+
+	for (i = 0; i < dcbcfg->numapps; i++) {
+		app = (struct i40e_cee_app_prio *)(tlv->tlvinfo + offset);
+		for (up = 0; up < I40E_MAX_USER_PRIORITY; up++) {
+			if (app->prio_map & BIT(up))
+				break;
+		}
+		dcbcfg->app[i].priority = up;
+		/* Get Selector from lower 2 bits, and convert to IEEE */
+		selector = (app->upper_oui_sel & I40E_CEE_APP_SELECTOR_MASK);
+		if (selector == I40E_CEE_APP_SEL_ETHTYPE)
+			dcbcfg->app[i].selector = I40E_APP_SEL_ETHTYPE;
+		else if (selector == I40E_CEE_APP_SEL_TCPIP)
+			dcbcfg->app[i].selector = I40E_APP_SEL_TCPIP;
+		else
+			/* Keep selector as it is for unknown types */
+			dcbcfg->app[i].selector = selector;
+		dcbcfg->app[i].protocolid = ntohs(app->protocol);
+		/* Move to next app */
+		offset += sizeof(*app);
+	}
+}
+
+/**
+ * i40e_parse_cee_tlv
+ * @tlv: CEE DCBX TLV
+ * @dcbcfg: Local store to update DCBX config data
+ *
+ * Get the TLV subtype and send it to parsing function
+ * based on the subtype value
+ **/
+static void i40e_parse_cee_tlv(struct i40e_lldp_org_tlv *tlv,
+			       struct i40e_dcbx_config *dcbcfg)
+{
+	u16 len, tlvlen, sublen, typelength;
+	struct i40e_cee_feat_tlv *sub_tlv;
+	u8 subtype, feat_tlv_count = 0;
+	u32 ouisubtype;
+
+	ouisubtype = ntohl(tlv->ouisubtype);
+	subtype = (u8)((ouisubtype & I40E_LLDP_TLV_SUBTYPE_MASK) >>
+		       I40E_LLDP_TLV_SUBTYPE_SHIFT);
+	/* Return if not CEE DCBX */
+	if (subtype != I40E_CEE_DCBX_TYPE)
+		return;
+
+	typelength = ntohs(tlv->typelength);
+	tlvlen = (u16)((typelength & I40E_LLDP_TLV_LEN_MASK) >>
+			I40E_LLDP_TLV_LEN_SHIFT);
+	len = sizeof(tlv->typelength) + sizeof(ouisubtype) +
+	      sizeof(struct i40e_cee_ctrl_tlv);
+	/* Return if no CEE DCBX Feature TLVs */
+	if (tlvlen <= len)
+		return;
+
+	sub_tlv = (struct i40e_cee_feat_tlv *)((char *)tlv + len);
+	while (feat_tlv_count < I40E_CEE_MAX_FEAT_TYPE) {
+		typelength = ntohs(sub_tlv->hdr.typelen);
+		sublen = (u16)((typelength &
+				I40E_LLDP_TLV_LEN_MASK) >>
+				I40E_LLDP_TLV_LEN_SHIFT);
+		subtype = (u8)((typelength & I40E_LLDP_TLV_TYPE_MASK) >>
+				I40E_LLDP_TLV_TYPE_SHIFT);
+		switch (subtype) {
+		case I40E_CEE_SUBTYPE_PG_CFG:
+			i40e_parse_cee_pgcfg_tlv(sub_tlv, dcbcfg);
+			break;
+		case I40E_CEE_SUBTYPE_PFC_CFG:
+			i40e_parse_cee_pfccfg_tlv(sub_tlv, dcbcfg);
+			break;
+		case I40E_CEE_SUBTYPE_APP_PRI:
+			i40e_parse_cee_app_tlv(sub_tlv, dcbcfg);
+			break;
+		default:
+			return; /* Invalid Sub-type return */
+		}
+		feat_tlv_count++;
+		/* Move to next sub TLV */
+		sub_tlv = (struct i40e_cee_feat_tlv *)((char *)sub_tlv +
+						sizeof(sub_tlv->hdr.typelen) +
+						sublen);
+	}
+}
+
+/**
  * i40e_parse_org_tlv
  * @tlv: Organization specific TLV
  * @dcbcfg: Local store to update ETS REC data
@@ -311,6 +493,9 @@ static void i40e_parse_org_tlv(struct i40e_lldp_org_tlv *tlv,
 	switch (oui) {
 	case I40E_IEEE_8021QAZ_OUI:
 		i40e_parse_ieee_tlv(tlv, dcbcfg);
+		break;
+	case I40E_CEE_DCBX_OUI:
+		i40e_parse_cee_tlv(tlv, dcbcfg);
 		break;
 	default:
 		break;
@@ -419,7 +604,7 @@ static void i40e_cee_to_dcb_v1_config(
 {
 	u16 status, tlv_status = LE16_TO_CPU(cee_cfg->tlv_status);
 	u16 app_prio = LE16_TO_CPU(cee_cfg->oper_app_prio);
-	u8 i, tc, err, sync, oper;
+	u8 i, tc, err;
 
 	/* CEE PG data to ETS config */
 	dcbcfg->etscfg.maxtcs = cee_cfg->oper_num_tc;
@@ -459,9 +644,7 @@ static void i40e_cee_to_dcb_v1_config(
 	status = (tlv_status & I40E_AQC_CEE_APP_STATUS_MASK) >>
 		  I40E_AQC_CEE_APP_STATUS_SHIFT;
 	err = (status & I40E_TLV_STATUS_ERR) ? 1 : 0;
-	sync = (status & I40E_TLV_STATUS_SYNC) ? 1 : 0;
-	oper = (status & I40E_TLV_STATUS_OPER) ? 1 : 0;
-	/* Add APPs if Error is False and Oper/Sync is True */
+	/* Add APPs if Error is False */
 	if (!err) {
 		/* CEE operating configuration supports FCoE/iSCSI/FIP only */
 		dcbcfg->numapps = I40E_CEE_OPER_MAX_APPS;
@@ -507,14 +690,17 @@ static void i40e_cee_to_dcb_config(
 	/* CEE PG data to ETS config */
 	dcbcfg->etscfg.maxtcs = cee_cfg->oper_num_tc;
 
+	/* Note that the FW creates the oper_prio_tc nibbles reversed
+	 * from those in the CEE Priority Group sub-TLV.
+	 */
 	for (i = 0; i < 4; i++) {
-		tc = (u8)((cee_cfg->oper_prio_tc[i] &
-			 I40E_CEE_PGID_PRIO_1_MASK) >>
-			 I40E_CEE_PGID_PRIO_1_SHIFT);
-		dcbcfg->etscfg.prioritytable[i*2] =  tc;
 		tc = (u8)((cee_cfg->oper_prio_tc[i] &
 			 I40E_CEE_PGID_PRIO_0_MASK) >>
 			 I40E_CEE_PGID_PRIO_0_SHIFT);
+		dcbcfg->etscfg.prioritytable[i*2] =  tc;
+		tc = (u8)((cee_cfg->oper_prio_tc[i] &
+			 I40E_CEE_PGID_PRIO_1_MASK) >>
+			 I40E_CEE_PGID_PRIO_1_SHIFT);
 		dcbcfg->etscfg.prioritytable[i*2 + 1] = tc;
 	}
 
@@ -536,37 +722,85 @@ static void i40e_cee_to_dcb_config(
 	dcbcfg->pfc.pfcenable = cee_cfg->oper_pfc_en;
 	dcbcfg->pfc.pfccap = I40E_MAX_TRAFFIC_CLASS;
 
-	status = (tlv_status & I40E_AQC_CEE_APP_STATUS_MASK) >>
-		  I40E_AQC_CEE_APP_STATUS_SHIFT;
+	i = 0;
+	status = (tlv_status & I40E_AQC_CEE_FCOE_STATUS_MASK) >>
+		  I40E_AQC_CEE_FCOE_STATUS_SHIFT;
 	err = (status & I40E_TLV_STATUS_ERR) ? 1 : 0;
 	sync = (status & I40E_TLV_STATUS_SYNC) ? 1 : 0;
 	oper = (status & I40E_TLV_STATUS_OPER) ? 1 : 0;
-	/* Add APPs if Error is False and Oper/Sync is True */
+	/* Add FCoE APP if Error is False and Oper/Sync is True */
 	if (!err && sync && oper) {
-		/* CEE operating configuration supports FCoE/iSCSI/FIP only */
-		dcbcfg->numapps = I40E_CEE_OPER_MAX_APPS;
-
 		/* FCoE APP */
-		dcbcfg->app[0].priority =
+		dcbcfg->app[i].priority =
 			(app_prio & I40E_AQC_CEE_APP_FCOE_MASK) >>
 			 I40E_AQC_CEE_APP_FCOE_SHIFT;
-		dcbcfg->app[0].selector = I40E_APP_SEL_ETHTYPE;
-		dcbcfg->app[0].protocolid = I40E_APP_PROTOID_FCOE;
+		dcbcfg->app[i].selector = I40E_APP_SEL_ETHTYPE;
+		dcbcfg->app[i].protocolid = I40E_APP_PROTOID_FCOE;
+		i++;
+	}
 
+	status = (tlv_status & I40E_AQC_CEE_ISCSI_STATUS_MASK) >>
+		  I40E_AQC_CEE_ISCSI_STATUS_SHIFT;
+	err = (status & I40E_TLV_STATUS_ERR) ? 1 : 0;
+	sync = (status & I40E_TLV_STATUS_SYNC) ? 1 : 0;
+	oper = (status & I40E_TLV_STATUS_OPER) ? 1 : 0;
+	/* Add iSCSI APP if Error is False and Oper/Sync is True */
+	if (!err && sync && oper) {
 		/* iSCSI APP */
-		dcbcfg->app[1].priority =
+		dcbcfg->app[i].priority =
 			(app_prio & I40E_AQC_CEE_APP_ISCSI_MASK) >>
 			 I40E_AQC_CEE_APP_ISCSI_SHIFT;
-		dcbcfg->app[1].selector = I40E_APP_SEL_TCPIP;
-		dcbcfg->app[1].protocolid = I40E_APP_PROTOID_ISCSI;
+		dcbcfg->app[i].selector = I40E_APP_SEL_TCPIP;
+		dcbcfg->app[i].protocolid = I40E_APP_PROTOID_ISCSI;
+		i++;
+	}
 
+	status = (tlv_status & I40E_AQC_CEE_FIP_STATUS_MASK) >>
+		  I40E_AQC_CEE_FIP_STATUS_SHIFT;
+	err = (status & I40E_TLV_STATUS_ERR) ? 1 : 0;
+	sync = (status & I40E_TLV_STATUS_SYNC) ? 1 : 0;
+	oper = (status & I40E_TLV_STATUS_OPER) ? 1 : 0;
+	/* Add FIP APP if Error is False and Oper/Sync is True */
+	if (!err && sync && oper) {
 		/* FIP APP */
-		dcbcfg->app[2].priority =
+		dcbcfg->app[i].priority =
 			(app_prio & I40E_AQC_CEE_APP_FIP_MASK) >>
 			 I40E_AQC_CEE_APP_FIP_SHIFT;
-		dcbcfg->app[2].selector = I40E_APP_SEL_ETHTYPE;
-		dcbcfg->app[2].protocolid = I40E_APP_PROTOID_FIP;
+		dcbcfg->app[i].selector = I40E_APP_SEL_ETHTYPE;
+		dcbcfg->app[i].protocolid = I40E_APP_PROTOID_FIP;
+		i++;
 	}
+	dcbcfg->numapps = i;
+}
+
+/**
+ * i40e_get_ieee_dcb_config
+ * @hw: pointer to the hw struct
+ *
+ * Get IEEE mode DCB configuration from the Firmware
+ **/
+static i40e_status i40e_get_ieee_dcb_config(struct i40e_hw *hw)
+{
+	i40e_status ret = I40E_SUCCESS;
+
+	/* IEEE mode */
+	hw->local_dcbx_config.dcbx_mode = I40E_DCBX_MODE_IEEE;
+	/* Get Local DCB Config */
+	ret = i40e_aq_get_dcb_config(hw, I40E_AQ_LLDP_MIB_LOCAL, 0,
+				     &hw->local_dcbx_config);
+	if (ret)
+		goto out;
+
+	/* Get Remote DCB Config */
+	ret = i40e_aq_get_dcb_config(hw, I40E_AQ_LLDP_MIB_REMOTE,
+				     I40E_AQ_LLDP_BRIDGE_TYPE_NEAREST_BRIDGE,
+				     &hw->remote_dcbx_config);
+	/* Don't treat ENOENT as an error for Remote MIBs */
+	if (hw->aq.asq_last_status == I40E_AQ_RC_ENOENT)
+		ret = I40E_SUCCESS;
+
+out:
+	return ret;
 }
 
 /**
@@ -584,7 +818,7 @@ i40e_status i40e_get_dcb_config(struct i40e_hw *hw)
 	/* If Firmware version < v4.33 IEEE only */
 	if (((hw->aq.fw_maj_ver == 4) && (hw->aq.fw_min_ver < 33)) ||
 	    (hw->aq.fw_maj_ver < 4))
-		goto ieee;
+		return i40e_get_ieee_dcb_config(hw);
 
 	/* If Firmware version == v4.33 use old CEE struct */
 	if ((hw->aq.fw_maj_ver == 4) && (hw->aq.fw_min_ver == 33)) {
@@ -593,6 +827,8 @@ i40e_status i40e_get_dcb_config(struct i40e_hw *hw)
 		if (ret == I40E_SUCCESS) {
 			/* CEE mode */
 			hw->local_dcbx_config.dcbx_mode = I40E_DCBX_MODE_CEE;
+			hw->local_dcbx_config.tlv_status =
+					LE16_TO_CPU(cee_v1_cfg.tlv_status);
 			i40e_cee_to_dcb_v1_config(&cee_v1_cfg,
 						  &hw->local_dcbx_config);
 		}
@@ -602,6 +838,8 @@ i40e_status i40e_get_dcb_config(struct i40e_hw *hw)
 		if (ret == I40E_SUCCESS) {
 			/* CEE mode */
 			hw->local_dcbx_config.dcbx_mode = I40E_DCBX_MODE_CEE;
+			hw->local_dcbx_config.tlv_status =
+					LE32_TO_CPU(cee_cfg.tlv_status);
 			i40e_cee_to_dcb_config(&cee_cfg,
 					       &hw->local_dcbx_config);
 		}
@@ -609,16 +847,14 @@ i40e_status i40e_get_dcb_config(struct i40e_hw *hw)
 
 	/* CEE mode not enabled try querying IEEE data */
 	if (hw->aq.asq_last_status == I40E_AQ_RC_ENOENT)
-		goto ieee;
-	else
+		return i40e_get_ieee_dcb_config(hw);
+
+	if (ret != I40E_SUCCESS)
 		goto out;
 
-ieee:
-	/* IEEE mode */
-	hw->local_dcbx_config.dcbx_mode = I40E_DCBX_MODE_IEEE;
-	/* Get Local DCB Config */
+	/* Get CEE DCB Desired Config */
 	ret = i40e_aq_get_dcb_config(hw, I40E_AQ_LLDP_MIB_LOCAL, 0,
-				     &hw->local_dcbx_config);
+				     &hw->desired_dcbx_config);
 	if (ret)
 		goto out;
 
@@ -691,6 +927,334 @@ i40e_status i40e_init_dcb(struct i40e_hw *hw)
 	if (ret)
 		return ret;
 
+	return ret;
+}
+
+/**
+ * i40e_add_ieee_ets_tlv - Prepare ETS TLV in IEEE format
+ * @tlv: Fill the ETS config data in IEEE format
+ * @dcbcfg: Local store which holds the DCB Config
+ *
+ * Prepare IEEE 802.1Qaz ETS CFG TLV
+ **/
+static void i40e_add_ieee_ets_tlv(struct i40e_lldp_org_tlv *tlv,
+				  struct i40e_dcbx_config *dcbcfg)
+{
+	u8 priority0, priority1, maxtcwilling = 0;
+	struct i40e_dcb_ets_config *etscfg;
+	u16 offset = 0, typelength, i;
+	u8 *buf = tlv->tlvinfo;
+	u32 ouisubtype;
+
+	typelength = (u16)((I40E_TLV_TYPE_ORG << I40E_LLDP_TLV_TYPE_SHIFT) |
+			I40E_IEEE_ETS_TLV_LENGTH);
+	tlv->typelength = htons(typelength);
+
+	ouisubtype = (u32)((I40E_IEEE_8021QAZ_OUI << I40E_LLDP_TLV_OUI_SHIFT) |
+			I40E_IEEE_SUBTYPE_ETS_CFG);
+	tlv->ouisubtype = I40E_HTONL(ouisubtype);
+
+	/* First Octet post subtype
+	 * --------------------------
+	 * |will-|CBS  | Re-  | Max |
+	 * |ing  |     |served| TCs |
+	 * --------------------------
+	 * |1bit | 1bit|3 bits|3bits|
+	 */
+	etscfg = &dcbcfg->etscfg;
+	if (etscfg->willing)
+		maxtcwilling = BIT(I40E_IEEE_ETS_WILLING_SHIFT);
+	maxtcwilling |= etscfg->maxtcs & I40E_IEEE_ETS_MAXTC_MASK;
+	buf[offset] = maxtcwilling;
+
+	/* Move offset to Priority Assignment Table */
+	offset++;
+
+	/* Priority Assignment Table (4 octets)
+	 * Octets:|    1    |    2    |    3    |    4    |
+	 *        -----------------------------------------
+	 *        |pri0|pri1|pri2|pri3|pri4|pri5|pri6|pri7|
+	 *        -----------------------------------------
+	 *   Bits:|7  4|3  0|7  4|3  0|7  4|3  0|7  4|3  0|
+	 *        -----------------------------------------
+	 */
+	for (i = 0; i < 4; i++) {
+		priority0 = etscfg->prioritytable[i * 2] & 0xF;
+		priority1 = etscfg->prioritytable[i * 2 + 1] & 0xF;
+		buf[offset] = (priority0 << I40E_IEEE_ETS_PRIO_1_SHIFT) |
+				priority1;
+		offset++;
+	}
+
+	/* TC Bandwidth Table (8 octets)
+	 * Octets:| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+	 *        ---------------------------------
+	 *        |tc0|tc1|tc2|tc3|tc4|tc5|tc6|tc7|
+	 *        ---------------------------------
+	 */
+	for (i = 0; i < I40E_MAX_TRAFFIC_CLASS; i++)
+		buf[offset++] = etscfg->tcbwtable[i];
+
+	/* TSA Assignment Table (8 octets)
+	 * Octets:| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+	 *        ---------------------------------
+	 *        |tc0|tc1|tc2|tc3|tc4|tc5|tc6|tc7|
+	 *        ---------------------------------
+	 */
+	for (i = 0; i < I40E_MAX_TRAFFIC_CLASS; i++)
+		buf[offset++] = etscfg->tsatable[i];
+}
+
+/**
+ * i40e_add_ieee_etsrec_tlv - Prepare ETS Recommended TLV in IEEE format
+ * @tlv: Fill ETS Recommended TLV in IEEE format
+ * @dcbcfg: Local store which holds the DCB Config
+ *
+ * Prepare IEEE 802.1Qaz ETS REC TLV
+ **/
+static void i40e_add_ieee_etsrec_tlv(struct i40e_lldp_org_tlv *tlv,
+				     struct i40e_dcbx_config *dcbcfg)
+{
+	struct i40e_dcb_ets_config *etsrec;
+	u16 offset = 0, typelength, i;
+	u8 priority0, priority1;
+	u8 *buf = tlv->tlvinfo;
+	u32 ouisubtype;
+
+	typelength = (u16)((I40E_TLV_TYPE_ORG << I40E_LLDP_TLV_TYPE_SHIFT) |
+			I40E_IEEE_ETS_TLV_LENGTH);
+	tlv->typelength = htons(typelength);
+
+	ouisubtype = (u32)((I40E_IEEE_8021QAZ_OUI << I40E_LLDP_TLV_OUI_SHIFT) |
+			I40E_IEEE_SUBTYPE_ETS_REC);
+	tlv->ouisubtype = I40E_HTONL(ouisubtype);
+
+	etsrec = &dcbcfg->etsrec;
+	/* First Octet is reserved */
+	/* Move offset to Priority Assignment Table */
+	offset++;
+
+	/* Priority Assignment Table (4 octets)
+	 * Octets:|    1    |    2    |    3    |    4    |
+	 *        -----------------------------------------
+	 *        |pri0|pri1|pri2|pri3|pri4|pri5|pri6|pri7|
+	 *        -----------------------------------------
+	 *   Bits:|7  4|3  0|7  4|3  0|7  4|3  0|7  4|3  0|
+	 *        -----------------------------------------
+	 */
+	for (i = 0; i < 4; i++) {
+		priority0 = etsrec->prioritytable[i * 2] & 0xF;
+		priority1 = etsrec->prioritytable[i * 2 + 1] & 0xF;
+		buf[offset] = (priority0 << I40E_IEEE_ETS_PRIO_1_SHIFT) |
+				priority1;
+		offset++;
+	}
+
+	/* TC Bandwidth Table (8 octets)
+	 * Octets:| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+	 *        ---------------------------------
+	 *        |tc0|tc1|tc2|tc3|tc4|tc5|tc6|tc7|
+	 *        ---------------------------------
+	 */
+	for (i = 0; i < I40E_MAX_TRAFFIC_CLASS; i++)
+		buf[offset++] = etsrec->tcbwtable[i];
+
+	/* TSA Assignment Table (8 octets)
+	 * Octets:| 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
+	 *        ---------------------------------
+	 *        |tc0|tc1|tc2|tc3|tc4|tc5|tc6|tc7|
+	 *        ---------------------------------
+	 */
+	for (i = 0; i < I40E_MAX_TRAFFIC_CLASS; i++)
+		buf[offset++] = etsrec->tsatable[i];
+}
+
+ /**
+ * i40e_add_ieee_pfc_tlv - Prepare PFC TLV in IEEE format
+ * @tlv: Fill PFC TLV in IEEE format
+ * @dcbcfg: Local store to get PFC CFG data
+ *
+ * Prepare IEEE 802.1Qaz PFC CFG TLV
+ **/
+static void i40e_add_ieee_pfc_tlv(struct i40e_lldp_org_tlv *tlv,
+				  struct i40e_dcbx_config *dcbcfg)
+{
+	u8 *buf = tlv->tlvinfo;
+	u32 ouisubtype;
+	u16 typelength;
+
+	typelength = (u16)((I40E_TLV_TYPE_ORG << I40E_LLDP_TLV_TYPE_SHIFT) |
+			I40E_IEEE_PFC_TLV_LENGTH);
+	tlv->typelength = htons(typelength);
+
+	ouisubtype = (u32)((I40E_IEEE_8021QAZ_OUI << I40E_LLDP_TLV_OUI_SHIFT) |
+			I40E_IEEE_SUBTYPE_PFC_CFG);
+	tlv->ouisubtype = I40E_HTONL(ouisubtype);
+
+	/* ----------------------------------------
+	 * |will-|MBC  | Re-  | PFC |  PFC Enable  |
+	 * |ing  |     |served| cap |              |
+	 * -----------------------------------------
+	 * |1bit | 1bit|2 bits|4bits| 1 octet      |
+	 */
+	if (dcbcfg->pfc.willing)
+		buf[0] = BIT(I40E_IEEE_PFC_WILLING_SHIFT);
+
+	if (dcbcfg->pfc.mbc)
+		buf[0] |= BIT(I40E_IEEE_PFC_MBC_SHIFT);
+
+	buf[0] |= dcbcfg->pfc.pfccap & 0xF;
+	buf[1] = dcbcfg->pfc.pfcenable;
+}
+
+/**
+ * i40e_add_ieee_app_pri_tlv -  Prepare APP TLV in IEEE format
+ * @tlv: Fill APP TLV in IEEE format
+ * @dcbcfg: Local store to get APP CFG data
+ *
+ * Prepare IEEE 802.1Qaz APP CFG TLV
+ **/
+static void i40e_add_ieee_app_pri_tlv(struct i40e_lldp_org_tlv *tlv,
+				      struct i40e_dcbx_config *dcbcfg)
+{
+	u16 typelength, length, offset = 0;
+	u8 priority, selector, i = 0;
+	u8 *buf = tlv->tlvinfo;
+	u32 ouisubtype;
+
+	/* No APP TLVs then just return */
+	if (dcbcfg->numapps == 0)
+		return;
+	ouisubtype = (u32)((I40E_IEEE_8021QAZ_OUI << I40E_LLDP_TLV_OUI_SHIFT) |
+			I40E_IEEE_SUBTYPE_APP_PRI);
+	tlv->ouisubtype = I40E_HTONL(ouisubtype);
+
+	/* Move offset to App Priority Table */
+	offset++;
+	/* Application Priority Table (3 octets)
+	 * Octets:|         1          |    2    |    3    |
+	 *        -----------------------------------------
+	 *        |Priority|Rsrvd| Sel |    Protocol ID    |
+	 *        -----------------------------------------
+	 *   Bits:|23    21|20 19|18 16|15                0|
+	 *        -----------------------------------------
+	 */
+	while (i < dcbcfg->numapps) {
+		priority = dcbcfg->app[i].priority & 0x7;
+		selector = dcbcfg->app[i].selector & 0x7;
+		buf[offset] = (priority << I40E_IEEE_APP_PRIO_SHIFT) | selector;
+		buf[offset + 1] = (dcbcfg->app[i].protocolid >> 0x8) & 0xFF;
+		buf[offset + 2] =  dcbcfg->app[i].protocolid & 0xFF;
+		/* Move to next app */
+		offset += 3;
+		i++;
+		if (i >= I40E_DCBX_MAX_APPS)
+			break;
+	}
+	/* length includes size of ouisubtype + 1 reserved + 3*numapps */
+	length = sizeof(tlv->ouisubtype) + 1 + (i*3);
+	typelength = (u16)((I40E_TLV_TYPE_ORG << I40E_LLDP_TLV_TYPE_SHIFT) |
+		(length & 0x1FF));
+	tlv->typelength = htons(typelength);
+}
+
+ /**
+ * i40e_add_dcb_tlv - Add all IEEE TLVs
+ * @tlv: pointer to org tlv
+ *
+ * add tlv information
+ **/
+static void i40e_add_dcb_tlv(struct i40e_lldp_org_tlv *tlv,
+			     struct i40e_dcbx_config *dcbcfg,
+			     u16 tlvid)
+{
+	switch (tlvid) {
+	case I40E_IEEE_TLV_ID_ETS_CFG:
+		i40e_add_ieee_ets_tlv(tlv, dcbcfg);
+		break;
+	case I40E_IEEE_TLV_ID_ETS_REC:
+		i40e_add_ieee_etsrec_tlv(tlv, dcbcfg);
+		break;
+	case I40E_IEEE_TLV_ID_PFC_CFG:
+		i40e_add_ieee_pfc_tlv(tlv, dcbcfg);
+		break;
+	case I40E_IEEE_TLV_ID_APP_PRI:
+		i40e_add_ieee_app_pri_tlv(tlv, dcbcfg);
+		break;
+	default:
+		break;
+	}
+}
+
+ /**
+ * i40e_set_dcb_config - Set the local LLDP MIB to FW
+ * @hw: pointer to the hw struct
+ *
+ * Set DCB configuration to the Firmware
+ **/
+i40e_status i40e_set_dcb_config(struct i40e_hw *hw)
+{
+	i40e_status ret = I40E_SUCCESS;
+	struct i40e_dcbx_config *dcbcfg;
+	struct i40e_virt_mem mem;
+	u8 mib_type, *lldpmib;
+	u16 miblen;
+
+	/* update the hw local config */
+	dcbcfg = &hw->local_dcbx_config;
+	/* Allocate the LLDPDU */
+	ret = i40e_allocate_virt_mem(hw, &mem, I40E_LLDPDU_SIZE);
+	if (ret)
+		return ret;
+
+	mib_type = SET_LOCAL_MIB_AC_TYPE_LOCAL_MIB;
+	if (dcbcfg->app_mode == I40E_DCBX_APPS_NON_WILLING) {
+		mib_type |= SET_LOCAL_MIB_AC_TYPE_NON_WILLING_APPS <<
+			    SET_LOCAL_MIB_AC_TYPE_NON_WILLING_APPS_SHIFT;
+	}
+	lldpmib = (u8 *)mem.va;
+	ret = i40e_dcb_config_to_lldp(lldpmib, &miblen, dcbcfg);
+	ret = i40e_aq_set_lldp_mib(hw, mib_type, (void *)lldpmib, miblen, NULL);
+
+	i40e_free_virt_mem(hw, &mem);
+	return ret;
+}
+
+/**
+ * i40e_dcb_config_to_lldp - Convert Dcbconfig to MIB format
+ * @hw: pointer to the hw struct
+ * @dcbcfg: store for LLDPDU data
+ *
+ * send DCB configuration to FW
+ **/
+i40e_status i40e_dcb_config_to_lldp(u8 *lldpmib, u16 *miblen,
+					      struct i40e_dcbx_config *dcbcfg)
+{
+	u16 length, offset = 0, tlvid = I40E_TLV_ID_START;
+	i40e_status ret = I40E_SUCCESS;
+	struct i40e_lldp_org_tlv *tlv;
+	u16 type, typelength;
+
+	tlv = (struct i40e_lldp_org_tlv *)lldpmib;
+	while (1) {
+		i40e_add_dcb_tlv(tlv, dcbcfg, tlvid++);
+		typelength = ntohs(tlv->typelength);
+		type = (u16)((typelength & I40E_LLDP_TLV_TYPE_MASK) >>
+				I40E_LLDP_TLV_TYPE_SHIFT);
+		length = (u16)((typelength & I40E_LLDP_TLV_LEN_MASK) >>
+				I40E_LLDP_TLV_LEN_SHIFT);
+		if (length)
+			offset += length + 2;
+		/* END TLV or beyond LLDPDU size */
+		if ((tlvid >= I40E_TLV_ID_END_OF_LLDPPDU) ||
+		    (offset > I40E_LLDPDU_SIZE))
+			break;
+		/* Move to next TLV */
+		if (length)
+			tlv = (struct i40e_lldp_org_tlv *)((char *)tlv +
+			      sizeof(tlv->typelength) + length);
+	}
+	*miblen = offset;
 	return ret;
 }
 
