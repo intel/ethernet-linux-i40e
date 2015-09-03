@@ -825,24 +825,6 @@ static bool i40e_clean_tx_irq(struct i40e_ring *tx_ring, int budget)
  **/
 void i40e_force_wb(struct i40e_vsi *vsi, struct i40e_q_vector *q_vector)
 {
-#ifdef X722_SUPPORT
-	u16 flags = q_vector->tx.ring[0].flags;
-
-	if (flags & I40E_TXR_FLAGS_WB_ON_ITR) {
-		u32 val;
-
-		if (q_vector->arm_wb_state == true)
-			return;
-
-		val = I40E_PFINT_DYN_CTLN_WB_ON_ITR_MASK;
-
-		wr32(&vsi->back->hw,
-		     I40E_PFINT_DYN_CTLN(q_vector->v_idx +
-					 vsi->base_vector - 1),
-		     val);
-		q_vector->arm_wb_state = true;
-	} else {
-#endif /* X722_SUPPORT */
 	if (vsi->back->flags & I40E_FLAG_MSIX_ENABLED) {
 		u32 val = I40E_PFINT_DYN_CTLN_INTENA_MASK |
 			  I40E_PFINT_DYN_CTLN_ITR_INDX_MASK | /* set noitr */
@@ -864,9 +846,6 @@ void i40e_force_wb(struct i40e_vsi *vsi, struct i40e_q_vector *q_vector)
 		wr32(&vsi->back->hw, I40E_PFINT_DYN_CTL0, val);
 
 	}
-#ifdef X722_SUPPORT
-	}
-#endif
 }
 
 /**
@@ -1478,11 +1457,6 @@ static inline void i40e_rx_checksum(struct i40e_vsi *vsi,
 #ifdef I40E_ADD_PROBES
 	{
 		vsi->back->rx_ip4_cso_err++;
-#ifdef X722_SUPPORT
-		/* We are counting outer UDP checksum error as well in this
-		 * count since HW overloads the error bit.
-		 */
-#endif
 		goto checksum_fail;
 	}
 #else
@@ -1523,12 +1497,7 @@ static inline void i40e_rx_checksum(struct i40e_vsi *vsi,
 	 * so the total length of IPv4 header is IHL*4 bytes
 	 * The UDP_0 bit *may* bet set if the *inner* header is UDP
 	 */
-#ifdef X722_SUPPORT
-	if (!(vsi->back->flags & I40E_FLAG_OUTER_UDP_CSUM_CAPABLE) &&
-	    (ipv4_tunnel)) {
-#else /* X722_SUPPORT */
 	if (ipv4_tunnel) {
-#endif
 		i40e_set_transport_header(skb);
 		if ((ip_hdr(skb)->protocol == IPPROTO_UDP) &&
 		    (udp_hdr(skb)->check != 0)) {
@@ -2101,10 +2070,6 @@ int i40e_napi_poll(struct napi_struct *napi, int budget)
 		return budget;
 	}
 
-#ifdef X722_SUPPORT
-	if (flags & I40E_TXR_FLAGS_WB_ON_ITR)
-		q_vector->arm_wb_state = false;
-#endif
 	/* Work is done so exit the polling mode and re-enable the interrupt */
 	napi_complete(napi);
 	if (vsi->back->flags & I40E_FLAG_MSIX_ENABLED) {
@@ -2200,15 +2165,6 @@ static void i40e_atr(struct i40e_ring *tx_ring, struct sk_buff *skb,
 	/* Due to lack of space, no more new filters can be programmed */
 	if (th->syn && (pf->auto_disable_flags & I40E_FLAG_FD_ATR_ENABLED))
 		return;
-#ifdef X722_SUPPORT
-	if (pf->flags & I40E_FLAG_HW_ATR_EVICT_CAPABLE) {
-		/* HW ATR eviction will take care of removing filters on FIN
-		 * and RST packets.
-		 */
-		if (th->fin || th->rst)
-			return;
-	}
-#endif
 
 	tx_ring->atr_count++;
 
@@ -2263,12 +2219,6 @@ static void i40e_atr(struct i40e_ring *tx_ring, struct sk_buff *skb,
 			((u32)I40E_FD_ATR_TUNNEL_STAT_IDX(pf->hw.pf_id) <<
 			I40E_TXD_FLTR_QW1_CNTINDEX_SHIFT) &
 			I40E_TXD_FLTR_QW1_CNTINDEX_MASK;
-
-#ifdef X722_SUPPORT
-
-	if (pf->flags & I40E_FLAG_HW_ATR_EVICT_CAPABLE)
-		dtype_cmd |= I40E_TXD_FLTR_QW1_ATR_MASK;
-#endif
 
 	fdir_desc->qindex_flex_ptype_vsi = cpu_to_le32(flex_ptype);
 	fdir_desc->rsvd = cpu_to_le32(0);
@@ -2519,19 +2469,11 @@ static void i40e_tx_enable_csum(struct sk_buff *skb, u32 *tx_flags,
 	u32 network_hdr_len;
 	u8 l4_hdr = 0;
 #ifdef HAVE_ENCAP_CSUM_OFFLOAD
-#ifdef X722_SUPPORT
-	struct udphdr *oudph;
-	struct iphdr *oiph;
-#endif
 	u32 l4_tunnel = 0;
 
 	if (skb->encapsulation) {
 		switch (ip_hdr(skb)->protocol) {
 		case IPPROTO_UDP:
-#ifdef X722_SUPPORT
-			oudph = udp_hdr(skb);
-			oiph = ip_hdr(skb);
-#endif
 			l4_tunnel = I40E_TXD_CTX_UDP_TUNNELING;
 			*tx_flags |= I40E_TX_FLAGS_VXLAN_TUNNEL;
 			break;
@@ -2572,17 +2514,6 @@ static void i40e_tx_enable_csum(struct sk_buff *skb, u32 *tx_flags,
 			*tx_flags |= I40E_TX_FLAGS_IPV6;
 		}
 
-#ifdef X722_SUPPORT
-		if ((tx_ring->flags & I40E_TXR_FLAGS_OUTER_UDP_CSUM) &&
-		    (l4_tunnel == I40E_TXD_CTX_UDP_TUNNELING)        &&
-		    (*cd_tunneling & I40E_TXD_CTX_QW0_EXT_IP_MASK)) {
-			oudph->check = ~csum_tcpudp_magic(oiph->saddr,
-					oiph->daddr,
-					(skb->len - skb_transport_offset(skb)),
-					IPPROTO_UDP, 0);
-			*cd_tunneling |= I40E_TXD_CTX_QW0_L4T_CS_MASK;
-		}
-#endif
 	} else {
 		network_hdr_len = skb_network_header_len(skb);
 		this_ip_hdr = ip_hdr(skb);

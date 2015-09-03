@@ -41,8 +41,8 @@
 	1583  Ethernet Controller XL710 for 40GbE QSFP+
 		1028 0000  Ethernet 40G 2P XL710 QSFP+ rNDC
 		1028 1f9f  Ethernet 40G 2P XL710 QSFP+ rNDC
-		108e 0000  Oracle 10 Gb and 40 Gb Ethernet Adapter
-		108e 7b1b  Oracle 10 Gb and 40 Gb Ethernet Adapter
+		108e 0000  Oracle Quad 10Gb Ethernet Adapter
+		108e 7b1b  Oracle Quad 10Gb Ethernet Adapter
 		1137 0000  Cisco(R) Ethernet Converged NIC XL710-Q2
 		1137 013c  Cisco(R) Ethernet Converged NIC XL710-Q2
 		8086 0000  Ethernet Converged Network Adapter XL710-Q2

@@ -1204,26 +1204,11 @@ static int i40e_vc_get_vf_resources_msg(struct i40e_vf *vf, u8 *msg)
 	vsi = pf->vsi[vf->lan_vsi_idx];
 	if (!vsi->info.pvid)
 		vfres->vf_offload_flags |= I40E_VIRTCHNL_VF_OFFLOAD_VLAN;
-#ifdef X722_SUPPORT
-	if (pf->flags & I40E_FLAG_RSS_AQ_CAPABLE) {
-		if (vf->driver_caps & I40E_VIRTCHNL_VF_OFFLOAD_RSS_AQ)
-			vfres->vf_offload_flags |=
-				I40E_VIRTCHNL_VF_OFFLOAD_RSS_AQ;
-	} else
-#endif
 		vfres->vf_offload_flags |= I40E_VIRTCHNL_VF_OFFLOAD_RSS_REG;
 
 	if (vf->driver_caps & I40E_VIRTCHNL_VF_OFFLOAD_RX_POLLING)
 		vfres->vf_offload_flags |= I40E_VIRTCHNL_VF_OFFLOAD_RX_POLLING;
 
-#ifdef X722_SUPPORT
-	if (pf->flags & I40E_FLAG_WB_ON_ITR_CAPABLE) {
-		if (vf->driver_caps & I40E_VIRTCHNL_VF_OFFLOAD_WB_ON_ITR)
-			vfres->vf_offload_flags |=
-					I40E_VIRTCHNL_VF_OFFLOAD_WB_ON_ITR;
-	}
-
-#endif
 	vfres->num_vsis = num_vsis;
 	vfres->num_queue_pairs = vf->num_queue_pairs;
 	vfres->max_vectors = pf->hw.func_caps.num_msix_vectors_vf;

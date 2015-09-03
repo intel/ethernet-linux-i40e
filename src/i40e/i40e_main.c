@@ -44,11 +44,7 @@ static const char i40e_driver_string[] =
 
 #define DRV_HW_PERF
 #define DRV_FPGA
-#ifdef X722_SUPPORT
-#define DRV_X722 "-X722"
-#else
 #define DRV_X722
-#endif
 #define DRV_A0
 #ifdef I40E_MSI_INTERRUPT
 #define DRV_KERN "-msi"
@@ -62,10 +58,12 @@ static const char i40e_driver_string[] =
 
 #define DRV_VERSION_MAJOR 1
 #define DRV_VERSION_MINOR 3
-#define DRV_VERSION_BUILD 38
+#define DRV_VERSION_BUILD 39
+#define DRV_VERSION_BUILD_MINOR 1
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	     __stringify(DRV_VERSION_MINOR) "." \
-	     __stringify(DRV_VERSION_BUILD) DRV_HW_PERF DRV_FPGA DRV_X722 DRV_A0 DRV_KERN
+	     __stringify(DRV_VERSION_BUILD) "." \
+	     __stringify(DRV_VERSION_BUILD_MINOR) DRV_HW_PERF DRV_FPGA DRV_X722 DRV_A0 DRV_KERN
 const char i40e_driver_version_str[] = DRV_VERSION;
 static const char i40e_copyright[] = "Copyright (c) 2013 - 2015 Intel Corporation.";
 
@@ -100,11 +98,6 @@ static const struct pci_device_id i40e_pci_tbl[] = {
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_10G_BASE_T4), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_20G_KR2), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_20G_KR2_A), 0},
-#ifdef X722_SUPPORT
-	{PCI_VDEVICE(INTEL, I40E_DEV_ID_SFP_X722), 0},
-	{PCI_VDEVICE(INTEL, I40E_DEV_ID_1G_BASE_T_X722), 0},
-	{PCI_VDEVICE(INTEL, I40E_DEV_ID_10G_BASE_T_X722), 0},
-#endif /* X722_SUPPORT */
 	/* required last entry */
 	{0, }
 };
@@ -3462,11 +3455,6 @@ static void i40e_enable_misc_int_causes(struct i40e_pf *pf)
 	      I40E_PFINT_ICR0_ENA_HMC_ERR_MASK       |
 	      I40E_PFINT_ICR0_ENA_VFLR_MASK          |
 	      I40E_PFINT_ICR0_ENA_ADMINQ_MASK;
-#ifdef X722_SUPPORT
-
-	if (pf->flags & I40E_FLAG_IWARP_ENABLED)
-		val |= I40E_PFINT_ICR0_ENA_PE_CRITERR_MASK;
-#endif
 #ifdef HAVE_PTP_1588_CLOCK
 
 	if (pf->flags & I40E_FLAG_PTP)
@@ -3744,15 +3732,6 @@ static irqreturn_t i40e_intr(int irq, void *data)
 	if (((icr0 & ~I40E_PFINT_ICR0_INTEVENT_MASK) == 0) ||
 	    (icr0 & I40E_PFINT_ICR0_SWINT_MASK))
 		pf->sw_int_count++;
-#ifdef X722_SUPPORT
-
-	if ((pf->flags & I40E_FLAG_IWARP_ENABLED) && 
-	    (ena_mask & I40E_PFINT_ICR0_ENA_PE_CRITERR_MASK)) {
-		ena_mask &= ~I40E_PFINT_ICR0_ENA_PE_CRITERR_MASK;
-		icr0 &= ~I40E_PFINT_ICR0_ENA_PE_CRITERR_MASK;
-		dev_info(&pf->pdev->dev, "cleared PE_CRITERR\n");
-	}
-#endif
 
 	/* only q0 is used in MSI/Legacy mode, and none are used in MSIX */
 	if (icr0 & I40E_PFINT_ICR0_QUEUE_0_MASK) {
@@ -6662,7 +6641,6 @@ static void i40e_enable_pf_switch_lb(struct i40e_pf *pf)
 	}
 }
 
-#ifdef HAVE_BRIDGE_ATTRIBS
 /**
  * i40e_disable_pf_switch_lb
  * @pf: pointer to the PF structure
@@ -6699,7 +6677,6 @@ static void i40e_disable_pf_switch_lb(struct i40e_pf *pf)
 	}
 }
 
-#endif
 /**
  * i40e_config_bridge_mode - Configure the HW bridge mode
  * @veb: pointer to the bridge instance
@@ -6719,8 +6696,13 @@ static void i40e_config_bridge_mode(struct i40e_veb *veb)
 	if (veb->bridge_mode & BRIDGE_MODE_VEPA)
 		i40e_disable_pf_switch_lb(pf);
 	else
-#endif
 		i40e_enable_pf_switch_lb(pf);
+#else
+	if (pf->flags & I40E_FLAG_VEB_MODE_ENABLED)
+		i40e_enable_pf_switch_lb(pf);
+	else
+		i40e_disable_pf_switch_lb(pf);
+#endif
 }
 
 /**
@@ -7772,12 +7754,6 @@ static int i40e_alloc_rings(struct i40e_vsi *vsi)
 		tx_ring->count = vsi->num_desc;
 		tx_ring->size = 0;
 		tx_ring->dcb_tc = 0;
-#ifdef X722_SUPPORT
-		if (vsi->back->flags & I40E_FLAG_WB_ON_ITR_CAPABLE)
-			tx_ring->flags = I40E_TXR_FLAGS_WB_ON_ITR;
-		if (vsi->back->flags & I40E_FLAG_OUTER_UDP_CSUM_CAPABLE)
-			tx_ring->flags |= I40E_TXR_FLAGS_OUTER_UDP_CSUM;
-#endif
 		vsi->tx_rings[i] = tx_ring;
 
 		rx_ring = &tx_ring[1];
@@ -8212,74 +8188,6 @@ static int i40e_setup_misc_vector(struct i40e_pf *pf)
 	return err;
 }
 
-#ifdef X722_SUPPORT
-/**
- * i40e_config_rss_aq - Prepare for RSS using AQ commands
- * @vsi: vsi structure
- * @seed: RSS hash seed
- **/
-static int i40e_config_rss_aq(struct i40e_vsi *vsi, const u8 *seed)
-{
-	struct i40e_aqc_get_set_rss_key_data rss_key;
-	struct i40e_pf *pf = vsi->back;
-	struct i40e_hw *hw = &pf->hw;
-	bool pf_lut = false;
-	u8 *rss_lut;
-	int ret, i;
-
-	memset(&rss_key, 0, sizeof(rss_key));
-	memcpy(&rss_key, seed, sizeof(rss_key));
-
-	rss_lut = kzalloc(pf->rss_table_size, GFP_KERNEL);
-	if (!rss_lut)
-		return -ENOMEM;
-
-	/* Populate the LUT with max no. of queues in round robin fashion */
-	for (i = 0; i < vsi->rss_table_size; i++)
-		rss_lut[i] = i % vsi->rss_size;
-
-	ret = i40e_aq_set_rss_key(hw, vsi->id, &rss_key);
-	if (ret) {
-		dev_info(&pf->pdev->dev,
-			 "Cannot set RSS key, err %s aq_err %s\n",
-			 i40e_stat_str(&pf->hw, ret),
-			 i40e_aq_str(&pf->hw, pf->hw.aq.asq_last_status));
-		return ret;
-	}
-
-	if (vsi->type == I40E_VSI_MAIN)
-		pf_lut = true;
-
-	ret = i40e_aq_set_rss_lut(hw, vsi->id, pf_lut, rss_lut,
-				  vsi->rss_table_size);
-	if (ret)
-		dev_info(&pf->pdev->dev,
-			 "Cannot set RSS lut, err %s aq_err %s\n",
-			 i40e_stat_str(&pf->hw, ret),
-			 i40e_aq_str(&pf->hw, pf->hw.aq.asq_last_status));
-
-	return ret;
-}
-
-/**
- * i40e_vsi_config_rss - Prepare for VSI(VMDq) RSS if used
- * @vsi: VSI structure
- **/
-static int i40e_vsi_config_rss(struct i40e_vsi *vsi)
-{
-	u8 seed[I40E_HKEY_ARRAY_SIZE];
-	struct i40e_pf *pf = vsi->back;
-
-	netdev_rss_key_fill((void *)seed, I40E_HKEY_ARRAY_SIZE);
-	vsi->rss_size = min_t(int, pf->rss_size, vsi->num_queue_pairs);
-
-	if (pf->flags & I40E_FLAG_RSS_AQ_CAPABLE)
-		return i40e_config_rss_aq(vsi, seed);
-
-	return 0;
-}
-
-#endif
 /**
  * i40e_config_rss_reg - Prepare for RSS if used
  * @pf: board private structure
@@ -8344,14 +8252,7 @@ static int i40e_config_rss(struct i40e_pf *pf)
 			(reg_val & ~I40E_PFQF_CTL_0_HASHLUTSIZE_512);
 	wr32(hw, I40E_PFQF_CTL_0, reg_val);
 
-#ifdef X722_SUPPORT
-	if (pf->flags & I40E_FLAG_RSS_AQ_CAPABLE)
-		return i40e_config_rss_aq(pf->vsi[pf->lan_vsi], seed);
-	else
-		return i40e_config_rss_reg(pf, seed);
-#else
 	return i40e_config_rss_reg(pf, seed);
-#endif
 }
 
 /**
@@ -8640,17 +8541,6 @@ static int i40e_sw_init(struct i40e_pf *pf)
 #endif /* HAVE_SRIOV_CONFIGURE */
 	}
 #endif /* CONFIG_PCI_IOV */
-#ifdef X722_SUPPORT
-	if (pf->hw.mac.type == I40E_MAC_X722) {
-		pf->flags |= I40E_FLAG_RSS_AQ_CAPABLE
-			     | I40E_FLAG_128_QP_RSS_CAPABLE
-			     | I40E_FLAG_HW_ATR_EVICT_CAPABLE
-			     | I40E_FLAG_OUTER_UDP_CSUM_CAPABLE
-			     | I40E_FLAG_WB_ON_ITR_CAPABLE
-			     | I40E_FLAG_MULTIPLE_TCP_UDP_RSS_PCTYPE
-			     | I40E_FLAG_NO_PCI_LINK_CHECK;
-	}
-#endif
 	pf->eeprom_version = 0xDEAD;
 	pf->lan_veb = I40E_NO_VEB;
 	pf->lan_vsi = I40E_NO_VSI;
@@ -10108,13 +9998,6 @@ struct i40e_vsi *i40e_vsi_setup(struct i40e_pf *pf, u8 type,
 		/* no netdev or rings for the other VSI types */
 		break;
 	}
-#ifdef X722_SUPPORT
-
-	if ((pf->flags & I40E_FLAG_RSS_AQ_CAPABLE) &&
-	    (vsi->type == I40E_VSI_VMDQ2)) {
-		ret = i40e_vsi_config_rss(vsi);
-	}
-#endif
 	return vsi;
 
 err_rings:

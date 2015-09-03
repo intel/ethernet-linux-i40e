@@ -92,20 +92,10 @@
 #define I40E_MIN_MSIX                 2
 #define I40E_DEFAULT_NUM_VMDQ_VSI     8 /* max 256 VSIs */
 #define I40E_MIN_VSI_ALLOC            51 /* LAN, ATR, FCOE, 32 VF, 16 VMDQ */
-#ifdef X722_SUPPORT
-#define i40e_default_queues_per_vmdq(pf) \
-	       (((pf)->flags & I40E_FLAG_RSS_AQ_CAPABLE) ? 4 : 1) /* max 16 qps */
-#else
 #define i40e_default_queues_per_vmdq(pf)  1 /* max 16 qps */
-#endif
 #define I40E_DEFAULT_QUEUES_PER_VF    4
 #define I40E_DEFAULT_QUEUES_PER_TC    1 /* should be a power of 2 */
-#ifdef X722_SUPPORT
-#define i40e_pf_get_max_q_per_tc(pf) \
-		(((pf)->flags & I40E_FLAG_128_QP_RSS_CAPABLE) ? 128 : 64)
-#else
 #define i40e_pf_get_max_q_per_tc(pf)  64 /* should be a power of 2 */
-#endif
 #define I40E_FDIR_RING                0
 #define I40E_FDIR_RING_COUNT          32
 #ifdef I40E_FCOE
@@ -391,17 +381,7 @@ struct i40e_pf {
 #define I40E_FLAG_VXLAN_FILTER_SYNC            BIT_ULL(27)
 #define I40E_FLAG_PORT_ID_VALID                BIT_ULL(28)
 #define I40E_FLAG_DCB_CAPABLE                  BIT_ULL(29)
-#ifdef X722_SUPPORT
-#define I40E_FLAG_RSS_AQ_CAPABLE               BIT_ULL(31)
-#define I40E_FLAG_HW_ATR_EVICT_CAPABLE         BIT_ULL(32)
-#define I40E_FLAG_OUTER_UDP_CSUM_CAPABLE       BIT_ULL(33)
-#define I40E_FLAG_128_QP_RSS_CAPABLE           BIT_ULL(34)
-#define I40E_FLAG_WB_ON_ITR_CAPABLE            BIT_ULL(35)
-#endif
 #define I40E_FLAG_VEB_STATS_ENABLED            BIT_ULL(37)
-#ifdef X722_SUPPORT
-#define I40E_FLAG_MULTIPLE_TCP_UDP_RSS_PCTYPE  BIT_ULL(38)
-#endif
 #define I40E_FLAG_LINK_POLLING_ENABLED         BIT_ULL(39)
 #define I40E_FLAG_VEB_MODE_ENABLED             BIT_ULL(40)
 #define I40E_FLAG_NO_PCI_LINK_CHECK            BIT_ULL(41)
@@ -676,9 +656,6 @@ struct i40e_q_vector {
 #endif
 	struct rcu_head rcu;	/* to avoid race with update stats on free */
 	char name[I40E_INT_NAME_STR_LEN];
-#ifdef X722_SUPPORT
-	bool arm_wb_state;
-#endif
 #define ITR_COUNTDOWN_START 100
 	u8 itr_countdown;	/* when 0 should adjust ITR */
 } ____cacheline_internodealigned_in_smp;

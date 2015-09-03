@@ -367,16 +367,9 @@ static void i40e_get_settings_link_up(struct i40e_hw *hw,
 		break;
 	case I40E_PHY_TYPE_SGMII:
 		ecmd->supported = SUPPORTED_Autoneg |
-#ifdef X722_SUPPORT
-				  SUPPORTED_100baseT_Full |
-#endif /* X722_SUPPORT */
 				  SUPPORTED_1000baseT_Full;
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
 			ecmd->advertising |= ADVERTISED_1000baseT_Full;
-#ifdef X722_SUPPORT
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_100MB)
-			ecmd->advertising |= ADVERTISED_100baseT_Full;
-#endif /* X722_SUPPORT */
 		break;
 	default:
 		/* if we got here and link is up something bad is afoot */
@@ -426,14 +419,8 @@ static void i40e_get_settings_link_down(struct i40e_hw *hw,
 	ecmd->advertising = 0x0;
 	if (phy_types & I40E_CAP_PHY_TYPE_SGMII) {
 		ecmd->supported |= SUPPORTED_Autoneg |
-#ifdef X722_SUPPORT
-				   SUPPORTED_100baseT_Full |
-#endif
 				SUPPORTED_1000baseT_Full;
 		ecmd->advertising |= ADVERTISED_Autoneg |
-#ifdef X722_SUPPORT
-				     ADVERTISED_100baseT_Full |
-#endif
 				     ADVERTISED_1000baseT_Full;
 	}
 	if (phy_types & I40E_CAP_PHY_TYPE_XAUI ||
