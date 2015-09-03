@@ -2374,7 +2374,9 @@ static void i40e_tx_enable_csum(struct sk_buff *skb, u32 tx_flags,
 	struct iphdr *this_ip_hdr;
 	u32 network_hdr_len;
 	u8 l4_hdr = 0;
+#ifdef HAVE_ENCAP_CSUM_OFFLOAD
 	u32 l4_tunnel = 0;
+#endif
 
 #ifdef HAVE_ENCAP_CSUM_OFFLOAD
 	if (skb->encapsulation) {

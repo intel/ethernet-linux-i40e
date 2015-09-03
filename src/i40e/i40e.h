@@ -329,6 +329,7 @@ struct i40e_pf {
 #define I40E_FLAG_VXLAN_FILTER_SYNC            (u64)(1 << 27)
 #define I40E_FLAG_PORT_ID_VALID                (u64)(1 << 28)
 #define I40E_FLAG_DCB_CAPABLE                  (u64)(1 << 29)
+#define I40E_FLAG_VEB_MODE_ENABLED             (1ULL << 40)
 
 	/* tracks features that get auto disabled by errors */
 	u64 auto_disable_flags;

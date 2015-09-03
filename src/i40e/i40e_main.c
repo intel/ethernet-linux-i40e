@@ -56,10 +56,12 @@ static const char i40e_driver_string[] =
 
 #define DRV_VERSION_MAJOR 1
 #define DRV_VERSION_MINOR 2
-#define DRV_VERSION_BUILD 46
+#define DRV_VERSION_BUILD 48
+#define DRV_VERSION_FIX   2
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	     __stringify(DRV_VERSION_MINOR) "." \
-	     __stringify(DRV_VERSION_BUILD) DRV_HW_PERF DRV_FPGA DRV_A0 DRV_KERN
+	     __stringify(DRV_VERSION_BUILD) "." \
+	     __stringify(DRV_VERSION_FIX) DRV_HW_PERF DRV_FPGA DRV_A0 DRV_KERN
 const char i40e_driver_version_str[] = DRV_VERSION;
 static const char i40e_copyright[] = "Copyright (c) 2013 - 2015 Intel Corporation.";
 
@@ -6373,8 +6375,13 @@ static void i40e_config_bridge_mode(struct i40e_veb *veb)
 	if (veb->bridge_mode & BRIDGE_MODE_VEPA)
 		i40e_disable_pf_switch_lb(pf);
 	else
-#endif
 		i40e_enable_pf_switch_lb(pf);
+#else
+	if (pf->flags & I40E_FLAG_VEB_MODE_ENABLED)
+		i40e_enable_pf_switch_lb(pf);
+	else
+		i40e_disable_pf_switch_lb(pf);
+#endif
 }
 
 /**
@@ -6423,6 +6430,12 @@ static int i40e_reconstitute_veb(struct i40e_veb *veb)
 	if (ret)
 		goto end_reconstitute;
 
+#ifdef HAVE_BRIDGE_ATTRIBS
+	if (pf->flags & I40E_FLAG_VEB_MODE_ENABLED)
+		veb->bridge_mode = BRIDGE_MODE_VEB;
+	else
+		veb->bridge_mode = BRIDGE_MODE_VEPA;
+#endif
 	i40e_config_bridge_mode(veb);
 
 	/* create the remaining VSIs attached to this VEB */
@@ -8465,6 +8478,10 @@ static int i40e_ndo_bridge_setlink(struct net_device *dev,
 		} else if (mode != veb->bridge_mode) {
 			/* Existing HW bridge but different mode needs reset */
 			veb->bridge_mode = mode;
+			if (mode == BRIDGE_MODE_VEB)
+				pf->flags |= I40E_FLAG_VEB_MODE_ENABLED;
+			else
+				pf->flags &= ~I40E_FLAG_VEB_MODE_ENABLED;
 			i40e_do_reset(pf, (1 << __I40E_PF_RESET_REQUESTED));
 			break;
 		}
@@ -8915,7 +8932,8 @@ static int i40e_add_vsi(struct i40e_vsi *vsi)
 		ctxt.uplink_seid = vsi->uplink_seid;
 		ctxt.connection_type = I40E_AQ_VSI_CONN_TYPE_NORMAL;
 		ctxt.flags = I40E_AQ_VSI_TYPE_PF;
-		if (i40e_is_vsi_uplink_mode_veb(vsi)) {
+		if ((pf->flags & I40E_FLAG_VEB_MODE_ENABLED) &&
+		    (i40e_is_vsi_uplink_mode_veb(vsi))) {
 			ctxt.info.valid_sections |=
 				cpu_to_le16(I40E_AQ_VSI_PROP_SWITCH_VALID);
 			ctxt.info.switch_id =
@@ -9331,6 +9349,16 @@ struct i40e_vsi *i40e_vsi_setup(struct i40e_pf *pf, u8 type,
 					 __func__);
 				return NULL;
 			}
+#ifdef HAVE_BRIDGE_ATTRIBS
+			/* We come up by default in VEPA mode if sriov is not
+			 * already enabled, in which case we can't force VEPA
+			 * mode.
+			 */
+			if (!(pf->flags & I40E_FLAG_VEB_MODE_ENABLED)) {
+				veb->bridge_mode = BRIDGE_MODE_VEPA;
+				pf->flags &= ~I40E_FLAG_VEB_MODE_ENABLED;
+			}
+#endif
 			i40e_config_bridge_mode(veb);
 		}
 		for (i = 0; i < I40E_MAX_VEB && !veb; i++) {
@@ -10447,6 +10475,19 @@ static int i40e_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		goto err_switch_setup;
 	}
 
+#ifdef CONFIG_PCI_IOV
+	/* prep for VF support */
+	if ((pf->flags & I40E_FLAG_SRIOV_ENABLED) &&
+	    (pf->flags & I40E_FLAG_MSIX_ENABLED) &&
+	    !test_bit(__I40E_BAD_EEPROM, &pf->state)) {
+		if (pci_num_vf(pdev))
+			pf->flags |= I40E_FLAG_VEB_MODE_ENABLED;
+#if !defined(HAVE_SRIOV_CONFIGURE) && !defined(HAVE_RHEL6_SRIOV_CONFIGURE)
+		else if (pf->num_req_vfs)
+			pf->flags |= I40E_FLAG_VEB_MODE_ENABLED;
+#endif
+	}
+#endif
 	err = i40e_setup_pf_switch(pf, false);
 	if (err) {
 		dev_info(&pdev->dev, "setup_pf_switch failed: %d\n", err);
