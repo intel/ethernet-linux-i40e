@@ -12,9 +12,9 @@
 		1028 0000  Ethernet 10G X710 rNDC
 		1028 1f99  Ethernet 10G 4P X710/I350 rNDC
 		1028 1f9c  Ethernet 10G 4P X710 SFP+ rNDC
-		103c 0000  HP Ethernet 10Gb 562SFP+ Adapter
-		103c 22fc  HP Ethernet 10Gb 2-port 562FLR-SFP+ Adapter
-		103c 22fd  HP Ethernet 10Gb 2-port 562SFP+ Adapter
+		103c 0000  HPE Ethernet 10Gb 562SFP+ Adapter
+		103c 22fc  HPE Ethernet 10Gb 2-port 562FLR-SFP+ Adapter
+		103c 22fd  HPE Ethernet 10Gb 2-port 562SFP+ Adapter
 		1137 0000  Cisco(R) Ethernet Converged NIC X710-4
 		1137 013b  Cisco(R) Ethernet Converged NIC X710-4
 		17aa 0000  Lenovo ThinkServer X710 AnyFabric for 10GbE SFP+
@@ -62,14 +62,12 @@
 		108e 0000  Ethernet Controller X710 for 10GBASE-T
 		108e 4857  Ethernet Controller X710 for 10GBASE-T
 	1587  Ethernet Controller XL710 for 20GbE backplane
-		103c 0000  HP Flex-20 20Gb 2-port 660FLB Adapter
-		103c 22fe  HP Flex-20 20Gb 2-port 660FLB Adapter
+		103c 0000  HPE Flex-20 20Gb 2-port 660FLB Adapter
+		103c 22fe  HPE Flex-20 20Gb 2-port 660FLB Adapter
 	1588  Ethernet Controller XL710 for 20GbE backplane
-		103c 0000  HP Flex-20 20Gb 2-port 660M Adapter
-		103c 22ff  HP Flex-20 20Gb 2-port 660M Adapter
+		103c 0000  HPE Flex-20 20Gb 2-port 660M Adapter
+		103c 22ff  HPE Flex-20 20Gb 2-port 660M Adapter
 	1589  Ethernet Controller X710/X557-AT 10GBASE-T
 		8086 0000  Ethernet Converged Network Adapter X710-T
 		8086 0001  Ethernet Converged Network Adapter X710-T4
 		8086 0002  Ethernet Converged Network Adapter X710-T4
-	37D1  Ethernet Connection X722 for 1GbE
-	37D2  Ethernet Connection X722 for 10GBASE-T

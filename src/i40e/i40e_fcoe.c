@@ -1449,8 +1449,12 @@ static int i40e_fcoe_change_mtu(struct net_device *netdev, int new_mtu)
  * @features: the feature set that the stack is suggesting
  *
  **/
+#ifdef HAVE_RHEL6_NET_DEVICE_OPS_EXT
+static int i40e_fcoe_set_features(struct net_device *netdev, u32 features)
+#else
 static int i40e_fcoe_set_features(struct net_device *netdev,
 			     netdev_features_t features)
+#endif
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_vsi *vsi = np->vsi;
@@ -1504,6 +1508,13 @@ static const struct net_device_ops i40e_fcoe_netdev_ops = {
 #ifdef HAVE_NETDEV_OPS_FCOE_DDP_TARGET
 	.ndo_fcoe_ddp_target	= i40e_fcoe_ddp_target,
 #endif
+#ifdef HAVE_RHEL6_NET_DEVICE_OPS_EXT
+};
+
+/* RHEL6 keeps these operations in a separate structure */
+static const struct net_device_ops_ext i40e_fcoe_netdev_ops_ext = {
+	.size = sizeof(struct net_device_ops_ext),
+#endif /* HAVE_RHEL6_NET_DEVICE_OPS_EXT */
 #ifdef HAVE_NDO_SET_FEATURES
 	.ndo_set_features	= i40e_fcoe_set_features,
 #endif /* HAVE_NDO_SET_FEATURES */
@@ -1526,6 +1537,9 @@ void i40e_fcoe_config_netdev(struct net_device *netdev, struct i40e_vsi *vsi)
 {
 	struct i40e_hw *hw = &vsi->back->hw;
 	struct i40e_pf *pf = vsi->back;
+#ifdef HAVE_RHEL6_NET_DEVICE_OPS_EXT
+	u32 hw_features;
+#endif
 
 	if (vsi->type != I40E_VSI_FCOE)
 		return;
@@ -1552,7 +1566,13 @@ void i40e_fcoe_config_netdev(struct net_device *netdev, struct i40e_vsi *vsi)
 	netdev->features |= NETIF_F_ALL_FCOE;
 	netdev->vlan_features |= NETIF_F_ALL_FCOE;
 #ifdef HAVE_NDO_SET_FEATURES
+#ifdef HAVE_RHEL6_NET_DEVICE_OPS_EXT
+	hw_features = get_netdev_hw_features(netdev);
+	hw_features |= netdev->features;
+	set_netdev_hw_features(netdev, hw_features);
+#else
 	netdev->hw_features |= netdev->features;
+#endif
 #endif
 #ifdef IFF_UNICAST_FLT
 	netdev->priv_flags |= IFF_UNICAST_FLT;
@@ -1573,12 +1593,12 @@ void i40e_fcoe_config_netdev(struct net_device *netdev, struct i40e_vsi *vsi)
 	 */
 	netdev->dev_port = 1;
 #endif
-	spin_lock(&vsi->mac_filter_list_lock);
+	spin_lock_bh(&vsi->mac_filter_list_lock);
 	i40e_add_filter(vsi, hw->mac.san_addr, 0, false, false);
 	i40e_add_filter(vsi, (u8[6]) FC_FCOE_FLOGI_MAC, 0, false, false);
 	i40e_add_filter(vsi, FIP_ALL_FCOE_MACS, 0, false, false);
 	i40e_add_filter(vsi, FIP_ALL_ENODE_MACS, 0, false, false);
-	spin_unlock(&vsi->mac_filter_list_lock);
+	spin_unlock_bh(&vsi->mac_filter_list_lock);
 
 	/* use san mac */
 	ether_addr_copy(netdev->dev_addr, hw->mac.san_addr);
