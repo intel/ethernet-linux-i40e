@@ -58,7 +58,7 @@ static const char i40e_driver_string[] =
 
 #define DRV_VERSION_MAJOR 1
 #define DRV_VERSION_MINOR 3
-#define DRV_VERSION_BUILD 46
+#define DRV_VERSION_BUILD 47
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	     __stringify(DRV_VERSION_MINOR) "." \
 	     __stringify(DRV_VERSION_BUILD) DRV_HW_PERF DRV_FPGA DRV_X722 DRV_A0 DRV_KERN
@@ -1624,10 +1624,9 @@ static int i40e_set_mac(struct net_device *netdev, void *p)
 		spin_unlock_bh(&vsi->mac_filter_list_lock);
 	}
 
-	i40e_sync_vsi_filters(vsi);
 	ether_addr_copy(netdev->dev_addr, addr->sa_data);
 
-	return 0;
+	return i40e_sync_vsi_filters(vsi, false);
 }
 
 /**
@@ -1951,12 +1950,13 @@ static void i40e_cleanup_add_list(struct list_head *add_list)
 /**
  * i40e_sync_vsi_filters - Update the VSI filter list to the HW
  * @vsi: ptr to the VSI
+ * @grab_rtnl: whether RTNL needs to be grabbed
  *
  * Push any outstanding VSI filter changes through the AdminQ.
  *
  * Returns 0 or error value
  **/
-int i40e_sync_vsi_filters(struct i40e_vsi *vsi)
+int i40e_sync_vsi_filters(struct i40e_vsi *vsi, bool grab_rtnl)
 {
 	struct list_head tmp_del_list, tmp_add_list;
 	struct i40e_mac_filter *f, *ftmp, *fclone;
@@ -2048,6 +2048,7 @@ int i40e_sync_vsi_filters(struct i40e_vsi *vsi)
 			i40e_undo_del_filter_entries(vsi, &tmp_del_list);
 			i40e_undo_add_filter_entries(vsi);
 			spin_unlock_bh(&vsi->mac_filter_list_lock);
+			vsi->flags |= I40E_VSI_FLAG_FILTER_CHANGED;
 			return -ENOMEM;
 		}
 
@@ -2119,6 +2120,7 @@ int i40e_sync_vsi_filters(struct i40e_vsi *vsi)
 			spin_lock_bh(&vsi->mac_filter_list_lock);
 			i40e_undo_add_filter_entries(vsi);
 			spin_unlock_bh(&vsi->mac_filter_list_lock);
+			vsi->flags |= I40E_VSI_FLAG_FILTER_CHANGED;
 			return -ENOMEM;
 		}
 
@@ -2212,8 +2214,7 @@ int i40e_sync_vsi_filters(struct i40e_vsi *vsi)
 			 */
 			if (pf->cur_promisc != cur_promisc) {
 				pf->cur_promisc = cur_promisc;
-				i40e_do_reset_safe(pf,
-						BIT(__I40E_PF_RESET_REQUESTED));
+				set_bit(__I40E_PF_RESET_REQUESTED, &pf->state);
 			}
 		} else {
 			ret = i40e_aq_set_vsi_unicast_promiscuous(
@@ -2263,12 +2264,19 @@ static void i40e_sync_filters_subtask(struct i40e_pf *pf)
 
 	if (!pf || !(pf->flags & I40E_FLAG_FILTER_SYNC))
 		return;
+
 	pf->flags &= ~I40E_FLAG_FILTER_SYNC;
 
 	for (v = 0; v < pf->num_alloc_vsi; v++) {
 		if (pf->vsi[v] &&
-		    (pf->vsi[v]->flags & I40E_VSI_FLAG_FILTER_CHANGED))
-			i40e_sync_vsi_filters(pf->vsi[v]);
+		    (pf->vsi[v]->flags & I40E_VSI_FLAG_FILTER_CHANGED)) {
+			int ret = i40e_sync_vsi_filters(pf->vsi[v], true);
+			if (ret) {
+				/* come back and try again later */
+				pf->flags |= I40E_FLAG_FILTER_SYNC;
+				break;
+			}
+		}
 	}
 }
 
@@ -2518,7 +2526,7 @@ int i40e_vsi_add_vlan(struct i40e_vsi *vsi, s16 vid)
 	    test_bit(__I40E_RESET_RECOVERY_PENDING, &vsi->back->state))
 		return 0;
 
-	return i40e_sync_vsi_filters(vsi);
+	return i40e_sync_vsi_filters(vsi, false);
 }
 
 /**
@@ -2600,7 +2608,7 @@ int i40e_vsi_kill_vlan(struct i40e_vsi *vsi, s16 vid)
 	    test_bit(__I40E_RESET_RECOVERY_PENDING, &vsi->back->state))
 		return 0;
 
-	return i40e_sync_vsi_filters(vsi);
+	return i40e_sync_vsi_filters(vsi, false);
 }
 
 /**
@@ -5755,13 +5763,9 @@ void i40e_do_reset(struct i40e_pf *pf, u32 reset_flags)
  **/
 void i40e_do_reset_safe(struct i40e_pf *pf, u32 reset_flags)
 {
-	if (!rtnl_is_locked()) {
-		rtnl_lock();
-		i40e_do_reset(pf, reset_flags);
-		rtnl_unlock();
-	} else {
-		i40e_do_reset(pf, reset_flags);
-	}
+	rtnl_lock();
+	i40e_do_reset(pf, reset_flags);
+	rtnl_unlock();
 }
 
 #ifdef CONFIG_DCB
@@ -7433,12 +7437,12 @@ static void i40e_service_task(struct work_struct *work)
 	}
 
 	i40e_detect_recover_hung(pf);
+	i40e_sync_filters_subtask(pf);
 	i40e_reset_subtask(pf);
 	i40e_handle_mdd_event(pf);
 	i40e_vc_process_vflr_event(pf);
 	i40e_watchdog_subtask(pf);
 	i40e_fdir_reinit_subtask(pf);
-	i40e_sync_filters_subtask(pf);
 #ifdef HAVE_VXLAN_RX_OFFLOAD
 	i40e_sync_vxlan_filters_subtask(pf);
 
@@ -9716,7 +9720,7 @@ int i40e_vsi_release(struct i40e_vsi *vsi)
 				f->is_vf, f->is_netdev);
 	spin_unlock_bh(&vsi->mac_filter_list_lock);
 
-	i40e_sync_vsi_filters(vsi);
+	i40e_sync_vsi_filters(vsi, false);
 
 	i40e_vsi_delete(vsi);
 	i40e_vsi_free_q_vectors(vsi);
