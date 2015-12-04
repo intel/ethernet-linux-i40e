@@ -2410,7 +2410,6 @@ i40e_status i40e_update_link_info(struct i40e_hw *hw)
 	return status;
 }
 
-
 /**
  * i40e_get_link_speed
  * @hw: pointer to the hw struct
