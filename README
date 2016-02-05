@@ -4,7 +4,7 @@ i40e Linux* Base Driver for the Intel(R) XL710 Ethernet Controller Family
 
 ===============================================================================
 
-September 25, 2015
+December 16, 2015
 
 ===============================================================================
 
@@ -26,6 +26,26 @@ Contents
 Important Notes
 ---------------
 
+Enabling a VF link if the port is disconnected
+----------------------------------------------
+
+If the physical function (PF) link is down, you can force link up (from the host
+PF) on any virtual functions (VF) bound to the PF. Note that this requires
+kernel support (Redhat kernel 3.10.0-327 or newer, upstream kernel 3.11.0 or
+newer, and associated iproute2 user space support). If the following command
+does not work, it may not be supported by your system. The following command
+forces link up on VF 0 bound to PF eth0:
+  ip link set eth0 vf 0 state enable
+
+
+Do not unload port driver if VF with active VM is bound to it
+-------------------------------------------------------------
+
+Do not unload a port's driver if a Virtual Function (VF) with an active Virtual
+Machine (VM) is bound to it. Doing so will cause the port to appear to hang.
+Once the VM shuts down, or otherwise releases the VF, the command will complete.
+
+
 Configuring SR-IOV for improved network security
 ------------------------------------------------
 
@@ -43,7 +63,8 @@ frames to be dropped.
 Overview
 --------
 
-This document describes the i40e Linux* Base Driver for the XL710 Ethernet Controller Family of Adapters.
+This document describes the i40e Linux* Base Driver
+for the XL710 Ethernet Controller Family of Adapters.
 
 The Linux* base driver supports the following kernel versions:
 2.6.32 and newer
@@ -118,7 +139,14 @@ Avago		1000BASE-T	SFP ABCU-5710RZ
 
 QSFP+ Modules
 -------------
+NOTE: Intel branded network adapters based on the X710/XL710 controller
+  (for example, Intel(R) Ethernet Converged Network Adapter XL710-Q1) support
+  the E40GQSFPLR module. For other connections based on the X710/XL710
+  controller, support is dependent on your system board. Please see your vendor
+  for details.
+
   Intel	TRIPLE RATE 1G/10G/40G QSFP+ SR (bailed)	E40GQSFPSR
+  Intel	TRIPLE RATE 1G/10G/40G QSFP+ LR (bailed)	E40GQSFPLR
     QSFP+ 1G speed is not supported on XL710 based devices.
 
 X710/XL710 Based SFP+ adapters support passive QSFP+ Direct Attach cables.
@@ -156,7 +184,7 @@ NOTES:
 4. Compile the driver module:
    # make install
    The binary will be installed as:
-   /lib/modules/<KERNEL VERSION>/kernel/drivers/net/i40e/i40e.[k]o
+   /lib/modules/<KERNEL VERSION>/updates/drivers/net/ethernet/intel/i40e/i40e.ko
 
    The install location listed above is the default location. This may differ
    for various Linux distributions.
@@ -220,17 +248,27 @@ max_vfs
 Valid Range:
 1-32 (X710 based devices)
 1-64 (XL710 based devices)
+
 NOTE: This parameter is only used on kernel 3.7.x and below. On kernel 3.8.x
 and above, use sysfs to enable VFs. For example:
 #echo $num_vf_enabled > /sys/class/net/$dev/device/sriov_numvfs	//enable VFs
 #echo 0 > /sys/class/net/$dev/device/sriov_numvfs	//disable VFs
+
+The parameters for the driver are referenced by position. Thus, if you have a
+dual port adapter, or more than one adapter in your system, and want N virtual
+functions per port, you must specify a number for each port with each parameter
+separated by a comma. For example:
+  modprobe i40e max_vfs=4,1
+NOTE: Caution must be used in loading the driver with these parameters.
+Depending on your system configuration, number of slots, etc., it is impossible
+to predict in all cases where the positions would be on the command line.
 This parameter adds support for SR-IOV. It causes the driver to spawn up to
 max_vfs worth of virtual functions.
 Some hardware configurations support fewer SR-IOV instances, as the whole
 XL710 controller (all functions) is limited to 128 SR-IOV interfaces in total.
-NOTE: When SR-IOV mode is enabled, hardware VLAN filtering
-and VLAN tag stripping/insertion will remain enabled. Please remove the old
-VLAN filter before the new VLAN filter is added. For example,
+NOTE: When SR-IOV mode is enabled, hardware VLAN
+filtering and VLAN tag stripping/insertion will remain enabled. Please remove
+the old VLAN filter before the new VLAN filter is added. For example,
 ip link set eth0 vf 0 vlan 100	// set vlan 100 for VF 0
 ip link set eth0 vf 0 vlan 0	// Delete vlan 100
 ip link set eth0 vf 0 vlan 200	// set a new vlan 200 for VF 0
@@ -265,6 +303,9 @@ $ ip link set dev eth0 vf 0 vlan 10
 
 Intel(R) Ethernet Flow Director
 -------------------------------
+NOTE: Flow director parameters are only supported on kernel versions 2.6.30 or
+newer.
+
 The Flow Director performs the following tasks:
 
   - Directs receive packets according to their flows to different queues.
@@ -438,7 +479,7 @@ NAPI
 ----
 NAPI (Rx polling mode) is supported in the i40e driver.
 For more information on NAPI, see
-ftp://robur.slu.se/pub/Linux/net-development/NAPI/usenix-paper.tgz.
+https://www.linuxfoundation.org/collaborate/workgroups/networking/napi
 
 
 Flow Control
@@ -482,29 +523,36 @@ IEEE 1588 Precision Time Protocol (PTP) Hardware Clock (PHC)
 Precision Time Protocol (PTP) is used to synchronize clocks in a computer
 network and is supported in the i40e driver.
 
-I40E_PTP is a compile time flag. The user can enable it at compile time to add
-support for PTP from the driver. The flag is used by editing the make file
-as follows when it is being compiled:
-
->make CFLAGS_EXTRA="-DI40E_PTP" install
 
 
 VXLAN Overlay HW Offloading
 ---------------------------
 
-VXLAN Overlay HW Offloading is enabled by default. The i40e Linux driver
-features VXLAN Overlay HW Offloading support. To view and configure
-VXLAN on a VXLAN-overlay offload enabled device, use the following
-commands:
+Virtual Extensible LAN (VXLAN) allows you to extend an L2 network over an L3
+network, which may be useful in a virtualized or cloud environment. Some Intel(R)
+Ethernet Network devices perform VXLAN processing, offloading it from the
+operating system. This reduces CPU utilization.
+ 
+VXLAN offloading is controlled by the tx and rx checksum offload options
+provided by ethtool. That is, if tx checksum offload is enabled, and the adapter
+has the capability, VXLAN offloading is also enabled. If rx checksum offload is
+enabled, then the VXLAN packets rx checksum will be offloaded, unless the module
+parameter vxlan_rx=0,0 was used to specifically disable the VXLAN rx offload.
+ 
+VXLAN Overlay HW Offloading is enabled by default. To view and configure VXLAN
+on a VXLAN-overlay offload enabled device, use the following
+command:
 
   # ethtool -k ethX
    (This command displays the offloads and their current state.)
-  # ethtool -K ethX tx-udp_tnl-segmentation [off|on]
-   (This enables/disables VXLAN support in the driver.)
 
-For more information on configuring your network for VXLAN overlay support,
-refer to the Intel Technical Brief, "Creating Overlay Networks Using Intel
-Ethernet Converged Network Adapters" (Intel Networking Division, August 2013):
+i40e support for VXLAN HW offloading is dependent on
+kernel support of the HW offloading features.
+
+For more information on configuring your network for overlay HW offloading
+support, refer to the Intel Technical Brief, "Creating Overlay Networks
+Using Intel Ethernet Converged Network Adapters" (Intel Networking Division,
+August 2013):
 
 http://www.intel.com/content/dam/www/public/us/en/documents/technology-briefs/
 overlay-networks-using-converged-network-adapters-brief.pdf
@@ -544,12 +592,14 @@ bandwidth allocations on each function as follows:
 
 3. Mount /config
 4. Load (or reload) the i40e driver
-5. Make a new directory under config for each partition upon which you wish
-   to configure the bandwidth.
-6. Three files will appear under the config/partition directory:
+5. Make a new directory under config/i40e for each partition upon which you
+   wish to configure the bandwidth.
+6. The following files will appear under the config/partition directory:
    - max_bw
    - min_bw
    - commit
+   - ports
+   - partitions
    read from max_bw to get display the current maximum bandwidth setting.
    write to max_bw to set the maximum bandwidth for this function.
    read from min_bw to display the current minimum bandwidth setting.
@@ -642,33 +692,48 @@ Performance Optimization:
 -------------------------
 
 Driver defaults are meant to fit a wide variety of workloads, but if further
-optimization is required we recommend experimenting with the following settings.
+optimization is required we recommend experimenting with the following
+settings.
 
 Pin the adapter's IRQs to specific cores by disabling the irqbalance service
-and using the included set_irq_affinity script.
-The following settings will distribute the IRQs across all the cores evenly:
-  # scripts/set_irq_affinity -x all <interface1> , [ <interface2>, ... ]
-The following settings will distribute the IRQs across all the cores that are
-local to the adapter (same NUMA node):
-  # scripts/set_irq_affinity -x local <interface1> ,[ <interface2>, ... ]
-Please see the script's help text for further options.
+and using the included set_irq_affinity script. Please see the script's help
+text for further options.
+
+  - The following settings will distribute the IRQs across all the cores
+    evenly:
+
+    # scripts/set_irq_affinity -x all <interface1> , [ <interface2>, ... ]
+
+  - The following settings will distribute the IRQs across all the cores that
+    are local to the adapter (same NUMA node):
+
+    # scripts/set_irq_affinity -x local <interface1> ,[ <interface2>, ... ]
 
 For very CPU intensive workloads, we recommend pinning the IRQs to all cores.
+
 For IP Forwarding: Disable Adaptive ITR and lower rx and tx interrupts per
 queue using ethtool.
-# ethtool <interface> adaptive-rx off adaptive-tx off rx-usecs 125 tx-usecs 125
-Setting rx-usecs and tx-usecs to 125 will limit interrupts to about 8000
-interrupts per second per queue.
+
+  - Setting rx-usecs and tx-usecs to 125 will limit interrupts to about 8000
+    interrupts per second per queue.
+
+    # ethtool -C <interface> adaptive-rx off adaptive-tx off rx-usecs 125 
+    tx-usecs 125
 
 For lower CPU utilization: Disable Adaptive ITR and lower rx and tx interrupts
 per queue using ethtool.
-# ethtool <interface> adaptive-rx off adaptive-tx off rx-usecs 250 tx-usecs 250
-Setting rx-usecs and tx-usecs to 250 will limit interrupts to about 4000
-interrupts per second per queue.
+
+  - Setting rx-usecs and tx-usecs to 250 will limit interrupts to about 4000
+    interrupts per second per queue.
+
+    # ethtool -C <interface> adaptive-rx off adaptive-tx off rx-usecs 250 
+    tx-usecs 250
 
 For lower latency: Disable Adaptive ITR and ITR by setting rx and tx to 0
 using ethtool.
-# ethtool <interface> adaptive-rx off adaptive-tx off rx-usecs 0 tx-usecs 0
+
+    # ethtool -C <interface> adaptive-rx off adaptive-tx off rx-usecs 0 
+    tx-usecs 0
 
 
 ================================================================================
@@ -676,6 +741,32 @@ using ethtool.
 
 Known Issues/Troubleshooting
 ----------------------------
+
+
+Fixing Performance Issues When Using IOMMU in Virtualized Environments
+----------------------------------------------------------------------
+The IOMMU feature of the processor prevents I/O devices from accessing memory
+outside the boundaries set by the OS. It also allows devices to be directly
+assigned to a Virtual Machine. However, IOMMU may affect performance, both
+in latency (each DMA access by the device must be translated by the IOMMU)
+and in CPU utilization (each buffer assigned to every device must be mapped
+in the IOMMU).
+
+If you experience significant performance issues with IOMMU, try using it in
+“passthrough” mode by adding the following to the kernel boot command line:
+  intel_iommu=on iommu=pt
+
+NOTE: This mode enables remapping for assigning devices to VMs, providing
+near-native I/O performance, but does not provide the additional memory
+protection.
+
+
+Transmit hangs leading to no traffic
+------------------------------------
+
+Disabling flow control while the device is under stress may cause tx hangs and
+eventually lead to the device no longer passing traffic. You must reboot the
+system to resolve this issue.
 
 
 Incomplete messages in the system log
@@ -693,6 +784,13 @@ Bad checksum counter incorrectly increments when using VxLAN
 
 When passing non-UDP traffic over a VxLAN interface, the port.rx_csum_bad
 counter increments for the packets.
+
+
+Statistic counters reset when promiscuous mode is changed
+---------------------------------------------------------
+
+Changing promiscuous mode triggers a reset of the physical function driver.
+This will reset the statistic counters.
 
 
 Virtual machine does not get link
@@ -889,10 +987,10 @@ For general information, go to the Intel support website at:
 www.intel.com/support/
 
 or the Intel Wired Networking project hosted by Sourceforge at:
-http://sourceforge.net/projects/i40e
+http://sourceforge.net/projects/e1000
 If an issue is identified with the released source code on a supported
 kernel with a supported adapter, email the specific information related to the
-issue to i40e-devel@lists.sf.net.
+issue to e1000-devel@lists.sf.net.
 
 
 ================================================================================

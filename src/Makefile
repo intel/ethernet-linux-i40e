@@ -94,6 +94,12 @@ test_file = $(shell [ -f $(file) ] && echo $(file))
 VSP := $(foreach file, $(VSP), $(test_file))
 CSP := $(foreach file, $(CSP), $(test_file))
 
+ifneq ($(wildcard ./gcc-i-sys.sh),)
+GCC_I_SYS := $(shell readlink -e ./gcc-i-sys.sh)
+$(shell chmod +x $(GCC_I_SYS))
+ISYS_OPTS := CC="$(GCC_I_SYS)"
+endif
+
 # and use the first valid entry in the Search Paths
 ifeq (,$(VERSION_FILE))
   VERSION_FILE := $(firstword $(VSP))
@@ -147,14 +153,28 @@ ifeq (${KVER_CODE},)
                  grep -m 1 LINUX_VERSION_CODE | awk '{ print $$3 }' | sed 's/\"//g')
 endif
 
-# set the install path before and after 3.2.0, and handle
-# distros like SLES 11 that backported the directories
-ifeq (1,$(shell [ -d /lib/modules/$(KVER)/kernel/drivers/net/ethernet/intel ] && echo 1 || echo 0))
-INSTDIR := /lib/modules/$(KVER)/kernel/drivers/net/ethernet/intel
-else
-INSTDIR := /lib/modules/$(KVER)/kernel/drivers/net
-endif
+############################
+# Module Install Directory #
+# ############################
 
+# Default to using updates/drivers/net/ethernet/intel/ path, since depmod since
+# v3.1 defaults to checking updates folder first, and only checking kernel/
+# and extra/ afterwards. We use updates instead of kernel/* due to desire to
+# prevent over-writing built-in modules files, and this neatly solves
+# the problem of knowing a-priori where the original driver was installed,
+# and how to uninstall cleanly.
+INSTDIR ?= /lib/modules/${KVER}/updates/drivers/net/ethernet/intel
+
+# figure out how to update the initrd
+INITRD_COMMAND = $(shell \
+			if which dracut > /dev/null 2>&1 ; then \
+				echo "dracut --force"; \
+			elif which mkinitrd > /dev/null 2>&1 ; then \
+				echo "mkinitrd"; \
+			elif which update-initramfs > /dev/null 2>&1 ; then \
+				echo "update-initramfs -u"; \
+			fi )
+				
 # abort the build on kernels older than 2.6.32
 ifneq (1,$(shell [ $(KVER_CODE) -ge 132640 ] && echo 1 || echo 0))
   $(error *** Aborting the build. \
@@ -188,10 +208,11 @@ endif
 # $1 is the relative path of the subdir to build in
 # $2 is the kernel build target
 kernelbuild = $(shell (\
+		export REAL_CC=$(CC); \
 		if [ -n "$(KOBJ)" ]; then \
-			$(MAKE) ccflags-y:="$(CFLAGS_EXTRA)" -C $(KSRC) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=$(realpath $(1)) INSTALL_MOD_PATH=$(INSTALL_MOD_PATH) $(2) ; \
+			$(MAKE) $(ISYS_OPTS) ccflags-y:="$(CFLAGS_EXTRA)" -C $(KSRC) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=$(realpath $(1)) INSTALL_MOD_PATH=$(INSTALL_MOD_PATH) $(2) ; \
 		else \
-			$(MAKE) ccflags-y:="$(CFLAGS_EXTRA)" -C $(KSRC) -O $(KOBJ) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=$(realpath $(1)) INSTALL_MOD_PATH=$(INSTALL_MOD_PATH) $(2) ; \
+			$(MAKE) $(ISYS_OPTS) ccflags-y:="$(CFLAGS_EXTRA)" -C $(KSRC) -O $(KOBJ) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=$(realpath $(1)) INSTALL_MOD_PATH=$(INSTALL_MOD_PATH) $(2) ; \
 		fi > .tmp ; rm .tmp))
 
 
@@ -206,19 +227,21 @@ $(MODULES): $(TARGETS)
 
 $(TARGETS): $(SOURCES)
 	@for s in $(DRIVERS) ; do \
+		export REAL_CC=$(CC); \
 		if [ -n "$(KOBJ)" ]; then \
-			$(MAKE) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s modules ; \
+			$(MAKE) $(ISYS_OPTS) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s modules ; \
 		else \
-			$(MAKE) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) -O $(KOBJ) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s modules ; \
+			$(MAKE) $(ISYS_OPTS) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) -O $(KOBJ) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s modules ; \
 		fi ; \
 	done
 
 noisy: $(SOURCES)
 	@for s in $(DRIVERS) ; do \
+		export REAL_CC=$(CC); \
 		if [ -n "$(KOBJ)" ]; then \
-			$(MAKE) -C $(KSRC) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s V=1 modules ; \
+			$(MAKE) -C $(KSRC) $(ISYS_OPTS) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s V=1 modules ; \
 		else \
-			$(MAKE) -C $(KSRC) -O $(KOBJ) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s V=1 modules ; \
+			$(MAKE) -C $(KSRC) -O $(KOBJ) $(ISYS_OPTS) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s V=1 modules ; \
 		fi ; \
 	done
 	@cp $(TARGETS) .
@@ -229,19 +252,21 @@ silent: $(SOURCES)
 
 sparse: clean $(SOURCES)
 	@for s in $(DRIVERS) ; do \
+		export REAL_CC=$(CC); \
 		if [ -n "$(KOBJ)" ]; then \
-			$(MAKE) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s C=2 CF="-D__CHECK_ENDIAN__ -Wbitwise -Wcontext" modules ; \
+			$(MAKE) $(ISYS_OPTS) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s C=2 CF="-D__CHECK_ENDIAN__ -Wbitwise -Wcontext" modules ; \
 		else \
-			$(MAKE) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) -O $(KOBJ) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s C=2 CF="-D__CHECK_ENDIAN_ -Wbitwise -Wcontext" modules ; \
+			$(MAKE) $(ISYS_OPTS) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) -O $(KOBJ) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s C=2 CF="-D__CHECK_ENDIAN_ -Wbitwise -Wcontext" modules ; \
 		fi ; \
 	done
 
 ccc: clean $(SOURCES)
 	@for s in $(DRIVERS) ; do \
+		export REAL_CC=$(CC); \
 		if [ -n "$(KOBJ)" ]; then \
-			$(MAKE) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s coccicheck MODE=report; \
+			$(MAKE) $(ISYS_OPTS) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s coccicheck MODE=report; \
 		else \
-			$(MAKE) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) -O $(KOBJ) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s coccicheck MODE=report; \
+			$(MAKE) $(ISYS_OPTS) ccflags-y+="$(CFLAGS_EXTRA)" -C $(KSRC) -O $(KOBJ) CONFIG_I40E=m CONFIG_I40EVF=m SUBDIRS=`pwd`/$$s coccicheck MODE=report; \
 		fi ; \
 	done
 
@@ -253,19 +278,20 @@ clean:
 	@-rm -rf *.$(MANSECTION).gz *.ko
 
 install: $(MODULES) manfile
-# remove all old versions of the driver
-	$(foreach d, $(DRIVERS), $(shell rm -f $(INSTALL_MOD_PATH)$(INSTDIR)/$(d)/$(d).ko))
-	$(foreach d, $(DRIVERS), $(shell rm -f $(INSTALL_MOD_PATH)$(INSTDIR)/$(d)/$(d).gz))
-	$(foreach d, $(DRIVERS), $(shell rm -f $(INSTALL_MOD_PATH)$(INSTDIR)/$(d)/$(d).ko.xz))
+	@echo "Copying modules..."
 	$(foreach m, $(DRIVERS), $(shell \
 		install -D -m 644 $(m).$(MANSECTION).gz $(INSTALL_MOD_PATH)$(MANDIR)/man$(MANSECTION)/$(m).$(MANSECTION).gz ; \
 		install -D -m 644 $(m).ko $(INSTALL_MOD_PATH)$(INSTDIR)/$(m)/$(m).ko))
 ifeq (,$(INSTALL_MOD_PATH))
+	@echo "Running depmod..."
 	@-/sbin/depmod -a $(KVER) || true
+ifeq (,$(INITRD_COMMAND))
+	@echo "Unable to update initrd. You may need to do this manually."
 else
-	@-/sbin/depmod -b $(INSTALL_MOD_PATH) -a -n $(KVER) > /dev/null || true
+	@echo "Updating initrd..."
+	@$(INITRD_COMMAND)
 endif
-
+endif
 uninstall:
 	$(foreach d, $(DRIVERS), $(shell rm -f $(INSTALL_MOD_PATH)$(INSTDIR)/$(d)/$(d).ko))
 	$(foreach d, $(DRIVERS), $(shell rm -f $(INSTALL_MOD_PATH)$(INSTDIR)/$(d)/$(d).gz))

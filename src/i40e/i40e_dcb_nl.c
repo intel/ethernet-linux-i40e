@@ -199,8 +199,10 @@ void i40e_dcbnl_set_all(struct i40e_vsi *vsi)
 		}
 	}
 
+#ifdef HAVE_DCBNL_IEEE_DELAPP
 	/* Notify user-space of the changes */
 	dcbnl_ieee_notify(dev, RTM_SETDCB, DCB_CMD_IEEE_SET, 0, 0);
+#endif
 }
 
 /**

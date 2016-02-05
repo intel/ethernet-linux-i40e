@@ -28,7 +28,7 @@
 #include <linux/configfs.h>
 #include "i40e.h"
 
-#if IS_ENABLED(CONFIG_CONFIGFS_FS)
+#if IS_ENABLED(CONFIG_CONFIGFS_FS) && (LINUX_VERSION_CODE < KERNEL_VERSION(4,4,0))
 
 /**
  * configfs structure for i40e
@@ -352,6 +352,22 @@ int i40e_configfs_init(void)
 void i40e_configfs_exit(void)
 {
 	configfs_unregister_subsystem(&i40e_cfgfs_group_subsys);
+}
+
+#else /* CONFIG_CONFIGFS_FS */
+/**
+ * i40e_configfs_init - Initialize configfs support for our driver
+ **/
+int i40e_configfs_init(void)
+{
+	return 0;
+}
+
+/**
+ * i40e_configfs_init - Bail out - unregister configfs subsystem and release
+ **/
+void i40e_configfs_exit(void)
+{
 }
 
 #endif /* CONFIG_CONFIGFS_FS */

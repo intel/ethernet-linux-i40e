@@ -90,7 +90,17 @@ enum i40e_dyn_idx_t {
 	BIT_ULL(I40E_FILTER_PCTYPE_FRAG_IPV6) | \
 	BIT_ULL(I40E_FILTER_PCTYPE_L2_PAYLOAD))
 
-#define i40e_pf_get_default_rss_hena(pf) I40E_DEFAULT_RSS_HENA
+#define I40E_DEFAULT_RSS_HENA_EXPANDED (I40E_DEFAULT_RSS_HENA | \
+	BIT_ULL(I40E_FILTER_PCTYPE_NONF_IPV4_TCP_SYN_NO_ACK) | \
+	BIT_ULL(I40E_FILTER_PCTYPE_NONF_UNICAST_IPV4_UDP) | \
+	BIT_ULL(I40E_FILTER_PCTYPE_NONF_MULTICAST_IPV4_UDP) | \
+	BIT_ULL(I40E_FILTER_PCTYPE_NONF_IPV6_TCP_SYN_NO_ACK) | \
+	BIT_ULL(I40E_FILTER_PCTYPE_NONF_UNICAST_IPV6_UDP) | \
+	BIT_ULL(I40E_FILTER_PCTYPE_NONF_MULTICAST_IPV6_UDP))
+
+#define i40e_pf_get_default_rss_hena(pf) \
+	(((pf)->flags & I40E_FLAG_MULTIPLE_TCP_UDP_RSS_PCTYPE) ? \
+	  I40E_DEFAULT_RSS_HENA_EXPANDED : I40E_DEFAULT_RSS_HENA)
 
 /* Supported Rx Buffer Sizes */
 #define I40E_RXBUFFER_512   512    /* Used for packet split */
@@ -141,7 +151,7 @@ enum i40e_dyn_idx_t {
 /* Tx Descriptors needed, worst case */
 #define TXD_USE_COUNT(S) DIV_ROUND_UP((S), I40E_MAX_DATA_PER_TXD)
 #define DESC_NEEDED (MAX_SKB_FRAGS + 4)
-#define I40E_MIN_DESC_PENDING   4
+#define I40E_MIN_DESC_PENDING	4
 
 #define I40E_TX_FLAGS_CSUM		BIT(0)
 #define I40E_TX_FLAGS_HW_VLAN		BIT(1)
@@ -155,7 +165,7 @@ enum i40e_dyn_idx_t {
 #define I40E_TX_FLAGS_TSYN		BIT(8)
 #endif /* HAVE_PTP_1588_CLOCK */
 #define I40E_TX_FLAGS_FD_SB		BIT(9)
-#define I40E_TX_FLAGS_VXLAN_TUNNEL	BIT(10)
+#define I40E_TX_FLAGS_TUNNEL		BIT(10)
 #define I40E_TX_FLAGS_VLAN_MASK		0xffff0000
 #define I40E_TX_FLAGS_VLAN_PRIO_MASK	0xe0000000
 #define I40E_TX_FLAGS_VLAN_PRIO_SHIFT	29
@@ -194,19 +204,21 @@ struct i40e_tx_queue_stats {
 	u64 tx_busy;
 	u64 tx_done_old;
 	u64 tx_linearize;
+	u64 tx_force_wb;
+	u64 tx_lost_interrupt;
 };
 
 struct i40e_rx_queue_stats {
 	u64 non_eop_descs;
 	u64 alloc_page_failed;
 	u64 alloc_buff_failed;
+	u64 page_reuse_count;
+	u64 realloc_count;
 };
 
 enum i40e_ring_state_t {
 	__I40E_TX_FDIR_INIT_DONE,
 	__I40E_TX_XPS_INIT_DONE,
-	__I40E_TX_DETECT_HANG,
-	__I40E_HANG_CHECK_ARMED,
 	__I40E_RX_PS_ENABLED,
 	__I40E_RX_16BYTE_DESC_ENABLED,
 };
@@ -217,12 +229,6 @@ enum i40e_ring_state_t {
 	set_bit(__I40E_RX_PS_ENABLED, &(ring)->state)
 #define clear_ring_ps_enabled(ring) \
 	clear_bit(__I40E_RX_PS_ENABLED, &(ring)->state)
-#define check_for_tx_hang(ring) \
-	test_bit(__I40E_TX_DETECT_HANG, &(ring)->state)
-#define set_check_for_tx_hang(ring) \
-	set_bit(__I40E_TX_DETECT_HANG, &(ring)->state)
-#define clear_check_for_tx_hang(ring) \
-	clear_bit(__I40E_TX_DETECT_HANG, &(ring)->state)
 #define ring_is_16byte_desc_enabled(ring) \
 	test_bit(__I40E_RX_16BYTE_DESC_ENABLED, &(ring)->state)
 #define set_ring_16byte_desc_enabled(ring) \
@@ -253,7 +259,6 @@ struct i40e_ring {
 #define I40E_RX_DTYPE_NO_SPLIT      0
 #define I40E_RX_DTYPE_HEADER_SPLIT  1
 #define I40E_RX_DTYPE_SPLIT_ALWAYS  2
-	u8  hsplit;
 #define I40E_RX_SPLIT_L2      0x1
 #define I40E_RX_SPLIT_IP      0x2
 #define I40E_RX_SPLIT_TCP_UDP 0x4
@@ -272,7 +277,12 @@ struct i40e_ring {
 #endif /* HAVE_PTP_1588_CLOCK */
 	bool ring_active;		/* is ring online or not */
 	bool arm_wb;		/* do something to arm write back */
-	u16  packet_stride;
+	u8 packet_stride;
+
+	u16 flags;
+#define I40E_TXR_FLAGS_WB_ON_ITR	BIT(0)
+#define I40E_TXR_FLAGS_OUTER_UDP_CSUM	BIT(1)
+#define I40E_TXR_FLAGS_LAST_XMIT_MORE_SET BIT(2)
 
 	/* stats structs */
 	struct i40e_queue_stats	stats;
@@ -355,8 +365,8 @@ static inline bool i40e_qv_disable(struct i40e_q_vector *q_vector)
 	return true;
 }
 
-void i40e_alloc_rx_buffers_ps(struct i40e_ring *rxr, u16 cleaned_count);
-void i40e_alloc_rx_buffers_1buf(struct i40e_ring *rxr, u16 cleaned_count);
+bool i40e_alloc_rx_buffers_ps(struct i40e_ring *rxr, u16 cleaned_count);
+bool i40e_alloc_rx_buffers_1buf(struct i40e_ring *rxr, u16 cleaned_count);
 void i40e_alloc_rx_headers(struct i40e_ring *rxr);
 netdev_tx_t i40e_lan_xmit_frame(struct sk_buff *skb, struct net_device *netdev);
 #if !defined(HAVE_NET_DEVICE_OPS) && defined(HAVE_NETDEV_SELECT_QUEUE)
@@ -371,15 +381,16 @@ void i40e_free_tx_resources(struct i40e_ring *tx_ring);
 void i40e_free_rx_resources(struct i40e_ring *rx_ring);
 int i40e_napi_poll(struct napi_struct *napi, int budget);
 #ifdef I40E_FCOE
-void i40e_tx_map(struct i40e_ring *, struct sk_buff *, struct i40e_tx_buffer *,
-		 u32, const u8, u32, u32);
+void i40e_tx_map(struct i40e_ring *tx_ring, struct sk_buff *skb,
+		 struct i40e_tx_buffer *first, u32 tx_flags,
+		 const u8 hdr_len, u32 td_cmd, u32 td_offset);
 int i40e_maybe_stop_tx(struct i40e_ring *tx_ring, int size);
-int i40e_xmit_descriptor_count(struct sk_buff *, struct i40e_ring *);
-int i40e_tx_prepare_vlan_flags(struct sk_buff *, struct i40e_ring *,
-			       u32 *flags);
+int i40e_xmit_descriptor_count(struct sk_buff *skb, struct i40e_ring *tx_ring);
+int i40e_tx_prepare_vlan_flags(struct sk_buff *skb,
+			       struct i40e_ring *tx_ring, u32 *flags);
 #endif
 void i40e_force_wb(struct i40e_vsi *vsi, struct i40e_q_vector *q_vector);
-u32 i40e_get_tx_pending(struct i40e_ring *ring);
+u32 i40e_get_tx_pending(struct i40e_ring *ring, bool in_sw);
 
 /**
  * i40e_get_head - Retrieve head from head writeback

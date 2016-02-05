@@ -94,8 +94,8 @@ struct i40e_vf {
 	 * When assigned, these will be non-zero, because VSI 0 is always
 	 * the main LAN VSI for the PF.
 	 */
-	u8 lan_vsi_idx;	        /* index into PF struct */
-	u8 lan_vsi_id;		/* ID as used by firmware */
+	u16 lan_vsi_idx;	/* index into PF struct */
+	u16 lan_vsi_id;		/* ID as used by firmware */
 #ifdef I40E_FCOE
 	u8 fcoe_vsi_index;
 	u8 fcoe_vsi_id;
@@ -114,9 +114,9 @@ struct i40e_vf {
 	bool link_forced;
 	bool link_up;		/* only valid if VF link is forced */
 #endif
-#ifdef HAVE_VF_SPOOFCHK_CONFIGURE
 	bool spoofchk;
-#endif
+	/* RDMA Client */
+	struct i40e_virtchnl_iwarp_qvlist_info *qvlist_info;
 };
 
 void i40e_free_vfs(struct i40e_pf *pf);

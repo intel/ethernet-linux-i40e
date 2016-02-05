@@ -27,6 +27,8 @@
 #ifndef _I40E_HELPER_H_
 #define _I40E_HELPER_H_
 
+#include "i40e_alloc.h"
+
 /**
  * i40e_allocate_dma_mem_d - OS specific memory alloc for shared code
  * @hw:   pointer to the HW structure
@@ -36,6 +38,7 @@
  **/
 inline int i40e_allocate_dma_mem_d(struct i40e_hw *hw,
 				   struct i40e_dma_mem *mem,
+				   __always_unused enum i40e_memory_type mtype,
 				   u64 size, u32 alignment)
 {
 	struct i40e_pf *nf = (struct i40e_pf *)hw->back;

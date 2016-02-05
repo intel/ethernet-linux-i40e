@@ -81,7 +81,8 @@ struct i40e_dma_mem {
 } __packed;
 
 #define i40e_allocate_dma_mem(h, m, unused, s, a) \
-			i40e_allocate_dma_mem_d(h, m, s, a)
+			i40e_allocate_dma_mem_d(h, m, unused, s, a)
+
 #define i40e_free_dma_mem(h, m) i40e_free_dma_mem_d(h, m)
 
 struct i40e_virt_mem {
@@ -116,10 +117,20 @@ struct i40e_spinlock {
 	struct mutex spinlock;
 };
 
-#define i40e_init_spinlock(_sp) i40e_init_spinlock_d(_sp)
+static inline void i40e_no_action(struct i40e_spinlock *sp)
+{
+	/* nothing */
+}
+
+/* the locks are initialized in _probe and destroyed in _remove
+ * so make sure NOT to implement init/destroy here, as to
+ * avoid the i40e_init_adminq code trying to reinitialize
+ * the persistent lock memory
+ */
+#define i40e_init_spinlock(_sp)    i40e_no_action(_sp)
 #define i40e_acquire_spinlock(_sp) i40e_acquire_spinlock_d(_sp)
 #define i40e_release_spinlock(_sp) i40e_release_spinlock_d(_sp)
-#define i40e_destroy_spinlock(_sp) i40e_destroy_spinlock_d(_sp)
+#define i40e_destroy_spinlock(_sp) i40e_no_action(_sp)
 
 #define I40E_HTONL(a)		htonl(a)
 

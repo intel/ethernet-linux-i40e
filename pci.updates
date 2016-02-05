@@ -6,8 +6,6 @@
 #             (numerical order).
 #
 8086  Intel Corporation
-	154c  XL710/X710 Virtual Function
-	1571  XL710/X710 Virtual Function
 	1572  Ethernet Controller X710 for 10GbE SFP+
 		1028 0000  Ethernet 10G X710 rNDC
 		1028 1f99  Ethernet 10G 4P X710/I350 rNDC
@@ -28,10 +26,12 @@
 		8086 0006  Ethernet Converged Network Adapter X710
 		8086 0007  Ethernet Converged Network Adapter X710-2
 		8086 0008  Ethernet Converged Network Adapter X710-2
-		8086 0009  Ethernet Controller X710 for 10GbE SFP+ 
-		8086 000a  Ethernet Controller X710 for 10GbE SFP+ 
+		8086 0009  Ethernet Controller X710 for 10GbE SFP+
+		8086 000a  Ethernet Controller X710 for 10GbE SFP+
+		8086 000d  Ethernet Controller X710 for 10GbE SFP+
 		8086 4005  Ethernet Controller X710 for 10GbE SFP+
-		8086 4006  Ethernet Controller X710 for 10GbE SFP+ 
+		8086 4006  Ethernet Controller X710 for 10GbE SFP+
+	1574  Ethernet Controller XL710 Emulation
 	1580  Ethernet Controller XL710 for 40GbE backplane
 	1581  Ethernet Controller X710 for 10GbE backplane
 		1028 0000  Ethernet 10G X710-k bNDC
@@ -41,8 +41,8 @@
 	1583  Ethernet Controller XL710 for 40GbE QSFP+
 		1028 0000  Ethernet 40G 2P XL710 QSFP+ rNDC
 		1028 1f9f  Ethernet 40G 2P XL710 QSFP+ rNDC
-		108e 0000  Oracle Quad 10Gb Ethernet Adapter
-		108e 7b1b  Oracle Quad 10Gb Ethernet Adapter
+		108e 0000  Oracle 10Gb/40Gb Ethernet Adapter
+		108e 7b1d  Oracle 10Gb/40Gb Ethernet Adapter
 		1137 0000  Cisco(R) Ethernet Converged NIC XL710-Q2
 		1137 013c  Cisco(R) Ethernet Converged NIC XL710-Q2
 		8086 0000  Ethernet Converged Network Adapter XL710-Q2
@@ -71,3 +71,5 @@
 		8086 0000  Ethernet Converged Network Adapter X710-T
 		8086 0001  Ethernet Converged Network Adapter X710-T4
 		8086 0002  Ethernet Converged Network Adapter X710-T4
+	37d1  Ethernet Connection X722 for 1GbE
+	37d2  Ethernet Connection X722 for 10GBASE-T
