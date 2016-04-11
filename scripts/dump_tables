@@ -1,6 +1,6 @@
 #!/bin/bash
 # Dump Tables script
-# Copyright (C) 2015 Intel Corporation
+# Copyright (C) 2015 - 2016 Intel Corporation
 #
 # This script is used to generate a dump of the hardware state for
 # sending to linux.nics@intel.com for debugging purposes.  This

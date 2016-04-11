@@ -4,7 +4,7 @@ i40e Linux* Base Driver for the Intel(R) XL710 Ethernet Controller Family
 
 ===============================================================================
 
-December 16, 2015
+April 6, 2016
 
 ===============================================================================
 
@@ -63,13 +63,13 @@ frames to be dropped.
 Overview
 --------
 
-This document describes the i40e Linux* Base Driver
-for the XL710 Ethernet Controller Family of Adapters.
+This driver supports kernel versions 2.6.32 and newer.
 
-The Linux* base driver supports the following kernel versions:
-2.6.32 and newer
+It supports Linux supported x86_64 systems.
 
-It includes support for Linux supported x86_64 systems.
+Driver information can be obtained using ethtool, lspci, and ifconfig.
+Instructions on updating ethtool can be found in the section Additional
+Configurations later in this document.
 
 This driver is only supported as a loadable module at this time. Intel is
 not supplying patches against the kernel source to allow for static linking of
@@ -83,26 +83,24 @@ The following features are now available in supported kernels:
 - Native VLANs
 - Channel Bonding (teaming)
 - SNMP
-- Generic Receive Offload
 
 Adapter teaming is implemented using the native Linux Channel bonding
 module. This is included in supported Linux kernels.
+
 Channel Bonding documentation can be found in the Linux kernel source:
 /documentation/networking/bonding.txt
 
 The driver information previously displayed in the /proc file system is not
 supported in this release.
 
-Driver information can be obtained using ethtool, lspci, and ifconfig.
-Instructions on updating ethtool can be found in the section Additional 
-Configurations later in this document.
-
 
 
 Identifying Your Adapter
 ------------------------
-The driver in this release is compatible with XL710 and X710-based Intel
-Ethernet Network Connections.
+The driver in this release is compatible with devices based on the following:
+  * Intel(R) Ethernet Controller X710
+  * Intel(R) Ethernet Controller XL710
+  * Intel(R) Ethernet Controller X722
 
 For information on how to identify your adapter, go to the Adapter &
 Driver ID Guide at:
@@ -301,6 +299,49 @@ the first VF on VLAN 10.
 $ ip link set dev eth0 vf 0 vlan 10
 .
 
+VLAN Tag Packet Steering
+------------------------
+
+Allows you to send all packets with a specific VLAN tag to a particular
+SR-IOV virtual function (VF). Further, this feature allows you to designate
+a particular VF as trusted, and allows that trusted VF to request selective
+promiscuous mode on the Physical Function (PF).
+
+To set a VF as trusted or untrusted, enter the following command in the
+Hypervisor:
+  # ip link set dev eth0 vf 1 trust [on|off]
+
+Once the VF is designated as trusted, use the following commands in the VM
+to set the VF to promiscuous mode.
+  For promiscuous all:
+  #ip link set eth2 promisc on
+    Where eth2 is a VF interface in the VM
+  For promiscuous Multicast:
+  #ip link set eth2 allmulti on
+    Where eth2 is a VF interface in the VM
+
+    NOTE: By default, the ethtool priv-flag vf-true-promisc-support is set to 
+    “off”,meaning that promiscuous mode for the VF will be limited. To set the
+    promiscuous mode for the VF to true promiscuous and allow the VF to see
+    all ingress traffic, use the following command.
+      #ethtool –set-priv-flags p261p1 vf-true-promisc-support on
+    The vf-true-promisc-support priv-flag does not enable promiscuous mode;
+    rather, it designates which type of promiscuous mode (limited or true)
+    you will get when you enable promiscuous mode using the ip link commands 
+    above. Note that this is a global setting that affects the entire device.
+    However,the vf-true-promisc-support priv-flag is only exposed to the first
+    PF of the device. The PF remains in limited promiscuous mode (unless it
+    is in MFP mode) regardless of the vf-true-promisc-support setting.
+
+Now add a VLAN interface on the VF interface.
+  #ip link add link eth2 name eth2.100 type vlan id 100
+
+Note that the order in which you set the VF to promiscuous mode and add
+the VLAN interface does not matter (you can do either first). The end result
+in this example is that the VF will get all traffic that is tagged with
+VLAN 100.
+
+
 Intel(R) Ethernet Flow Director
 -------------------------------
 NOTE: Flow director parameters are only supported on kernel versions 2.6.30 or
@@ -312,33 +353,57 @@ The Flow Director performs the following tasks:
   - Enables tight control on routing a flow in the platform.
   - Matches flows and CPU cores for flow affinity.
   - Supports multiple parameters for flexible flow classification and load
-    balancing.
+    balancing (in SFP mode only).
 
 NOTES:
 
-  - The Flow Director is enabled only if the kernel supports multiple
-    transmit queues.
   - An included script (set_irq_affinity) automates setting the IRQ to
     CPU affinity.
-  - The i40e Linux driver does not support configuration of the mask field.
-    It only accepts rules that completely qualify a certain flow type.
+  - The Linux i40e driver supports the following flow types: IPv4, TCPv4, and
+    UDPv4. For a given flow type, it supports valid combinations of
+    IP addresses (source or destination) and UDP/TCP ports (source and 
+    destination). For example, you can supply only a source IP address,
+    a source IP address and a destination port, or any combination of one or
+    more of these four parameters.
+  - The Linux i40e driver allows you to filter traffic based on a user-defined
+    flexible two-byte pattern and offset by using the ethtool user-def and
+    mask fields. Only L3 and L4 flow types are supported for user-defined 
+    flexible filters. For a given flow type, you must clear all Flow Director
+    filters before changing the input set (for that flow type).
 
 ethtool commands:
 
-  - To enable or disable the Flow Director
+  - To enable or disable the Flow Director:
 
 	# ethtool -K ethX ntuple <on|off>
 
-	When disabling ntuple filters all the user programed filters are flushed
-	from the driver cache and hardware. Filters must be re-added if they are
-	needed when ntuple is re-enabled.
+	When disabling ntuple filters, all the user programed filters are
+	flushed from the driver cache and hardware. All needed filters must
+	be re-added when ntuple is re-enabled.
 
-  - To add a filter that directs packet to queue 2, use -U or -N switch
+  - To add a filter that directs packet to queue 2, use -U or -N switch:
 
 	# ethtool -N ethX flow-type tcp4 src-ip 192.168.10.1 dst-ip \
 	192.168.10.2 src-port 2000 dst-port 2001 action 2 [loc 1]
 
-  - To see the list of filters currently present
+   To set a filter using only the source and destination IP address:
+
+	# ethtool -N ethX flow-type tcp4 src-ip 192.168.10.1 dst-ip \
+	192.168.10.2 action 2 [loc 1]
+
+   To set a filter based on a user defined pattern and offset:
+
+	# ethtool -N ethX flow-type tcp4 src-ip 192.168.10.1 dst-ip \
+	192.168.10.2 user-def 0xffffffff00000001 m 0x40 action 2 [loc 1]
+
+	where the value of the user-def field (0xffffffff00000001) is the
+	pattern and m 0x40 is the offset.
+
+	Note that in this case the mask (m 0x40) parameter is used with the
+	user-def field, whereas for cloud filter support the mask parameter
+	is not used.
+
+  - To see the list of filters currently present:
 	# ethtool <-u|-n> ethX
 
 Application Targeted Routing (ATR) Perfect Filters
@@ -391,6 +456,108 @@ Occasionally, when the filter table is full, you will notice HW errors when
 you try to add new rules. The i40e driver will call for a filter flush and
 sideband filter list replay. This will help flush any stale ATR rules and
 create space.
+
+
+Cloud Filter Support
+--------------------
+On a complex network that supports multiple types of traffic (such as for
+storage as well as cloud), cloud filter support allows you to send one type of
+ traffic (for example, the storage traffic) to the Physical Function (PF) and
+another type (say, the cloud traffic) to a Virtual Function (VF). Because cloud
+networks are typically VXLAN/Geneve-based, you can define a cloud filter to
+identify VXLAN/Geneve packets and send them to a queue in the VF to be
+processed by the virtual machine (VM). Similarly, other cloud filters can be
+designed for various other traffic tunneling.
+
+NOTES:
+  - Cloud filters are only supported when the underlying device is in Single
+    Function per Port mode.
+  - The "action -1" option, which drops matching packets in regular Flow
+    Director filters, is not available to drop packets when used with 
+    cloud filters.
+  - For IPv4 and ether flow-types, cloud filters cannot be used for TCP or
+    UDP filters.
+  - Cloud filters can be used as a method for implementing queue splitting in
+    the PF.
+
+The following filters are supported:
+  Cloud Filters
+    Inner MAC, Inner VLAN (for NVGRE, VXLAN or Geneve packets)
+    Inner MAC, Inner VLAN, Tenant ID (for NVGRE, VXLAN or Geneve packets)
+    Inner MAC, Tenant ID (NVGRE packet or VXLAN/Geneve packets)
+    Outer MAC L2 filter
+    Inner MAC filter
+    Outer MAC, Tenant ID, Inner MAC
+    Application Destination IP
+    Application Source-IP, Inner MAC
+    ToQueue: Use MAC, VLAN to point to a queue
+  L3 filters
+    Application Destination IP
+
+Use ethtool’s flow director and user defined (user-def) options to define
+cloud filters for tunneled packets (VF) and L3 filters for non-tunneled
+packets (PF or VF). In this case, the user-def field specifies that a cloud
+filter is being programmed instead of a Flow Director filter. Note that this
+is not the same as setting filters using a user-defined pattern and offset,
+which requires using the mask ('m') parameter in conjunction with the user-def
+field (see the Intel Ethernet Flow Director section in this document).
+
+For regular Flow Director filters:
+
+  - No user-def specified or upper 32 bits of user-def is all 0s
+
+  Example:
+
+    ethtool -N p258p1 flow-type ip4 src-ip 192.168.1.108 dst-ip 192.168.1.109 /
+    action 6 loc 3
+
+For L3 filters (non-tunneled packets):
+
+  - “user-def 0xffffffff00000002” (no Tenant ID/VNI specified in the upper
+    32 bits of the user-def field and send to VF id 2)
+  - Only L3 parameters (src-IP, dst-IP) are considered
+
+  Example:
+
+    ethtool -N p4p2 flow-type ip4 src-ip 192.168.42.13 dst-ip 192.168.42.33 /
+    src-port 12344 dst-port 12344 user-def 0xffffffff00000001 loc 3
+      Redirect traffic coming from 192.168.42.13 port 12344 with destination
+      192.168.42.33 port 12344 into VF id 1, and call this “rule 3”
+
+For cloud filters (tunneled packets):
+
+  - All other filters, including where Tenant ID/VNI is specified.
+  - The upper 32 bits of the user def field can carry the tenant ID/VNI
+    if specified or required.
+  - The lower 32 bits of the 'user-def' field can be used to specify the
+    VF ID. If the ID is greater than the maximum number of VFs currently
+    enabled then the ID will default back to the main VSI.
+  - Cloud filters can be defined with inner MAC, outer MAC, inner IP address,
+     inner VLAN, and VNI as part of the cloud tuple. Cloud filters filter on
+    destination (not source) MAC and IP. The destination and source MAC
+    address fields in the ethtool command are overloaded as dst = outer,
+    src = inner MAC address to facilitate tuple definition for a cloud filter.
+  - The 'loc' parameter specifies the rule number of the filter as being
+    stored in the base driver
+
+  Example:
+
+    ethtool -N p4p2 flow-type ip4 src-ip 192.168.42.13 dst-ip 192.168.42.33 /
+    src-port 12344 dst-port 12344 user-def 0x2200000001 loc 38
+      Redirect traffic on VXLAN using tunnel id 34 (hex 0x22) coming from
+      192.168.42.13 port 12344 with destination 192.168.42.33 port 12344 into
+      VF id 1, and call this “rule 38”
+      NOTE: If the VF id given is larger than the number of active VFs (e.g.
+      if you set num_vfs to 8 and use VF id 12 in the ethtool command) the
+      traffic will be redirected to the PF rather than to the VF.
+
+To see the list of filters currently present:
+    ethtool <-u|-n> ethX
+      NOTE: For cloud filters in which the specified VF is greater than
+      the number of VFs supported, the cloud filter will send traffic
+      to the PF. However, the driver does not store the specified VF
+      number, so in this case the ethtool -n command will display
+      0xffff for the VF number.
 
 
 ================================================================================
@@ -501,6 +668,26 @@ ethtool -A eth? autoneg off rx on tx on
 NOTE: You must have a flow control capable link partner.
 
 
+RSS Hash Flow
+-------------
+
+Allows you to set the hash bytes per flow type and any combination of one or
+more options for Receive Side Scaling (RSS) hash byte configuration.
+
+#ethtool –N <dev> rx-flow-hash <type> <option>
+
+Where <type> is:
+  tcp4	signifying TCP over IPv4
+  udp4	signifying UDP over IPv4
+  tcp6	signifying TCP over IPv6
+  udp6	signifying UDP over IPv6
+And <option> is one or more of:
+  s	Hash on the IP source address of the rx packet.
+  d	Hash on the IP destination address of the rx packet.
+  f	Hash on bytes 0 and 1 of the Layer 4 header of the rx packet.
+  n	Hash on bytes 2 and 3 of the Layer 4 header of the rx packet.
+
+
 MAC and VLAN anti-spoofing feature
 ----------------------------------
 
@@ -508,13 +695,6 @@ When a malicious driver attempts to send a spoofed packet, it is dropped by
 the hardware and not transmitted.
 NOTE: This feature can be disabled for a specific Virtual Function (VF).
 ip link set <pf dev> vf <vf id> spoofchk {off|on}
-
-
-Support for UDP RSS
--------------------
-
-This feature adds an ON/OFF switch for hashing over certain flow types. Only
-UDP can be turned on. The default setting is enabled .
 
 
 IEEE 1588 Precision Time Protocol (PTP) Hardware Clock (PHC)
@@ -549,7 +729,7 @@ command:
 i40e support for VXLAN HW offloading is dependent on
 kernel support of the HW offloading features.
 
-For more information on configuring your network for overlay HW offloading
+For more information on configuring your network for overlay HW offloading
 support, refer to the Intel Technical Brief, "Creating Overlay Networks
 Using Intel Ethernet Converged Network Adapters" (Intel Networking Division,
 August 2013):
@@ -814,13 +994,6 @@ static MAC address in the host machine. This static MAC address will survive
 a VF driver reload.
 
 
-Enabling TSO may cause data integrity issues
---------------------------------------------
-
-Enabling TSO on kernel 3.14 or newer may cause data integrity issues.
-Kernel 3.10 and older do not exhibit this behavior.
-
-
 Changing the number of Rx or Tx queues with ethtool -L may cause a kernel panic
 -------------------------------------------------------------------------------
 
@@ -1014,9 +1187,7 @@ St - Fifth Floor, Boston, MA 02110-1301 USA.
 The full GNU General Public License is included in this distribution in the
 file called "COPYING".
 
-Intel(R) XL710/X710 Network Driver
-Intel(R) XL710/X710 Virtual Function Network Driver
-Copyright(c) 2014-2015 Intel Corporation.
+Copyright(c) 2014-2016 Intel Corporation.
 ================================================================================
 
 
