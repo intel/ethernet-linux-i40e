@@ -51,7 +51,7 @@ static const char i40e_driver_string[] =
 
 #define DRV_VERSION_MAJOR 1
 #define DRV_VERSION_MINOR 5
-#define DRV_VERSION_BUILD 16
+#define DRV_VERSION_BUILD 18
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
 	__stringify(DRV_VERSION_BUILD) \
@@ -4209,6 +4209,7 @@ static void i40e_vsi_free_irq(struct i40e_vsi *vsi)
 			irq_set_affinity_hint(pf->msix_entries[vector].vector,
 					      NULL);
 #endif
+			synchronize_irq(pf->msix_entries[vector].vector);
 			free_irq(pf->msix_entries[vector].vector,
 				 vsi->q_vectors[i]);
 
@@ -12066,6 +12067,7 @@ static int i40e_suspend(struct pci_dev *pdev, pm_message_t state)
 {
 	struct i40e_pf *pf = pci_get_drvdata(pdev);
 	struct i40e_hw *hw = &pf->hw;
+	int retval = 0;
 
 	set_bit(__I40E_SUSPENDED, &pf->state);
 	set_bit(__I40E_DOWN, &pf->state);
@@ -12082,11 +12084,17 @@ static int i40e_suspend(struct pci_dev *pdev, pm_message_t state)
 	wr32(hw, I40E_PFPM_WUFC,
 	     (pf->wol_en ? I40E_PFPM_WUFC_MAG_MASK : 0));
 
+	i40e_stop_misc_vector(pf);
+
+	retval = pci_save_state(pdev);
+	if (retval)
+		return retval;
+
 debug_mode:
 	pci_wake_from_d3(pdev, pf->wol_en);
 	pci_set_power_state(pdev, PCI_D3hot);
 
-	return 0;
+	return retval;
 }
 
 /**

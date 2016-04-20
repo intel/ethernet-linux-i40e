@@ -2200,6 +2200,109 @@ static ssize_t i40e_dbg_command_write(struct file *filp,
 			dev_info(&pf->pdev->dev,
 				 "BW settings NOT SAVED - error %d:%d updating NVM\n",
 				 aq_status, last_aq_status);
+	} else if (strncmp(cmd_buf, "add switch ingress mirror", 25) == 0) {
+		u16 rule_type = I40E_AQC_MIRROR_RULE_TYPE_ALL_INGRESS;
+		u16 switch_seid, dst_vsi_seid, rule_id;
+		i40e_status aq_status;
+
+		cnt = sscanf(&cmd_buf[25], "%hu %hu",
+			     &switch_seid, &dst_vsi_seid);
+		if (cnt != 2) {
+			dev_info(&pf->pdev->dev,
+				 "add mirror: bad command string, cnt=%d\n",
+				 cnt);
+			goto command_write_done;
+		}
+
+		aq_status =
+			i40e_aq_add_mirrorrule(&pf->hw,
+					       switch_seid, rule_type,
+					       dst_vsi_seid, 0, NULL, NULL,
+					       &rule_id, NULL, NULL);
+		if (aq_status)
+			dev_info(&pf->pdev->dev,
+				 "add ingress mirror failed with status %d\n",
+				 aq_status);
+		else
+			dev_info(&pf->pdev->dev,
+				 "Ingress mirror rule %d added\n", rule_id);
+	} else if (strncmp(cmd_buf, "add switch egress mirror", 24) == 0) {
+		u16 rule_type = I40E_AQC_MIRROR_RULE_TYPE_ALL_EGRESS;
+		u16 switch_seid, dst_vsi_seid, rule_id;
+		i40e_status aq_status;
+
+		cnt = sscanf(&cmd_buf[24], "%hu %hu",
+			     &switch_seid, &dst_vsi_seid);
+		if (cnt != 2) {
+			dev_info(&pf->pdev->dev,
+				 "add mirror: bad command string, cnt=%d\n",
+				 cnt);
+			goto command_write_done;
+		}
+
+		aq_status =
+			i40e_aq_add_mirrorrule(&pf->hw,
+					       switch_seid, rule_type,
+					       dst_vsi_seid, 0, NULL, NULL,
+					       &rule_id, NULL, NULL);
+		if (aq_status)
+			dev_info(&pf->pdev->dev,
+				 "add egress mirror failed with status %d\n",
+				 aq_status);
+		else
+			dev_info(&pf->pdev->dev,
+				 "Egress mirror rule %d added\n", rule_id);
+	} else if (strncmp(cmd_buf, "del switch ingress mirror", 25) == 0) {
+		u16 rule_type = I40E_AQC_MIRROR_RULE_TYPE_ALL_INGRESS;
+		i40e_status aq_status;
+		u16 switch_seid, rule_id;
+
+		cnt = sscanf(&cmd_buf[25], "%hu %hu",
+			     &switch_seid, &rule_id);
+		if (cnt != 2) {
+			dev_info(&pf->pdev->dev,
+				 "del mirror: bad command string, cnt=%d\n",
+				 cnt);
+			goto command_write_done;
+		}
+
+		aq_status =
+			i40e_aq_delete_mirrorrule(&pf->hw, switch_seid,
+						  rule_type, rule_id, 0, NULL,
+						  NULL, NULL, NULL);
+		if (aq_status)
+			dev_info(&pf->pdev->dev,
+				 "mirror rule remove failed with status %d\n",
+				 aq_status);
+		else
+			dev_info(&pf->pdev->dev,
+				 "Mirror rule %d removed\n", rule_id);
+	} else if (strncmp(cmd_buf, "del switch egress mirror", 24) == 0) {
+		u16 rule_type = I40E_AQC_MIRROR_RULE_TYPE_ALL_EGRESS;
+		i40e_status aq_status;
+		u16 switch_seid, rule_id;
+
+		cnt = sscanf(&cmd_buf[24], "%hu %hu",
+			     &switch_seid, &rule_id);
+		if (cnt != 2) {
+			dev_info(&pf->pdev->dev,
+				 "del mirror: bad command string, cnt=%d\n",
+				 cnt);
+			goto command_write_done;
+		}
+
+		aq_status =
+			i40e_aq_delete_mirrorrule(&pf->hw, switch_seid,
+						  rule_type, rule_id, 0, NULL,
+						  NULL, NULL, NULL);
+		if (aq_status)
+			dev_info(&pf->pdev->dev,
+				 "mirror rule remove failed with status %d\n",
+				 aq_status);
+		else
+			dev_info(&pf->pdev->dev,
+				 "Mirror rule %d removed\n", rule_id);
+
 	} else {
 		dev_info(&pf->pdev->dev, "unknown command '%s'\n", cmd_buf);
 		dev_info(&pf->pdev->dev, "available commands\n");
@@ -2250,6 +2353,10 @@ static ssize_t i40e_dbg_command_write(struct file *filp,
 		dev_info(&pf->pdev->dev, "  get bw\n");
 		dev_info(&pf->pdev->dev, "  set bw <MAX> <MIN>\n");
 		dev_info(&pf->pdev->dev, "  commit bw\n");
+		dev_info(&pf->pdev->dev, "  add switch ingress mirror <sw_seid> <dst_seid>\n");
+		dev_info(&pf->pdev->dev, "  add switch egress mirror <sw_seid> <dst_seid>\n");
+		dev_info(&pf->pdev->dev, "  del switch ingress mirror <sw_seid> <rule_id>\n");
+		dev_info(&pf->pdev->dev, "  del switch egress mirror <sw_seid> <rule_id>\n");
 	}
 
 command_write_done:

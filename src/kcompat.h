@@ -4645,6 +4645,14 @@ extern unsigned int __kc_eth_get_headlen(unsigned char *data, unsigned int max_l
 #if RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,1))
 #define HAVE_SKBUFF_CSUM_LEVEL
 #endif /* >= RH 7.1 */
+
+#undef GENMASK
+#define GENMASK(h, l) \
+	(((~0UL) << (l)) & (~0UL >> (BITS_PER_LONG - 1 - (h))))
+#undef GENMASK_ULL
+#define GENMASK_ULL(h, l) \
+	(((~0ULL) << (l)) & (~0ULL >> (BITS_PER_LONG_LONG - 1 - (h))))
+
 #else /*  3.18.0 */
 #define HAVE_SKBUFF_CSUM_LEVEL
 #define HAVE_SKB_XMIT_MORE
@@ -4826,6 +4834,7 @@ static inline void page_ref_inc(struct page *page)
 {
 	atomic_inc(&page->_count);
 }
+
 #endif /* 4.6.0 */
 
 #endif /* _KCOMPAT_H_ */
