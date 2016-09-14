@@ -4,7 +4,7 @@ i40e Linux* Base Driver for the Intel(R) XL710 Ethernet Controller Family
 
 ===============================================================================
 
-April 6, 2016
+May 9, 2016
 
 ===============================================================================
 
@@ -93,6 +93,16 @@ Channel Bonding documentation can be found in the Linux kernel source:
 The driver information previously displayed in the /proc file system is not
 supported in this release.
 
+
+NOTE: 1 Gb devices based on the Intel(R) Ethernet Controller X722 do not
+support the following features:
+  * Data Center Bridging (DCB)
+  * QOS
+  * VMQ
+  * SR-IOV
+  * Task Encapsulation offload (VxLAN, NVGRE)
+  * Energy Efficient Ethernet (EEE)
+  * Auto-media detect
 
 
 Identifying Your Adapter
@@ -243,6 +253,8 @@ unless otherwise noted.
 
 max_vfs
 -------
+This parameter adds support for SR-IOV. It causes the driver to spawn up to
+max_vfs worth of virtual functions.
 Valid Range:
 1-32 (X710 based devices)
 1-64 (XL710 based devices)
@@ -256,12 +268,22 @@ The parameters for the driver are referenced by position. Thus, if you have a
 dual port adapter, or more than one adapter in your system, and want N virtual
 functions per port, you must specify a number for each port with each parameter
 separated by a comma. For example:
-  modprobe i40e max_vfs=4,1
+
+  modprobe i40e max_vfs=4
+
+This will spawn 4 VFs on the first port.
+
+  modprobe i40e max_vfs=2,4
+
+This will spawn 2 VFs on the first port and 4 VFs on the second port.
+
 NOTE: Caution must be used in loading the driver with these parameters.
 Depending on your system configuration, number of slots, etc., it is impossible
 to predict in all cases where the positions would be on the command line.
-This parameter adds support for SR-IOV. It causes the driver to spawn up to
-max_vfs worth of virtual functions.
+
+NOTE: Neither the device nor the driver control how VFs are mapped into config
+space. Bus layout will vary by operating system. On operating systems that
+support it, you can check sysfs to find the mapping. 
 Some hardware configurations support fewer SR-IOV instances, as the whole
 XL710 controller (all functions) is limited to 128 SR-IOV interfaces in total.
 NOTE: When SR-IOV mode is enabled, hardware VLAN
@@ -321,10 +343,10 @@ to set the VF to promiscuous mode.
     Where eth2 is a VF interface in the VM
 
     NOTE: By default, the ethtool priv-flag vf-true-promisc-support is set to 
-    “off”,meaning that promiscuous mode for the VF will be limited. To set the
+    "off",meaning that promiscuous mode for the VF will be limited. To set the
     promiscuous mode for the VF to true promiscuous and allow the VF to see
     all ingress traffic, use the following command.
-      #ethtool –set-priv-flags p261p1 vf-true-promisc-support on
+      #ethtool -set-priv-flags p261p1 vf-true-promisc-support on
     The vf-true-promisc-support priv-flag does not enable promiscuous mode;
     rather, it designates which type of promiscuous mode (limited or true)
     you will get when you enable promiscuous mode using the ip link commands 
@@ -336,7 +358,7 @@ to set the VF to promiscuous mode.
 Now add a VLAN interface on the VF interface.
   #ip link add link eth2 name eth2.100 type vlan id 100
 
-Note that the order in which you set the VF to promiscuous mode and add
+Note that the order in which you set the VF?to promiscuous mode and add
 the VLAN interface does not matter (you can do either first). The end result
 in this example is that the VF will get all traffic that is tagged with
 VLAN 100.
@@ -353,15 +375,15 @@ The Flow Director performs the following tasks:
   - Enables tight control on routing a flow in the platform.
   - Matches flows and CPU cores for flow affinity.
   - Supports multiple parameters for flexible flow classification and load
-    balancing (in SFP mode only).
+    balancing (in SFP mode only).
 
 NOTES:
 
   - An included script (set_irq_affinity) automates setting the IRQ to
     CPU affinity.
-  - The Linux i40e driver supports the following flow types: IPv4, TCPv4, and
+  - The Linux i40e driver supports the following flow types: IPv4, TCPv4, and
     UDPv4. For a given flow type, it supports valid combinations of
-    IP addresses (source or destination) and UDP/TCP ports (source and 
+    IP addresses (source or destination) and UDP/TCP ports (source and 
     destination). For example, you can supply only a source IP address,
     a source IP address and a destination port, or any combination of one or
     more of these four parameters.
@@ -386,7 +408,7 @@ ethtool commands:
 	# ethtool -N ethX flow-type tcp4 src-ip 192.168.10.1 dst-ip \
 	192.168.10.2 src-port 2000 dst-port 2001 action 2 [loc 1]
 
-   To set a filter using only the source and destination IP address:
+   To set a filter using only the source and destination IP?address:
 
 	# ethtool -N ethX flow-type tcp4 src-ip 192.168.10.1 dst-ip \
 	192.168.10.2 action 2 [loc 1]
@@ -462,7 +484,7 @@ Cloud Filter Support
 --------------------
 On a complex network that supports multiple types of traffic (such as for
 storage as well as cloud), cloud filter support allows you to send one type of
- traffic (for example, the storage traffic) to the Physical Function (PF) and
+ traffic (for example, the storage traffic) to the Physical Function (PF) and
 another type (say, the cloud traffic) to a Virtual Function (VF). Because cloud
 networks are typically VXLAN/Geneve-based, you can define a cloud filter to
 identify VXLAN/Geneve packets and send them to a queue in the VF to be
@@ -475,7 +497,7 @@ NOTES:
   - The "action -1" option, which drops matching packets in regular Flow
     Director filters, is not available to drop packets when used with 
     cloud filters.
-  - For IPv4 and ether flow-types, cloud filters cannot be used for TCP or
+  - For IPv4 and ether flow-types, cloud filters cannot be used for TCP?or
     UDP filters.
   - Cloud filters can be used as a method for implementing queue splitting in
     the PF.
@@ -494,7 +516,7 @@ The following filters are supported:
   L3 filters
     Application Destination IP
 
-Use ethtool’s flow director and user defined (user-def) options to define
+Use ethtool's flow director and user defined (user-def) options to define
 cloud filters for tunneled packets (VF) and L3 filters for non-tunneled
 packets (PF or VF). In this case, the user-def field specifies that a cloud
 filter is being programmed instead of a Flow Director filter. Note that this
@@ -513,7 +535,7 @@ For regular Flow Director filters:
 
 For L3 filters (non-tunneled packets):
 
-  - “user-def 0xffffffff00000002” (no Tenant ID/VNI specified in the upper
+  - "user-def 0xffffffff00000002" (no Tenant ID/VNI specified in the upper
     32 bits of the user-def field and send to VF id 2)
   - Only L3 parameters (src-IP, dst-IP) are considered
 
@@ -522,7 +544,7 @@ For L3 filters (non-tunneled packets):
     ethtool -N p4p2 flow-type ip4 src-ip 192.168.42.13 dst-ip 192.168.42.33 /
     src-port 12344 dst-port 12344 user-def 0xffffffff00000001 loc 3
       Redirect traffic coming from 192.168.42.13 port 12344 with destination
-      192.168.42.33 port 12344 into VF id 1, and call this “rule 3”
+      192.168.42.33 port 12344 into VF id 1, and call this ?rule 3?
 
 For cloud filters (tunneled packets):
 
@@ -531,12 +553,12 @@ For cloud filters (tunneled packets):
     if specified or required.
   - The lower 32 bits of the 'user-def' field can be used to specify the
     VF ID. If the ID is greater than the maximum number of VFs currently
-    enabled then the ID will default back to the main VSI.
-  - Cloud filters can be defined with inner MAC, outer MAC, inner IP address,
+    enabled then the ID will default back to the main VSI.
+  - Cloud filters can be defined with inner MAC, outer MAC, inner IP address,
      inner VLAN, and VNI as part of the cloud tuple. Cloud filters filter on
-    destination (not source) MAC and IP. The destination and source MAC
+    destination (not source) MAC and IP. The destination and source MAC
     address fields in the ethtool command are overloaded as dst = outer,
-    src = inner MAC address to facilitate tuple definition for a cloud filter.
+    src = inner MAC address to facilitate tuple definition for a cloud filter.
   - The 'loc' parameter specifies the rule number of the filter as being
     stored in the base driver
 
@@ -546,14 +568,14 @@ For cloud filters (tunneled packets):
     src-port 12344 dst-port 12344 user-def 0x2200000001 loc 38
       Redirect traffic on VXLAN using tunnel id 34 (hex 0x22) coming from
       192.168.42.13 port 12344 with destination 192.168.42.33 port 12344 into
-      VF id 1, and call this “rule 38”
+      VF id 1, and call this "rule 38"
       NOTE: If the VF id given is larger than the number of active VFs (e.g.
       if you set num_vfs to 8 and use VF id 12 in the ethtool command) the
       traffic will be redirected to the PF rather than to the VF.
 
 To see the list of filters currently present:
     ethtool <-u|-n> ethX
-      NOTE: For cloud filters in which the specified VF is greater than
+      NOTE: For cloud filters in which the specified VF is greater than
       the number of VFs supported, the cloud filter will send traffic
       to the PF. However, the driver does not store the specified VF
       number, so in this case the ethtool -n command will display
@@ -674,7 +696,7 @@ RSS Hash Flow
 Allows you to set the hash bytes per flow type and any combination of one or
 more options for Receive Side Scaling (RSS) hash byte configuration.
 
-#ethtool –N <dev> rx-flow-hash <type> <option>
+#ethtool -N <dev> rx-flow-hash <type> <option>
 
 Where <type> is:
   tcp4	signifying TCP over IPv4
@@ -715,9 +737,11 @@ operating system. This reduces CPU utilization.
  
 VXLAN offloading is controlled by the tx and rx checksum offload options
 provided by ethtool. That is, if tx checksum offload is enabled, and the adapter
-has the capability, VXLAN offloading is also enabled. If rx checksum offload is
-enabled, then the VXLAN packets rx checksum will be offloaded, unless the module
-parameter vxlan_rx=0,0 was used to specifically disable the VXLAN rx offload.
+has the capability, VXLAN offloading is also enabled.
+
+If rx checksum offload is enabled, then the VXLAN packets rx checksum will
+be offloaded, unless the module parameter vxlan_rx=0,0 was used to specifically
+disable the VXLAN rx offload.
  
 VXLAN Overlay HW Offloading is enabled by default. To view and configure VXLAN
 on a VXLAN-overlay offload enabled device, use the following
@@ -897,7 +921,7 @@ queue using ethtool.
   - Setting rx-usecs and tx-usecs to 125 will limit interrupts to about 8000
     interrupts per second per queue.
 
-    # ethtool -C <interface> adaptive-rx off adaptive-tx off rx-usecs 125 
+    # ethtool -C?<interface> adaptive-rx off adaptive-tx off rx-usecs 125 
     tx-usecs 125
 
 For lower CPU utilization: Disable Adaptive ITR and lower rx and tx interrupts
@@ -906,13 +930,13 @@ per queue using ethtool.
   - Setting rx-usecs and tx-usecs to 250 will limit interrupts to about 4000
     interrupts per second per queue.
 
-    # ethtool -C <interface> adaptive-rx off adaptive-tx off rx-usecs 250 
+    # ethtool -C?<interface> adaptive-rx off adaptive-tx off rx-usecs 250 
     tx-usecs 250
 
 For lower latency: Disable Adaptive ITR and ITR by setting rx and tx to 0
 using ethtool.
 
-    # ethtool -C <interface> adaptive-rx off adaptive-tx off rx-usecs 0 
+    # ethtool -C?<interface> adaptive-rx off adaptive-tx off rx-usecs 0 
     tx-usecs 0
 
 
@@ -933,7 +957,7 @@ and in CPU utilization (each buffer assigned to every device must be mapped
 in the IOMMU).
 
 If you experience significant performance issues with IOMMU, try using it in
-“passthrough” mode by adding the following to the kernel boot command line:
+?passthrough? mode by adding the following to the kernel boot command line:
   intel_iommu=on iommu=pt
 
 NOTE: This mode enables remapping for assigning devices to VMs, providing
@@ -1050,7 +1074,7 @@ Another alternative is to install the interfaces in separate broadcast domains
 UDP Stress Test Dropped Packet Issue
 ------------------------------------
 
-Under small packet UDP stress with the i40edriver, the system may
+Under small packet UDP stress with the i40e driver, the system may
 drop UDP packets due to socket buffers being full. Setting the driver Flow
 Control variables to the minimum may resolve the issue. You may also try
 increasing the kernel's default buffer sizes by changing the values in
