@@ -278,16 +278,15 @@ export INSTALL_MOD_DIR ?= updates/drivers/net/ethernet/intel/${DRIVER}
 # from within a Makefile recipe.
 #
 # The following variables are expected to be defined for its use:
-#
-# *) GCC_I_SYS -- if set it will enable use of gcc-i-sys.sh wrapper to use -isystem
-# *) CCFLAGS_VAR -- the CCFLAGS variable to set extra CFLAGS
-# *) EXTRA_CFLAGS -- a set of extra CFLAGS to pass into the ccflags-y variable
-# *) KSRC -- the location of the kernel source tree to build against
-# *) DRIVER_UPPERCASE -- the uppercase name of the kernel module, set from DRIVER
+# GCC_I_SYS -- if set it will enable use of gcc-i-sys.sh wrapper to use -isystem
+# CCFLAGS_VAR -- the CCFLAGS variable to set extra CFLAGS
+# EXTRA_CFLAGS -- a set of extra CFLAGS to pass into the ccflags-y variable
+# KSRC -- the location of the kernel source tree to build against
+# DRIVER_UPPERCASE -- the uppercase name of the kernel module, set from DRIVER
 #
 kernelbuild = ${MAKE} $(if ${GCC_I_SYS},CC="${GCC_I_SYS}") \
                       ${CCFLAGS_VAR}="${EXTRA_CFLAGS}" \
                       -C "${KSRC}" \
                       CONFIG_${DRIVER_UPPERCASE}=m \
                       M="${CURDIR}" \
-                      ${2} ${1};
+                      ${2} ${1}
