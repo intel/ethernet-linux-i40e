@@ -484,6 +484,7 @@ struct i40e_pf {
 #define I40E_FLAG_HAVE_10GBASET_PHY		BIT_ULL(48)
 #define I40E_FLAG_MPLS_HDR_OFFLOAD_CAPABLE	BIT_ULL(49)
 #define I40E_FLAG_TRUE_PROMISC_SUPPORT		BIT_ULL(50)
+#define I40E_FLAG_PTP_L4_CAPABLE		BIT_ULL(52)
 
 	/* tracks features that get auto disabled by errors */
 	u64 auto_disable_flags;

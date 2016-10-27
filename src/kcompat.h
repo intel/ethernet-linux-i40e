@@ -725,6 +725,15 @@ struct _kc_ethtool_pauseparam {
 #ifndef SPEED_5000
 #define SPEED_5000 5000
 #endif
+#ifndef SPEED_25000
+#define SPEED_25000 25000
+#endif
+#ifndef SPEED_50000
+#define SPEED_50000 50000
+#endif
+#ifndef SPEED_100000
+#define SPEED_100000 100000
+#endif
 
 #ifndef RHEL_RELEASE_VERSION
 #define RHEL_RELEASE_VERSION(a,b) (((a) << 8) + (b))
@@ -2701,6 +2710,13 @@ extern void __kc_warn_slowpath(const char *file, const int line,
 #undef HAVE_IXGBE_DEBUG_FS
 #undef HAVE_IGB_DEBUG_FS
 #else /* < 2.6.27 */
+#define ethtool_cmd_speed_set _kc_ethtool_cmd_speed_set
+static inline void _kc_ethtool_cmd_speed_set(struct ethtool_cmd *ep,
+					     __u32 speed)
+{
+	ep->speed = (__u16)(speed & 0xFFFF);
+	ep->speed_hi = (__u16)(speed >> 16);
+}
 #define HAVE_TX_MQ
 #define HAVE_NETDEV_SELECT_QUEUE
 #ifdef CONFIG_DEBUG_FS
@@ -4008,6 +4024,14 @@ static inline bool __kc_ether_addr_equal(const u8 *addr1, const u8 *addr2)
 
 #ifndef __GFP_MEMALLOC
 #define __GFP_MEMALLOC 0
+#endif
+
+#ifndef eth_broadcast_addr
+#define eth_broadcast_addr _kc_eth_broadcast_addr
+static inline void _kc_eth_broadcast_addr(u8 *addr)
+{
+	memset(addr, 0xff, ETH_ALEN);
+}
 #endif
 
 #ifndef eth_random_addr

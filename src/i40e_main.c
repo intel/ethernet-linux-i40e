@@ -51,7 +51,7 @@ static const char i40e_driver_string[] =
 
 #define DRV_VERSION_MAJOR 1
 #define DRV_VERSION_MINOR 5
-#define DRV_VERSION_BUILD 23
+#define DRV_VERSION_BUILD 25
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
 	__stringify(DRV_VERSION_BUILD) \
@@ -8787,7 +8787,8 @@ static int i40e_sw_init(struct i40e_pf *pf)
 			     | I40E_FLAG_NO_PCI_LINK_CHECK
 			     | I40E_FLAG_100M_SGMII_CAPABLE
 			     | I40E_FLAG_USE_SET_LLDP_MIB
-			     | I40E_FLAG_GENEVE_OFFLOAD_CAPABLE;
+			     | I40E_FLAG_GENEVE_OFFLOAD_CAPABLE
+			     | I40E_FLAG_PTP_L4_CAPABLE;
 
 #define I40E_FDEVICT_PCTYPE_DEFAULT 0xc03
 		if (rd32(&pf->hw, I40E_GLQF_FDEVICTENA(1)) !=
