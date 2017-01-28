@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
+ * Copyright(c) 2013 - 2017 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -25,9 +25,6 @@
 #define _I40E_DCB_H_
 
 #include "i40e_type.h"
-
-#define I40E_DCBX_OFFLOAD_DISABLED	0
-#define I40E_DCBX_OFFLOAD_ENABLED	1
 
 #define I40E_DCBX_STATUS_NOT_STARTED	0
 #define I40E_DCBX_STATUS_IN_PROGRESS	1
@@ -53,11 +50,6 @@
 #define I40E_CEE_SUBTYPE_APP_PRI	4
 
 #define I40E_CEE_MAX_FEAT_TYPE		3
-#define I40E_LLDP_ADMINSTATUS_DISABLED		0
-#define I40E_LLDP_ADMINSTATUS_ENABLED_RX	1
-#define I40E_LLDP_ADMINSTATUS_ENABLED_TX	2
-#define I40E_LLDP_ADMINSTATUS_ENABLED_RXTX	3
-
 /* Defines for LLDP TLV header */
 #define I40E_LLDP_TLV_LEN_SHIFT		0
 #define I40E_LLDP_TLV_LEN_MASK		(0x01FF << I40E_LLDP_TLV_LEN_SHIFT)
@@ -87,9 +79,7 @@
 
 /* Defines for IEEE TSA types */
 #define I40E_IEEE_TSA_STRICT		0
-#define I40E_IEEE_TSA_CBS		1
 #define I40E_IEEE_TSA_ETS		2
-#define I40E_IEEE_TSA_VENDOR		255
 
 /* Defines for IEEE PFC TLV */
 #define I40E_IEEE_PFC_CAP_SHIFT		0
@@ -121,12 +111,6 @@
 #define I40E_IEEE_APP_TLV_LENGTH	11
 
 #pragma pack(1)
-
-/* IEEE 802.1AB LLDP TLV structure */
-struct i40e_lldp_generic_tlv {
-	__be16 typelength;
-	u8 tlvinfo[1];
-};
 
 /* IEEE 802.1AB LLDP Organization specific TLV */
 struct i40e_lldp_org_tlv {
@@ -166,36 +150,6 @@ struct i40e_cee_app_prio {
 };
 #pragma pack()
 
-/*
- * TODO: The below structures related LLDP/DCBX variables
- * and statistics are defined but need to find how to get
- * the required information from the Firmware to use them
- */
-
-/* IEEE 802.1AB LLDP Agent Statistics */
-struct i40e_lldp_stats {
-	u64 remtablelastchangetime;
-	u64 remtableinserts;
-	u64 remtabledeletes;
-	u64 remtabledrops;
-	u64 remtableageouts;
-	u64 txframestotal;
-	u64 rxframesdiscarded;
-	u64 rxportframeerrors;
-	u64 rxportframestotal;
-	u64 rxporttlvsdiscardedtotal;
-	u64 rxporttlvsunrecognizedtotal;
-	u64 remtoomanyneighbors;
-};
-
-/* IEEE 802.1Qaz DCBX variables */
-struct i40e_dcbx_variables {
-	u32 defmaxtrafficclasses;
-	u32 defprioritytcmapping;
-	u32 deftcbandwidth;
-	u32 deftsaassignment;
-};
-
 i40e_status i40e_get_dcbx_status(struct i40e_hw *hw,
 					   u16 *status);
 i40e_status i40e_lldp_to_dcb_config(u8 *lldpmib,
@@ -205,8 +159,5 @@ i40e_status i40e_aq_get_dcb_config(struct i40e_hw *hw, u8 mib_type,
 					     struct i40e_dcbx_config *dcbcfg);
 i40e_status i40e_get_dcb_config(struct i40e_hw *hw);
 i40e_status i40e_init_dcb(struct i40e_hw *hw);
-i40e_status i40e_set_dcb_config(struct i40e_hw *hw);
-i40e_status i40e_dcb_config_to_lldp(u8 *lldpmib, u16 *miblen,
-					      struct i40e_dcbx_config *dcbcfg);
 
 #endif /* _I40E_DCB_H_ */

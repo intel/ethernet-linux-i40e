@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
+ * Copyright(c) 2013 - 2017 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -2070,6 +2070,10 @@ void __kc_dev_addr_unsync_dev(struct dev_addr_list **list, int *count,
 #endif /* 3.16.0 */
 
 /******************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,17,0) )
+#endif /* 3.17.0 */
+
+/******************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,18,0) )
 #ifndef NO_PTP_SUPPORT
 static void __kc_sock_efree(struct sk_buff *skb)
@@ -2248,4 +2252,46 @@ void __kc_netdev_rss_key_fill(void *buffer, size_t len)
 	memcpy(buffer, __kc_netdev_rss_key, len);
 }
 #endif
+#endif
+
+/******************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(4,5,0) )
+#if (!(RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,3)))
+#ifdef CONFIG_SPARC
+#include <asm/idprom.h>
+#include <asm/prom.h>
+#endif
+int _kc_eth_platform_get_mac_address(struct device *dev, u8 *mac_addr)
+{
+	const unsigned char *addr;
+	struct device_node *dp;
+
+	if (dev_is_pci(dev))
+		dp = pci_device_to_OF_node(to_pci_dev(dev));
+	else
+#if defined(HAVE_STRUCT_DEVICE_OF_NODE) && defined(CONFIG_OF)
+		dp = dev->of_node;
+#else
+		dp = NULL;
+#endif
+
+	addr = NULL;
+	if (dp)
+		addr = of_get_mac_address(dp);
+#ifdef CONFIG_SPARC
+	/* Kernel hasn't implemented arch_get_platform_mac_address, but we
+	 * should handle the SPARC case here since it was supported
+	 * originally. This is replaced by arch_get_platform_mac_address()
+	 * upstream.
+	 */
+	if (!addr)
+		addr = idprom->id_ethaddr;
+#endif
+	if (!addr)
+		return -ENODEV;
+
+	ether_addr_copy(mac_addr, addr);
+	return 0;
+}
+#endif /* !(RHEL_RELEASE >= 7.3) */
 #endif

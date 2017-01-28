@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
+ * Copyright(c) 2013 - 2017 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -42,9 +42,6 @@ struct i40e_diag_reg_test_info {
 
 extern struct i40e_diag_reg_test_info i40e_reg_list[];
 
-i40e_status i40e_diag_set_loopback(struct i40e_hw *hw,
-					     enum i40e_lb_mode mode);
-i40e_status i40e_diag_fw_alive_test(struct i40e_hw *hw);
 i40e_status i40e_diag_reg_test(struct i40e_hw *hw);
 i40e_status i40e_diag_eeprom_test(struct i40e_hw *hw);
 

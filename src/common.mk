@@ -1,7 +1,7 @@
 ################################################################################
 #
 # Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
-# Copyright(c) 2013 - 2016 Intel Corporation.
+# Copyright(c) 2013 - 2017 Intel Corporation.
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms and conditions of the GNU General Public License,
@@ -59,6 +59,8 @@ cmd_depmod = /sbin/depmod $(if ${SYSTEM_MAP_FILE},-e -F ${SYSTEM_MAP_FILE}) \
 cmd_initrd := $(shell \
                 if which dracut > /dev/null 2>&1 ; then \
                     echo "dracut --force"; \
+                elif which update-initramfs > /dev/null 2>&1 ; then \
+                    echo "update-initramfs -u"; \
                 fi )
 
 #####################
@@ -73,8 +75,8 @@ endif
 
 # Kernel Search Path
 # All the places we look for kernel source
-KSP :=  /lib/modules/${BUILD_KERNEL}/build \
-        /lib/modules/${BUILD_KERNEL}/source \
+KSP :=  /lib/modules/${BUILD_KERNEL}/source \
+        /lib/modules/${BUILD_KERNEL}/build \
         /usr/src/linux-${BUILD_KERNEL} \
         /usr/src/linux-$(${BUILD_KERNEL} | sed 's/-.*//') \
         /usr/src/kernel-headers-${BUILD_KERNEL} \
@@ -176,6 +178,30 @@ ifneq (${LINUX_VERSION_CODE},)
   $(warning Forcing target kernel to build with LINUX_VERSION_CODE of ${LINUX_VERSION_CODE}$(if ${LINUX_VERSION}, from LINUX_VERSION=${LINUX_VERSION}). Do this at your own risk.)
   KVER_CODE := ${LINUX_VERSION_CODE}
   EXTRA_CFLAGS += -DLINUX_VERSION_CODE=${LINUX_VERSION_CODE}
+endif
+
+# Determine SLE_LOCALVERSION_CODE for SuSE SLE >= 11 (needed by kcompat)
+# This assumes SuSE will continue setting CONFIG_LOCALVERSION to the string
+# appended to the stable kernel version on which their kernel is based with
+# additional versioning information (up to 3 numbers), a possible abbreviated
+# git SHA1 commit id and a kernel type, e.g. CONFIG_LOCALVERSION=-1.2.3-default
+# or CONFIG_LOCALVERSION=-999.gdeadbee-default
+ifeq (1,$(shell ${CC} -E -dM ${CONFIG_FILE} 2> /dev/null |\
+          grep -m 1 CONFIG_SUSE_KERNEL | awk '{ print $$3 }'))
+
+ifneq (10,$(shell ${CC} -E -dM ${CONFIG_FILE} 2> /dev/null |\
+	  grep -m 1 CONFIG_SLE_VERSION | awk '{ print $$3 }'))
+
+  LOCALVERSION := $(shell ${CC} -E -dM ${CONFIG_FILE} 2> /dev/null |\
+                    grep -m 1 CONFIG_LOCALVERSION | awk '{ print $$3 }' |\
+                    cut -d'-' -f2 | sed 's/\.g[[:xdigit:]]\{7\}//')
+  LOCALVER_A := $(shell echo ${LOCALVERSION} | cut -d'.' -f1)
+  LOCALVER_B := $(shell echo ${LOCALVERSION} | cut -s -d'.' -f2)
+  LOCALVER_C := $(shell echo ${LOCALVERSION} | cut -s -d'.' -f3)
+  SLE_LOCALVERSION_CODE := $(shell expr ${LOCALVER_A} \* 65536 + \
+                                        0${LOCALVER_B} \* 256 + 0${LOCALVER_C})
+  EXTRA_CFLAGS += -DSLE_LOCALVERSION_CODE=${SLE_LOCALVERSION_CODE}
+endif
 endif
 
 EXTRA_CFLAGS += ${CFLAGS_EXTRA}

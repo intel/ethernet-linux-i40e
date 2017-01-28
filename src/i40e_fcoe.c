@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
+ * Copyright(c) 2013 - 2017 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -849,7 +849,7 @@ static int i40e_fcoe_ddp_setup(struct net_device *netdev, u16 xid,
 	ddp = &fcoe->ddp[xid];
 	if (ddp->sgl) {
 		dev_info(&pf->pdev->dev, "xid 0x%x w/ non-null sgl=%p nents=%d\n",
-		      xid, ddp->sgl, ddp->sgc);
+			 xid, ddp->sgl, ddp->sgc);
 		return 0;
 	}
 	i40e_fcoe_ddp_clear(ddp);
@@ -910,7 +910,7 @@ static int i40e_fcoe_ddp_setup(struct net_device *netdev, u16 xid,
 			 * must end at bufflen
 			 */
 			if (((i != (dmacount - 1)) || (thislen != len)) &&
-			      ((thislen + thisoff) != bufflen))
+			    ((thislen + thisoff) != bufflen))
 				goto out_noddp_free;
 
 			ddp->udl[j] = (u64)(addr - thisoff);
@@ -1195,7 +1195,7 @@ static void i40e_fcoe_handle_ddp(struct i40e_ring *tx_ring,
 /**
  * i40e_fcoe_tso - set up FCoE TSO
  * @tx_ring:  ring to send buffer on
- * @skb:      send buffer
+ * @first:    pointer to first Tx buffer for xmit
  * @tx_flags: collected send information
  * @hdr_len:  the tso header length
  * @sof: the SOF to indicate class of service
@@ -1208,13 +1208,15 @@ static void i40e_fcoe_handle_ddp(struct i40e_ring *tx_ring,
  * code to drop the frame.
  **/
 static int i40e_fcoe_tso(struct i40e_ring *tx_ring,
-			 struct sk_buff *skb,
+			 struct i40e_tx_buffer *first,
 			 u32 tx_flags, u8 *hdr_len, u8 sof)
 {
+	struct sk_buff *skb = first->skb;
 	struct i40e_tx_context_desc *context_desc;
 	u32 cd_type, cd_cmd, cd_tso_len, cd_mss;
 	struct fc_frame_header *fh;
 	u64 cd_type_cmd_tso_mss;
+	u16 gso_segs, gso_size;
 
 	/* must match gso type as FCoE */
 	if (!skb_is_gso(skb))
@@ -1232,6 +1234,21 @@ static int i40e_fcoe_tso(struct i40e_ring *tx_ring,
 	*hdr_len = skb_transport_offset(skb) + sizeof(struct fc_frame_header) +
 		   sizeof(struct fcoe_crc_eof);
 
+	/* pull values out of skb_shinfo */
+	gso_size = skb_shinfo(skb)->gso_size;
+	gso_segs = skb_shinfo(skb)->gso_segs;
+
+#ifndef HAVE_NDO_FEATURES_CHECK
+	/* too small a TSO segment size causes hw problems */
+	if (gso_size < 64) {
+		gso_size = 64;
+		gso_segs = DIV_ROUND_UP(skb->len - *hdr_len, 64);
+	}
+#endif
+	/* update gso size and bytecount with header size */
+	first->gso_segs = gso_segs;
+	first->bytecount += (first->gso_segs - 1) * *hdr_len;
+
 	/* check sof to decide a class 2 or 3 TSO */
 	if (likely(i40e_fcoe_sof_is_class3(sof)))
 		cd_cmd = I40E_FCOE_TX_CTX_DESC_OPCODE_TSO_FC_CLASS3;
@@ -1246,7 +1263,7 @@ static int i40e_fcoe_tso(struct i40e_ring *tx_ring,
 	/* fill the field values */
 	cd_type = I40E_TX_DESC_DTYPE_FCOE_CTX;
 	cd_tso_len = skb->len - *hdr_len;
-	cd_mss = skb_shinfo(skb)->gso_size;
+	cd_mss = gso_size;
 	cd_type_cmd_tso_mss =
 		((u64)cd_type  << I40E_TXD_CTX_QW1_DTYPE_SHIFT)     |
 		((u64)cd_cmd     << I40E_TXD_CTX_QW1_CMD_SHIFT)	    |
@@ -1329,7 +1346,7 @@ static inline int i40e_fcoe_set_skb_header(struct sk_buff *skb)
 	skb_reset_mac_header(skb);
 	skb->mac_len = sizeof(struct ethhdr);
 	if (protocol == htons(ETH_P_8021Q)) {
-		struct vlan_ethhdr *veth = (struct vlan_ethhdr *) eth_hdr(skb);
+		struct vlan_ethhdr *veth = (struct vlan_ethhdr *)eth_hdr(skb);
 
 		protocol = veth->h_vlan_encapsulated_proto;
 		skb->mac_len += sizeof(struct vlan_hdr);
@@ -1398,6 +1415,9 @@ static netdev_tx_t i40e_fcoe_xmit_frame(struct sk_buff *skb,
 
 	/* record the location of the first descriptor for this packet */
 	first = &tx_ring->tx_bi[tx_ring->next_to_use];
+	first->skb = skb;
+	first->bytecount = skb->len;
+	first->gso_segs = 1;
 
 	/* FIP is a regular L2 traffic w/o offload */
 	if (skb->protocol == htons(ETH_P_FIP))
@@ -1413,7 +1433,7 @@ static netdev_tx_t i40e_fcoe_xmit_frame(struct sk_buff *skb,
 	tx_flags |= I40E_TX_FLAGS_FCCRC;
 
 	/* check we should do sequence offload */
-	fso = i40e_fcoe_tso(tx_ring, skb, tx_flags, &hdr_len, sof);
+	fso = i40e_fcoe_tso(tx_ring, first, tx_flags, &hdr_len, sof);
 	if (fso < 0)
 		goto out_drop;
 	else if (fso)
@@ -1429,7 +1449,8 @@ out_send:
 	return NETDEV_TX_OK;
 
 out_drop:
-	dev_kfree_skb_any(skb);
+	dev_kfree_skb_any(first->skb);
+	first->skb = NULL;
 	return NETDEV_TX_OK;
 }
 
@@ -1602,12 +1623,12 @@ void i40e_fcoe_config_netdev(struct net_device *netdev, struct i40e_vsi *vsi)
 	 */
 	netdev->dev_port = 1;
 #endif
-	spin_lock_bh(&vsi->mac_filter_list_lock);
-	i40e_add_filter(vsi, hw->mac.san_addr, 0, false, false);
-	i40e_add_filter(vsi, (u8[6]) FC_FCOE_FLOGI_MAC, 0, false, false);
-	i40e_add_filter(vsi, FIP_ALL_FCOE_MACS, 0, false, false);
-	i40e_add_filter(vsi, FIP_ALL_ENODE_MACS, 0, false, false);
-	spin_unlock_bh(&vsi->mac_filter_list_lock);
+	spin_lock_bh(&vsi->mac_filter_hash_lock);
+	i40e_add_mac_filter(vsi, hw->mac.san_addr);
+	i40e_add_mac_filter(vsi, (u8[6]) FC_FCOE_FLOGI_MAC);
+	i40e_add_mac_filter(vsi, FIP_ALL_FCOE_MACS);
+	i40e_add_mac_filter(vsi, FIP_ALL_ENODE_MACS);
+	spin_unlock_bh(&vsi->mac_filter_hash_lock);
 
 	/* use san mac */
 	ether_addr_copy(netdev->dev_addr, hw->mac.san_addr);

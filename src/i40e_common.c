@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
+ * Copyright(c) 2013 - 2017 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -37,7 +37,7 @@ static i40e_status i40e_set_mac_type(struct i40e_hw *hw)
 {
 	i40e_status status = I40E_SUCCESS;
 
-	if (hw->vendor_id == I40E_INTEL_VENDOR_ID) {
+	if (hw->vendor_id == PCI_VENDOR_ID_INTEL) {
 		switch (hw->device_id) {
 		case I40E_DEV_ID_SFP_XL710:
 		case I40E_DEV_ID_QEMU:
@@ -60,7 +60,6 @@ static i40e_status i40e_set_mac_type(struct i40e_hw *hw)
 		case I40E_DEV_ID_1G_BASE_T_X722:
 		case I40E_DEV_ID_10G_BASE_T_X722:
 		case I40E_DEV_ID_SFP_I_X722:
-		case I40E_DEV_ID_QSFP_I_X722:
 			hw->mac.type = I40E_MAC_X722;
 			break;
 		default:
@@ -325,28 +324,11 @@ void i40e_debug_aq(struct i40e_hw *hw, enum i40e_debug_mask mask, void *desc,
 			len = buf_len;
 		/* write the full 16-byte chunks */
 		for (i = 0; i < (len - 16); i += 16)
-			i40e_debug(hw, mask,
-				   "\t0x%04X  %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
-				   i, buf[i], buf[i+1], buf[i+2], buf[i+3],
-				   buf[i+4], buf[i+5], buf[i+6], buf[i+7],
-				   buf[i+8], buf[i+9], buf[i+10], buf[i+11],
-				   buf[i+12], buf[i+13], buf[i+14], buf[i+15]);
-		/* the most we could have left is 16 bytes, pad with zeros */
-		if (i < len) {
-			char d_buf[16];
-			int j, i_sav;
-
-			i_sav = i;
-			memset(d_buf, 0, sizeof(d_buf));
-			for (j = 0; i < len; j++, i++)
-				d_buf[j] = buf[i];
-			i40e_debug(hw, mask,
-				   "\t0x%04X  %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X\n",
-				   i_sav, d_buf[0], d_buf[1], d_buf[2], d_buf[3],
-				   d_buf[4], d_buf[5], d_buf[6], d_buf[7],
-				   d_buf[8], d_buf[9], d_buf[10], d_buf[11],
-				   d_buf[12], d_buf[13], d_buf[14], d_buf[15]);
-		}
+			i40e_debug(hw, mask, "\t0x%04X  %16ph\n", i, buf + i);
+		/* write whatever's left over without overrunning the buffer */
+		if (i < len)
+			i40e_debug(hw, mask, "\t0x%04X  %*ph\n",
+					     i, len - i, buf + i);
 	}
 }
 
@@ -711,7 +693,7 @@ struct i40e_rx_ptype_decoded i40e_ptype_lookup[] = {
 	/* Non Tunneled IPv6 */
 	I40E_PTT(88, IP, IPV6, FRG, NONE, NONE, NOF, NONE, PAY3),
 	I40E_PTT(89, IP, IPV6, NOF, NONE, NONE, NOF, NONE, PAY3),
-	I40E_PTT(90, IP, IPV6, NOF, NONE, NONE, NOF, UDP,  PAY3),
+	I40E_PTT(90, IP, IPV6, NOF, NONE, NONE, NOF, UDP,  PAY4),
 	I40E_PTT_UNUSED_ENTRY(91),
 	I40E_PTT(92, IP, IPV6, NOF, NONE, NONE, NOF, TCP,  PAY4),
 	I40E_PTT(93, IP, IPV6, NOF, NONE, NONE, NOF, SCTP, PAY4),
@@ -914,28 +896,6 @@ struct i40e_rx_ptype_decoded i40e_ptype_lookup[] = {
 };
 
 /**
- * i40e_validate_mac_addr - Validate unicast MAC address
- * @mac_addr: pointer to MAC address
- *
- * Tests a MAC address to ensure it is a valid Individual Address
- **/
-i40e_status i40e_validate_mac_addr(u8 *mac_addr)
-{
-	i40e_status status = I40E_SUCCESS;
-
-	/* Broadcast addresses ARE multicast addresses
-	 * Make sure it is not a multicast address
-	 * Reject the zero address
-	 */
-	if (is_multicast_ether_addr(mac_addr) ||
-	    (mac_addr[0] == 0 && mac_addr[1] == 0 && mac_addr[2] == 0 &&
-	      mac_addr[3] == 0 && mac_addr[4] == 0 && mac_addr[5] == 0))
-		status = I40E_ERR_INVALID_MAC_ADDR;
-
-	return status;
-}
-
-/**
  * i40e_init_shared_code - Initialize the shared code
  * @hw: pointer to hardware structure
  *
@@ -1056,7 +1016,7 @@ i40e_status i40e_get_mac_addr(struct i40e_hw *hw, u8 *mac_addr)
 	status = i40e_aq_mac_address_read(hw, &flags, &addrs, NULL);
 
 	if (flags & I40E_AQC_LAN_ADDR_VALID)
-		memcpy(mac_addr, &addrs.pf_lan_mac, sizeof(addrs.pf_lan_mac));
+		ether_addr_copy(mac_addr, addrs.pf_lan_mac);
 
 	return status;
 }
@@ -1079,7 +1039,7 @@ i40e_status i40e_get_port_mac_addr(struct i40e_hw *hw, u8 *mac_addr)
 		return status;
 
 	if (flags & I40E_AQC_PORT_ADDR_VALID)
-		memcpy(mac_addr, &addrs.port_mac, sizeof(addrs.port_mac));
+		ether_addr_copy(mac_addr, addrs.port_mac);
 	else
 		status = I40E_ERR_INVALID_MAC_ADDR;
 
@@ -1138,7 +1098,7 @@ i40e_status i40e_get_san_mac_addr(struct i40e_hw *hw,
 		return status;
 
 	if (flags & I40E_AQC_SAN_ADDR_VALID)
-		memcpy(mac_addr, &addrs.pf_san_mac, sizeof(addrs.pf_san_mac));
+		ether_addr_copy(mac_addr, addrs.pf_san_mac);
 	else
 		status = I40E_ERR_INVALID_MAC_ADDR;
 
@@ -1220,6 +1180,8 @@ static enum i40e_media_type i40e_get_media_type(struct i40e_hw *hw)
 	case I40E_PHY_TYPE_1000BASE_LX:
 	case I40E_PHY_TYPE_40GBASE_SR4:
 	case I40E_PHY_TYPE_40GBASE_LR4:
+	case I40E_PHY_TYPE_25GBASE_LR:
+	case I40E_PHY_TYPE_25GBASE_SR:
 		media = I40E_MEDIA_TYPE_FIBER;
 		break;
 	case I40E_PHY_TYPE_100BASE_TX:
@@ -1234,6 +1196,7 @@ static enum i40e_media_type i40e_get_media_type(struct i40e_hw *hw)
 	case I40E_PHY_TYPE_10GBASE_SFPP_CU:
 	case I40E_PHY_TYPE_40GBASE_AOC:
 	case I40E_PHY_TYPE_10GBASE_AOC:
+	case I40E_PHY_TYPE_25GBASE_CR:
 		media = I40E_MEDIA_TYPE_DA;
 		break;
 	case I40E_PHY_TYPE_1000BASE_KX:
@@ -1241,6 +1204,7 @@ static enum i40e_media_type i40e_get_media_type(struct i40e_hw *hw)
 	case I40E_PHY_TYPE_10GBASE_KR:
 	case I40E_PHY_TYPE_40GBASE_KR4:
 	case I40E_PHY_TYPE_20GBASE_KR2:
+	case I40E_PHY_TYPE_25GBASE_KR:
 		media = I40E_MEDIA_TYPE_BACKPLANE;
 		break;
 	case I40E_PHY_TYPE_SGMII:
@@ -1625,8 +1589,10 @@ i40e_status i40e_aq_get_phy_capabilities(struct i40e_hw *hw,
 	if (hw->aq.asq_last_status == I40E_AQ_RC_EIO)
 		status = I40E_ERR_UNKNOWN_PHY;
 
-	if (report_init)
+	if (report_init) {
 		hw->phy.phy_types = LE32_TO_CPU(abilities->phy_type);
+		hw->phy.phy_types |= ((u64)abilities->phy_type_ext << 32);
+	}
 
 	return status;
 }
@@ -1718,10 +1684,13 @@ i40e_status i40e_set_fc(struct i40e_hw *hw, u8 *aq_failures,
 			config.abilities |= I40E_AQ_PHY_ENABLE_ATOMIC_LINK;
 		/* Copy over all the old settings */
 		config.phy_type = abilities.phy_type;
+		config.phy_type_ext = abilities.phy_type_ext;
 		config.link_speed = abilities.link_speed;
 		config.eee_capability = abilities.eee_capability;
 		config.eeer = abilities.eeer_val;
 		config.low_power_ctrl = abilities.d3_lpan;
+		config.fec_config = abilities.fec_cfg_curr_mod_ext_info &
+				    I40E_AQ_PHY_FEC_CONFIG_MASK;
 		status = i40e_aq_set_phy_config(hw, &config, NULL);
 
 		if (status)
@@ -1739,43 +1708,6 @@ i40e_status i40e_set_fc(struct i40e_hw *hw, u8 *aq_failures,
 	}
 	if (status)
 		*aq_failures |= I40E_SET_FC_AQ_FAIL_UPDATE;
-
-	return status;
-}
-
-/**
- * i40e_aq_set_mac_config
- * @hw: pointer to the hw struct
- * @max_frame_size: Maximum Frame Size to be supported by the port
- * @crc_en: Tell HW to append a CRC to outgoing frames
- * @pacing: Pacing configurations
- * @cmd_details: pointer to command details structure or NULL
- *
- * Configure MAC settings for frame size, jumbo frame support and the
- * addition of a CRC by the hardware.
- **/
-i40e_status i40e_aq_set_mac_config(struct i40e_hw *hw,
-				u16 max_frame_size,
-				bool crc_en, u16 pacing,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aq_set_mac_config *cmd =
-		(struct i40e_aq_set_mac_config *)&desc.params.raw;
-	i40e_status status;
-
-	if (max_frame_size == 0)
-		return I40E_ERR_PARAM;
-
-	i40e_fill_default_direct_cmd_desc(&desc,
-					  i40e_aqc_opc_set_mac_config);
-
-	cmd->max_frame_size = CPU_TO_LE16(max_frame_size);
-	cmd->params = ((u8)pacing & 0x0F) << 3;
-	if (crc_en)
-		cmd->params |= I40E_AQ_SET_MAC_CONFIG_CRC_EN;
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 
 	return status;
 }
@@ -1881,6 +1813,8 @@ i40e_status i40e_aq_get_link_info(struct i40e_hw *hw,
 	hw_link_info->link_speed = (enum i40e_aq_link_speed)resp->link_speed;
 	hw_link_info->link_info = resp->link_info;
 	hw_link_info->an_info = resp->an_info;
+	hw_link_info->fec_info = resp->config & (I40E_AQ_CONFIG_FEC_KR_ENA |
+						 I40E_AQ_CONFIG_FEC_RS_ENA);
 	hw_link_info->ext_info = resp->ext_info;
 	hw_link_info->loopback = resp->loopback;
 	hw_link_info->max_frame_size = LE16_TO_CPU(resp->max_frame_size);
@@ -1903,12 +1837,13 @@ i40e_status i40e_aq_get_link_info(struct i40e_hw *hw,
 	else
 		hw_link_info->crc_enable = false;
 
-	if (resp->command_flags & CPU_TO_LE16(I40E_AQ_LSE_ENABLE))
+	if (resp->command_flags & CPU_TO_LE16(I40E_AQ_LSE_IS_ENABLED))
 		hw_link_info->lse_enable = true;
 	else
 		hw_link_info->lse_enable = false;
 
-	if ((hw->aq.fw_maj_ver < 4 || (hw->aq.fw_maj_ver == 4 &&
+	if ((hw->mac.type == I40E_MAC_XL710) &&
+	    (hw->aq.fw_maj_ver < 4 || (hw->aq.fw_maj_ver == 4 &&
 	     hw->aq.fw_min_ver < 40)) && hw_link_info->phy_type == 0xE)
 		hw_link_info->phy_type = I40E_PHY_TYPE_10GBASE_SFPP_CU;
 
@@ -1945,125 +1880,6 @@ i40e_status i40e_aq_set_phy_int_mask(struct i40e_hw *hw,
 					  i40e_aqc_opc_set_phy_int_mask);
 
 	cmd->event_mask = CPU_TO_LE16(mask);
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
-
-	return status;
-}
-
-/**
- * i40e_aq_get_local_advt_reg
- * @hw: pointer to the hw struct
- * @advt_reg: local AN advertisement register value
- * @cmd_details: pointer to command details structure or NULL
- *
- * Get the Local AN advertisement register value.
- **/
-i40e_status i40e_aq_get_local_advt_reg(struct i40e_hw *hw,
-				u64 *advt_reg,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_an_advt_reg *resp =
-		(struct i40e_aqc_an_advt_reg *)&desc.params.raw;
-	i40e_status status;
-
-	i40e_fill_default_direct_cmd_desc(&desc,
-					  i40e_aqc_opc_get_local_advt_reg);
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
-
-	if (status != I40E_SUCCESS)
-		goto aq_get_local_advt_reg_exit;
-
-	*advt_reg = (u64)(LE16_TO_CPU(resp->local_an_reg1)) << 32;
-	*advt_reg |= LE32_TO_CPU(resp->local_an_reg0);
-
-aq_get_local_advt_reg_exit:
-	return status;
-}
-
-/**
- * i40e_aq_set_local_advt_reg
- * @hw: pointer to the hw struct
- * @advt_reg: local AN advertisement register value
- * @cmd_details: pointer to command details structure or NULL
- *
- * Get the Local AN advertisement register value.
- **/
-i40e_status i40e_aq_set_local_advt_reg(struct i40e_hw *hw,
-				u64 advt_reg,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_an_advt_reg *cmd =
-		(struct i40e_aqc_an_advt_reg *)&desc.params.raw;
-	i40e_status status;
-
-	i40e_fill_default_direct_cmd_desc(&desc,
-					  i40e_aqc_opc_get_local_advt_reg);
-
-	cmd->local_an_reg0 = CPU_TO_LE32(lower_32_bits(advt_reg));
-	cmd->local_an_reg1 = CPU_TO_LE16(upper_32_bits(advt_reg));
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
-
-	return status;
-}
-
-/**
- * i40e_aq_get_partner_advt
- * @hw: pointer to the hw struct
- * @advt_reg: AN partner advertisement register value
- * @cmd_details: pointer to command details structure or NULL
- *
- * Get the link partner AN advertisement register value.
- **/
-i40e_status i40e_aq_get_partner_advt(struct i40e_hw *hw,
-				u64 *advt_reg,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_an_advt_reg *resp =
-		(struct i40e_aqc_an_advt_reg *)&desc.params.raw;
-	i40e_status status;
-
-	i40e_fill_default_direct_cmd_desc(&desc,
-					  i40e_aqc_opc_get_partner_advt);
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
-
-	if (status != I40E_SUCCESS)
-		goto aq_get_partner_advt_exit;
-
-	*advt_reg = (u64)(LE16_TO_CPU(resp->local_an_reg1)) << 32;
-	*advt_reg |= LE32_TO_CPU(resp->local_an_reg0);
-
-aq_get_partner_advt_exit:
-	return status;
-}
-
-/**
- * i40e_aq_set_lb_modes
- * @hw: pointer to the hw struct
- * @lb_modes: loopback mode to be set
- * @cmd_details: pointer to command details structure or NULL
- *
- * Sets loopback modes.
- **/
-i40e_status i40e_aq_set_lb_modes(struct i40e_hw *hw,
-				u16 lb_modes,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_set_lb_mode *cmd =
-		(struct i40e_aqc_set_lb_mode *)&desc.params.raw;
-	i40e_status status;
-
-	i40e_fill_default_direct_cmd_desc(&desc,
-					  i40e_aqc_opc_set_lb_modes);
-
-	cmd->lb_mode = CPU_TO_LE16(lb_modes);
 
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 
@@ -2170,6 +1986,34 @@ i40e_status i40e_aq_set_default_vsi(struct i40e_hw *hw,
 }
 
 /**
+ * i40e_aq_clear_default_vsi
+ * @hw: pointer to the hw struct
+ * @seid: vsi number
+ * @cmd_details: pointer to command details structure or NULL
+ **/
+i40e_status i40e_aq_clear_default_vsi(struct i40e_hw *hw,
+				u16 seid,
+				struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aq_desc desc;
+	struct i40e_aqc_set_vsi_promiscuous_modes *cmd =
+		(struct i40e_aqc_set_vsi_promiscuous_modes *)
+		&desc.params.raw;
+	i40e_status status;
+
+	i40e_fill_default_direct_cmd_desc(&desc,
+					i40e_aqc_opc_set_vsi_promiscuous_modes);
+
+	cmd->promiscuous_flags = CPU_TO_LE16(0);
+	cmd->valid_flags = CPU_TO_LE16(I40E_AQC_SET_VSI_DEFAULT);
+	cmd->seid = CPU_TO_LE16(seid);
+
+	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
+
+	return status;
+}
+
+/**
  * i40e_aq_set_vsi_unicast_promiscuous
  * @hw: pointer to the hw struct
  * @seid: vsi number
@@ -2237,6 +2081,43 @@ i40e_status i40e_aq_set_vsi_multicast_promiscuous(struct i40e_hw *hw,
 	cmd->promiscuous_flags = CPU_TO_LE16(flags);
 
 	cmd->valid_flags = CPU_TO_LE16(I40E_AQC_SET_VSI_PROMISC_MULTICAST);
+
+	cmd->seid = CPU_TO_LE16(seid);
+	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
+
+	return status;
+}
+
+/**
+* i40e_aq_set_vsi_full_promiscuous
+* @hw: pointer to the hw struct
+* @seid: VSI number
+* @set: set promiscuous enable/disable
+* @cmd_details: pointer to command details structure or NULL
+**/
+i40e_status i40e_aq_set_vsi_full_promiscuous(struct i40e_hw *hw,
+				u16 seid, bool set,
+				struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aq_desc desc;
+	struct i40e_aqc_set_vsi_promiscuous_modes *cmd =
+		(struct i40e_aqc_set_vsi_promiscuous_modes *)&desc.params.raw;
+	i40e_status status;
+	u16 flags = 0;
+
+	i40e_fill_default_direct_cmd_desc(&desc,
+		i40e_aqc_opc_set_vsi_promiscuous_modes);
+
+	if (set)
+		flags = I40E_AQC_SET_VSI_PROMISC_UNICAST   |
+			I40E_AQC_SET_VSI_PROMISC_MULTICAST |
+			I40E_AQC_SET_VSI_PROMISC_BROADCAST;
+
+	cmd->promiscuous_flags = CPU_TO_LE16(flags);
+
+	cmd->valid_flags = CPU_TO_LE16(I40E_AQC_SET_VSI_PROMISC_UNICAST   |
+				       I40E_AQC_SET_VSI_PROMISC_MULTICAST |
+				       I40E_AQC_SET_VSI_PROMISC_BROADCAST);
 
 	cmd->seid = CPU_TO_LE16(seid);
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
@@ -2313,6 +2194,40 @@ i40e_status i40e_aq_set_vsi_uc_promisc_on_vlan(struct i40e_hw *hw,
 }
 
 /**
+ * i40e_aq_set_vsi_bc_promisc_on_vlan
+ * @hw: pointer to the hw struct
+ * @seid: vsi number
+ * @enable: set broadcast promiscuous enable/disable for a given VLAN
+ * @vid: The VLAN tag filter - capture any broadcast packet with this VLAN tag
+ * @cmd_details: pointer to command details structure or NULL
+ **/
+i40e_status i40e_aq_set_vsi_bc_promisc_on_vlan(struct i40e_hw *hw,
+				u16 seid, bool enable, u16 vid,
+				struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aq_desc desc;
+	struct i40e_aqc_set_vsi_promiscuous_modes *cmd =
+		(struct i40e_aqc_set_vsi_promiscuous_modes *)&desc.params.raw;
+	i40e_status status;
+	u16 flags = 0;
+
+	i40e_fill_default_direct_cmd_desc(&desc,
+					i40e_aqc_opc_set_vsi_promiscuous_modes);
+
+	if (enable)
+		flags |= I40E_AQC_SET_VSI_PROMISC_BROADCAST;
+
+	cmd->promiscuous_flags = CPU_TO_LE16(flags);
+	cmd->valid_flags = CPU_TO_LE16(I40E_AQC_SET_VSI_PROMISC_BROADCAST);
+	cmd->seid = CPU_TO_LE16(seid);
+	cmd->vlan_tag = CPU_TO_LE16(vid | I40E_AQC_SET_VSI_VLAN_VALID);
+
+	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
+
+	return status;
+}
+
+/**
  * i40e_aq_set_vsi_broadcast
  * @hw: pointer to the hw struct
  * @seid: vsi number
@@ -2368,7 +2283,7 @@ i40e_status i40e_aq_set_vsi_vlan_promisc(struct i40e_hw *hw,
 					i40e_aqc_opc_set_vsi_promiscuous_modes);
 	if (enable)
 		flags |= I40E_AQC_SET_VSI_PROMISC_VLAN;
-	
+
 	cmd->promiscuous_flags = CPU_TO_LE16(flags);
 	cmd->valid_flags = CPU_TO_LE16(I40E_AQC_SET_VSI_PROMISC_VLAN);
 	cmd->seid = CPU_TO_LE16(seid);
@@ -2552,14 +2467,6 @@ i40e_status i40e_aq_get_firmware_version(struct i40e_hw *hw,
 			*api_major_version = LE16_TO_CPU(resp->api_major);
 		if (api_minor_version != NULL)
 			*api_minor_version = LE16_TO_CPU(resp->api_minor);
-
-		/* A workaround to fix the API version in SW */
-		if (api_major_version && api_minor_version &&
-		    fw_major_version && fw_minor_version &&
-		    ((*api_major_version == 1) && (*api_minor_version == 1)) &&
-		    (((*fw_major_version == 4) && (*fw_minor_version >= 2)) ||
-		     (*fw_major_version > 4)))
-			*api_minor_version = 2;
 	}
 
 	return status;
@@ -2645,41 +2552,19 @@ i40e_status i40e_update_link_info(struct i40e_hw *hw)
 	if (status)
 		return status;
 
-	if (hw->phy.link_info.link_info & I40E_AQ_MEDIA_AVAILABLE) {
+	/* extra checking needed to ensure link info to user is timely */
+	if ((hw->phy.link_info.link_info & I40E_AQ_MEDIA_AVAILABLE) &&
+	    ((hw->phy.link_info.link_info & I40E_AQ_LINK_UP) ||
+	     !(hw->phy.link_info_old.link_info & I40E_AQ_LINK_UP))) {
 		status = i40e_aq_get_phy_capabilities(hw, false, false,
 						      &abilities, NULL);
 		if (status)
 			return status;
 
-		memcpy(hw->phy.link_info.module_type, &abilities.module_type,
-			sizeof(hw->phy.link_info.module_type));
+		i40e_memcpy(hw->phy.link_info.module_type, &abilities.module_type,
+			sizeof(hw->phy.link_info.module_type), I40E_NONDMA_TO_NONDMA);
 	}
 	return status;
-}
-
-
-/**
- * i40e_get_link_speed
- * @hw: pointer to the hw struct
- *
- * Returns the link speed of the adapter.
- **/
-enum i40e_aq_link_speed i40e_get_link_speed(struct i40e_hw *hw)
-{
-	enum i40e_aq_link_speed speed = I40E_LINK_SPEED_UNKNOWN;
-	i40e_status status = I40E_SUCCESS;
-
-	if (hw->phy.get_link_info) {
-		status = i40e_aq_get_link_info(hw, true, NULL, NULL);
-
-		if (status != I40E_SUCCESS)
-			goto i40e_link_speed_exit;
-	}
-
-	speed = hw->phy.link_info.link_speed;
-
-i40e_link_speed_exit:
-	return speed;
 }
 
 /**
@@ -3014,86 +2899,6 @@ i40e_status i40e_aq_delete_mirrorrule(struct i40e_hw *hw, u16 sw_seid,
 	return i40e_mirrorrule_op(hw, i40e_aqc_opc_delete_mirror_rule, sw_seid,
 				  rule_type, rule_id, count, mr_list,
 				  cmd_details, NULL, rules_used, rules_free);
-}
-
-/**
- * i40e_aq_add_vlan - Add VLAN ids to the HW filtering
- * @hw: pointer to the hw struct
- * @seid: VSI for the vlan filters
- * @v_list: list of vlan filters to be added
- * @count: length of the list
- * @cmd_details: pointer to command details structure or NULL
- **/
-i40e_status i40e_aq_add_vlan(struct i40e_hw *hw, u16 seid,
-			struct i40e_aqc_add_remove_vlan_element_data *v_list,
-			u8 count, struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_macvlan *cmd =
-		(struct i40e_aqc_macvlan *)&desc.params.raw;
-	i40e_status status;
-	u16 buf_size;
-
-	if (count == 0 || !v_list || !hw)
-		return I40E_ERR_PARAM;
-
-	buf_size = count * sizeof(*v_list);
-
-	/* prep the rest of the request */
-	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_add_vlan);
-	cmd->num_addresses = CPU_TO_LE16(count);
-	cmd->seid[0] = CPU_TO_LE16(seid | I40E_AQC_MACVLAN_CMD_SEID_VALID);
-	cmd->seid[1] = 0;
-	cmd->seid[2] = 0;
-
-	desc.flags |= CPU_TO_LE16((u16)(I40E_AQ_FLAG_BUF | I40E_AQ_FLAG_RD));
-	if (buf_size > I40E_AQ_LARGE_BUF)
-		desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_LB);
-
-	status = i40e_asq_send_command(hw, &desc, v_list, buf_size,
-				       cmd_details);
-
-	return status;
-}
-
-/**
- * i40e_aq_remove_vlan - Remove VLANs from the HW filtering
- * @hw: pointer to the hw struct
- * @seid: VSI for the vlan filters
- * @v_list: list of macvlans to be removed
- * @count: length of the list
- * @cmd_details: pointer to command details structure or NULL
- **/
-i40e_status i40e_aq_remove_vlan(struct i40e_hw *hw, u16 seid,
-			struct i40e_aqc_add_remove_vlan_element_data *v_list,
-			u8 count, struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_macvlan *cmd =
-		(struct i40e_aqc_macvlan *)&desc.params.raw;
-	i40e_status status;
-	u16 buf_size;
-
-	if (count == 0 || !v_list || !hw)
-		return I40E_ERR_PARAM;
-
-	buf_size = count * sizeof(*v_list);
-
-	/* prep the rest of the request */
-	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_remove_vlan);
-	cmd->num_addresses = CPU_TO_LE16(count);
-	cmd->seid[0] = CPU_TO_LE16(seid | I40E_AQC_MACVLAN_CMD_SEID_VALID);
-	cmd->seid[1] = 0;
-	cmd->seid[2] = 0;
-
-	desc.flags |= CPU_TO_LE16((u16)(I40E_AQ_FLAG_BUF | I40E_AQ_FLAG_RD));
-	if (buf_size > I40E_AQ_LARGE_BUF)
-		desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_LB);
-
-	status = i40e_asq_send_command(hw, &desc, v_list, buf_size,
-				       cmd_details);
-
-	return status;
 }
 
 /**
@@ -3494,6 +3299,14 @@ static void i40e_parse_discover_capabilities(struct i40e_hw *hw, void *buff,
 			break;
 		case I40E_AQ_CAP_ID_MNG_MODE:
 			p->management_mode = number;
+			if (major_rev > 1) {
+				p->mng_protocols_over_mctp = logical_id;
+				i40e_debug(hw, I40E_DEBUG_INIT,
+					   "HW Capability: Protocols over MCTP = %d\n",
+					   p->mng_protocols_over_mctp);
+			} else {
+				p->mng_protocols_over_mctp = 0;
+			}
 			i40e_debug(hw, I40E_DEBUG_INIT,
 				   "HW Capability: Management Mode = %d\n",
 				   p->management_mode);
@@ -3722,7 +3535,6 @@ static void i40e_parse_discover_capabilities(struct i40e_hw *hw, void *buff,
 			else
 				p->acpi_prog_method = I40E_ACPI_PROGRAMMING_METHOD_HW_FVL;
 			p->proxy_support = (phys_id & I40E_PROXY_SUPPORT_MASK) ? 1 : 0;
-			p->proxy_support = p->proxy_support;
 			i40e_debug(hw, I40E_DEBUG_INIT,
 				   "HW Capability: WOL proxy filters = %d\n",
 				   hw->num_wol_proxy_filters);
@@ -3771,8 +3583,10 @@ static void i40e_parse_discover_capabilities(struct i40e_hw *hw, void *buff,
 	/* partition id is 1-based, and functions are evenly spread
 	 * across the ports as partitions
 	 */
-	hw->partition_id = (hw->pf_id / hw->num_ports) + 1;
-	hw->num_partitions = num_functions / hw->num_ports;
+	if (hw->num_ports != 0) {
+		hw->partition_id = (hw->pf_id / hw->num_ports) + 1;
+		hw->num_partitions = num_functions / hw->num_ports;
+	}
 
 	/* additional HW specific goodies that might
 	 * someday be HW version specific
@@ -3990,156 +3804,6 @@ i40e_status i40e_aq_cfg_lldp_mib_change_event(struct i40e_hw *hw,
 		cmd->command |= I40E_AQ_LLDP_MIB_UPDATE_DISABLE;
 
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
-
-	return status;
-}
-
-/**
- * i40e_aq_add_lldp_tlv
- * @hw: pointer to the hw struct
- * @bridge_type: type of bridge
- * @buff: buffer with TLV to add
- * @buff_size: length of the buffer
- * @tlv_len: length of the TLV to be added
- * @mib_len: length of the LLDP MIB returned in response
- * @cmd_details: pointer to command details structure or NULL
- *
- * Add the specified TLV to LLDP Local MIB for the given bridge type,
- * it is responsibility of the caller to make sure that the TLV is not
- * already present in the LLDPDU.
- * In return firmware will write the complete LLDP MIB with the newly
- * added TLV in the response buffer.
- **/
-i40e_status i40e_aq_add_lldp_tlv(struct i40e_hw *hw, u8 bridge_type,
-				void *buff, u16 buff_size, u16 tlv_len,
-				u16 *mib_len,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_lldp_add_tlv *cmd =
-		(struct i40e_aqc_lldp_add_tlv *)&desc.params.raw;
-	i40e_status status;
-
-	if (buff_size == 0 || !buff || tlv_len == 0)
-		return I40E_ERR_PARAM;
-
-	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_lldp_add_tlv);
-
-	/* Indirect Command */
-	desc.flags |= CPU_TO_LE16((u16)(I40E_AQ_FLAG_BUF | I40E_AQ_FLAG_RD));
-	if (buff_size > I40E_AQ_LARGE_BUF)
-		desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_LB);
-	desc.datalen = CPU_TO_LE16(buff_size);
-
-	cmd->type = ((bridge_type << I40E_AQ_LLDP_BRIDGE_TYPE_SHIFT) &
-		      I40E_AQ_LLDP_BRIDGE_TYPE_MASK);
-	cmd->len = CPU_TO_LE16(tlv_len);
-
-	status = i40e_asq_send_command(hw, &desc, buff, buff_size, cmd_details);
-	if (!status) {
-		if (mib_len != NULL)
-			*mib_len = LE16_TO_CPU(desc.datalen);
-	}
-
-	return status;
-}
-
-/**
- * i40e_aq_update_lldp_tlv
- * @hw: pointer to the hw struct
- * @bridge_type: type of bridge
- * @buff: buffer with TLV to update
- * @buff_size: size of the buffer holding original and updated TLVs
- * @old_len: Length of the Original TLV
- * @new_len: Length of the Updated TLV
- * @offset: offset of the updated TLV in the buff
- * @mib_len: length of the returned LLDP MIB
- * @cmd_details: pointer to command details structure or NULL
- *
- * Update the specified TLV to the LLDP Local MIB for the given bridge type.
- * Firmware will place the complete LLDP MIB in response buffer with the
- * updated TLV.
- **/
-i40e_status i40e_aq_update_lldp_tlv(struct i40e_hw *hw,
-				u8 bridge_type, void *buff, u16 buff_size,
-				u16 old_len, u16 new_len, u16 offset,
-				u16 *mib_len,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_lldp_update_tlv *cmd =
-		(struct i40e_aqc_lldp_update_tlv *)&desc.params.raw;
-	i40e_status status;
-
-	if (buff_size == 0 || !buff || offset == 0 ||
-	    old_len == 0 || new_len == 0)
-		return I40E_ERR_PARAM;
-
-	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_lldp_update_tlv);
-
-	/* Indirect Command */
-	desc.flags |= CPU_TO_LE16((u16)(I40E_AQ_FLAG_BUF | I40E_AQ_FLAG_RD));
-	if (buff_size > I40E_AQ_LARGE_BUF)
-		desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_LB);
-	desc.datalen = CPU_TO_LE16(buff_size);
-
-	cmd->type = ((bridge_type << I40E_AQ_LLDP_BRIDGE_TYPE_SHIFT) &
-		      I40E_AQ_LLDP_BRIDGE_TYPE_MASK);
-	cmd->old_len = CPU_TO_LE16(old_len);
-	cmd->new_offset = CPU_TO_LE16(offset);
-	cmd->new_len = CPU_TO_LE16(new_len);
-
-	status = i40e_asq_send_command(hw, &desc, buff, buff_size, cmd_details);
-	if (!status) {
-		if (mib_len != NULL)
-			*mib_len = LE16_TO_CPU(desc.datalen);
-	}
-
-	return status;
-}
-
-/**
- * i40e_aq_delete_lldp_tlv
- * @hw: pointer to the hw struct
- * @bridge_type: type of bridge
- * @buff: pointer to a user supplied buffer that has the TLV
- * @buff_size: length of the buffer
- * @tlv_len: length of the TLV to be deleted
- * @mib_len: length of the returned LLDP MIB
- * @cmd_details: pointer to command details structure or NULL
- *
- * Delete the specified TLV from LLDP Local MIB for the given bridge type.
- * The firmware places the entire LLDP MIB in the response buffer.
- **/
-i40e_status i40e_aq_delete_lldp_tlv(struct i40e_hw *hw,
-				u8 bridge_type, void *buff, u16 buff_size,
-				u16 tlv_len, u16 *mib_len,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_lldp_add_tlv *cmd =
-		(struct i40e_aqc_lldp_add_tlv *)&desc.params.raw;
-	i40e_status status;
-
-	if (buff_size == 0 || !buff)
-		return I40E_ERR_PARAM;
-
-	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_lldp_delete_tlv);
-
-	/* Indirect Command */
-	desc.flags |= CPU_TO_LE16((u16)(I40E_AQ_FLAG_BUF | I40E_AQ_FLAG_RD));
-	if (buff_size > I40E_AQ_LARGE_BUF)
-		desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_LB);
-	desc.datalen = CPU_TO_LE16(buff_size);
-	cmd->len = CPU_TO_LE16(tlv_len);
-	cmd->type = ((bridge_type << I40E_AQ_LLDP_BRIDGE_TYPE_SHIFT) &
-		      I40E_AQ_LLDP_BRIDGE_TYPE_MASK);
-
-	status = i40e_asq_send_command(hw, &desc, buff, buff_size, cmd_details);
-	if (!status) {
-		if (mib_len != NULL)
-			*mib_len = LE16_TO_CPU(desc.datalen);
-	}
 
 	return status;
 }
@@ -4377,326 +4041,6 @@ i40e_status i40e_aq_delete_element(struct i40e_hw *hw, u16 seid,
 }
 
 /**
- * i40e_aq_add_pvirt - Instantiate a Port Virtualizer on a port
- * @hw: pointer to the hw struct
- * @flags: component flags
- * @mac_seid: uplink seid (MAC SEID)
- * @vsi_seid: connected vsi seid
- * @ret_seid: seid of create pv component
- *
- * This instantiates an i40e port virtualizer with specified flags.
- * Depending on specified flags the port virtualizer can act as a
- * 802.1Qbr port virtualizer or a 802.1Qbg S-component.
- */
-i40e_status i40e_aq_add_pvirt(struct i40e_hw *hw, u16 flags,
-				       u16 mac_seid, u16 vsi_seid,
-				       u16 *ret_seid)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_add_update_pv *cmd =
-		(struct i40e_aqc_add_update_pv *)&desc.params.raw;
-	struct i40e_aqc_add_update_pv_completion *resp =
-		(struct i40e_aqc_add_update_pv_completion *)&desc.params.raw;
-	i40e_status status;
-
-	if (vsi_seid == 0)
-		return I40E_ERR_PARAM;
-
-	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_add_pv);
-	cmd->command_flags = CPU_TO_LE16(flags);
-	cmd->uplink_seid = CPU_TO_LE16(mac_seid);
-	cmd->connected_seid = CPU_TO_LE16(vsi_seid);
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, NULL);
-	if (!status && ret_seid)
-		*ret_seid = LE16_TO_CPU(resp->pv_seid);
-
-	return status;
-}
-
-/**
- * i40e_aq_add_tag - Add an S/E-tag
- * @hw: pointer to the hw struct
- * @direct_to_queue: should s-tag direct flow to a specific queue
- * @vsi_seid: VSI SEID to use this tag
- * @tag: value of the tag
- * @queue_num: queue number, only valid is direct_to_queue is true
- * @tags_used: return value, number of tags in use by this PF
- * @tags_free: return value, number of unallocated tags
- * @cmd_details: pointer to command details structure or NULL
- *
- * This associates an S- or E-tag to a VSI in the switch complex.  It returns
- * the number of tags allocated by the PF, and the number of unallocated
- * tags available.
- **/
-i40e_status i40e_aq_add_tag(struct i40e_hw *hw, bool direct_to_queue,
-				u16 vsi_seid, u16 tag, u16 queue_num,
-				u16 *tags_used, u16 *tags_free,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_add_tag *cmd =
-		(struct i40e_aqc_add_tag *)&desc.params.raw;
-	struct i40e_aqc_add_remove_tag_completion *resp =
-		(struct i40e_aqc_add_remove_tag_completion *)&desc.params.raw;
-	i40e_status status;
-
-	if (vsi_seid == 0)
-		return I40E_ERR_PARAM;
-
-	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_add_tag);
-
-	cmd->seid = CPU_TO_LE16(vsi_seid);
-	cmd->tag = CPU_TO_LE16(tag);
-	if (direct_to_queue) {
-		cmd->flags = CPU_TO_LE16(I40E_AQC_ADD_TAG_FLAG_TO_QUEUE);
-		cmd->queue_number = CPU_TO_LE16(queue_num);
-	}
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
-
-	if (!status) {
-		if (tags_used != NULL)
-			*tags_used = LE16_TO_CPU(resp->tags_used);
-		if (tags_free != NULL)
-			*tags_free = LE16_TO_CPU(resp->tags_free);
-	}
-
-	return status;
-}
-
-/**
- * i40e_aq_remove_tag - Remove an S- or E-tag
- * @hw: pointer to the hw struct
- * @vsi_seid: VSI SEID this tag is associated with
- * @tag: value of the S-tag to delete
- * @tags_used: return value, number of tags in use by this PF
- * @tags_free: return value, number of unallocated tags
- * @cmd_details: pointer to command details structure or NULL
- *
- * This deletes an S- or E-tag from a VSI in the switch complex.  It returns
- * the number of tags allocated by the PF, and the number of unallocated
- * tags available.
- **/
-i40e_status i40e_aq_remove_tag(struct i40e_hw *hw, u16 vsi_seid,
-				u16 tag, u16 *tags_used, u16 *tags_free,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_remove_tag *cmd =
-		(struct i40e_aqc_remove_tag *)&desc.params.raw;
-	struct i40e_aqc_add_remove_tag_completion *resp =
-		(struct i40e_aqc_add_remove_tag_completion *)&desc.params.raw;
-	i40e_status status;
-
-	if (vsi_seid == 0)
-		return I40E_ERR_PARAM;
-
-	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_remove_tag);
-
-	cmd->seid = CPU_TO_LE16(vsi_seid);
-	cmd->tag = CPU_TO_LE16(tag);
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
-
-	if (!status) {
-		if (tags_used != NULL)
-			*tags_used = LE16_TO_CPU(resp->tags_used);
-		if (tags_free != NULL)
-			*tags_free = LE16_TO_CPU(resp->tags_free);
-	}
-
-	return status;
-}
-
-/**
- * i40e_aq_add_mcast_etag - Add a multicast E-tag
- * @hw: pointer to the hw struct
- * @pv_seid: Port Virtualizer of this SEID to associate E-tag with
- * @etag: value of E-tag to add
- * @num_tags_in_buf: number of unicast E-tags in indirect buffer
- * @buf: address of indirect buffer
- * @tags_used: return value, number of E-tags in use by this port
- * @tags_free: return value, number of unallocated M-tags
- * @cmd_details: pointer to command details structure or NULL
- *
- * This associates a multicast E-tag to a port virtualizer.  It will return
- * the number of tags allocated by the PF, and the number of unallocated
- * tags available.
- *
- * The indirect buffer pointed to by buf is a list of 2-byte E-tags,
- * num_tags_in_buf long.
- **/
-i40e_status i40e_aq_add_mcast_etag(struct i40e_hw *hw, u16 pv_seid,
-				u16 etag, u8 num_tags_in_buf, void *buf,
-				u16 *tags_used, u16 *tags_free,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_add_remove_mcast_etag *cmd =
-		(struct i40e_aqc_add_remove_mcast_etag *)&desc.params.raw;
-	struct i40e_aqc_add_remove_mcast_etag_completion *resp =
-	   (struct i40e_aqc_add_remove_mcast_etag_completion *)&desc.params.raw;
-	i40e_status status;
-	u16 length = sizeof(u16) * num_tags_in_buf;
-
-	if ((pv_seid == 0) || (buf == NULL) || (num_tags_in_buf == 0))
-		return I40E_ERR_PARAM;
-
-	i40e_fill_default_direct_cmd_desc(&desc,
-					  i40e_aqc_opc_add_multicast_etag);
-
-	cmd->pv_seid = CPU_TO_LE16(pv_seid);
-	cmd->etag = CPU_TO_LE16(etag);
-	cmd->num_unicast_etags = num_tags_in_buf;
-
-	desc.flags |= CPU_TO_LE16((u16)(I40E_AQ_FLAG_BUF | I40E_AQ_FLAG_RD));
-	if (length > I40E_AQ_LARGE_BUF)
-		desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_LB);
-
-	status = i40e_asq_send_command(hw, &desc, buf, length, cmd_details);
-
-	if (!status) {
-		if (tags_used != NULL)
-			*tags_used = LE16_TO_CPU(resp->mcast_etags_used);
-		if (tags_free != NULL)
-			*tags_free = LE16_TO_CPU(resp->mcast_etags_free);
-	}
-
-	return status;
-}
-
-/**
- * i40e_aq_remove_mcast_etag - Remove a multicast E-tag
- * @hw: pointer to the hw struct
- * @pv_seid: Port Virtualizer SEID this M-tag is associated with
- * @etag: value of the E-tag to remove
- * @tags_used: return value, number of tags in use by this port
- * @tags_free: return value, number of unallocated tags
- * @cmd_details: pointer to command details structure or NULL
- *
- * This deletes an E-tag from the port virtualizer.  It will return
- * the number of tags allocated by the port, and the number of unallocated
- * tags available.
- **/
-i40e_status i40e_aq_remove_mcast_etag(struct i40e_hw *hw, u16 pv_seid,
-				u16 etag, u16 *tags_used, u16 *tags_free,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_add_remove_mcast_etag *cmd =
-		(struct i40e_aqc_add_remove_mcast_etag *)&desc.params.raw;
-	struct i40e_aqc_add_remove_mcast_etag_completion *resp =
-	   (struct i40e_aqc_add_remove_mcast_etag_completion *)&desc.params.raw;
-	i40e_status status;
-
-
-	if (pv_seid == 0)
-		return I40E_ERR_PARAM;
-
-	i40e_fill_default_direct_cmd_desc(&desc,
-					  i40e_aqc_opc_remove_multicast_etag);
-
-	cmd->pv_seid = CPU_TO_LE16(pv_seid);
-	cmd->etag = CPU_TO_LE16(etag);
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
-
-	if (!status) {
-		if (tags_used != NULL)
-			*tags_used = LE16_TO_CPU(resp->mcast_etags_used);
-		if (tags_free != NULL)
-			*tags_free = LE16_TO_CPU(resp->mcast_etags_free);
-	}
-
-	return status;
-}
-
-/**
- * i40e_aq_update_tag - Update an S/E-tag
- * @hw: pointer to the hw struct
- * @vsi_seid: VSI SEID using this S-tag
- * @old_tag: old tag value
- * @new_tag: new tag value
- * @tags_used: return value, number of tags in use by this PF
- * @tags_free: return value, number of unallocated tags
- * @cmd_details: pointer to command details structure or NULL
- *
- * This updates the value of the tag currently attached to this VSI
- * in the switch complex.  It will return the number of tags allocated
- * by the PF, and the number of unallocated tags available.
- **/
-i40e_status i40e_aq_update_tag(struct i40e_hw *hw, u16 vsi_seid,
-				u16 old_tag, u16 new_tag, u16 *tags_used,
-				u16 *tags_free,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_update_tag *cmd =
-		(struct i40e_aqc_update_tag *)&desc.params.raw;
-	struct i40e_aqc_update_tag_completion *resp =
-		(struct i40e_aqc_update_tag_completion *)&desc.params.raw;
-	i40e_status status;
-
-	if (vsi_seid == 0)
-		return I40E_ERR_PARAM;
-
-	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_update_tag);
-
-	cmd->seid = CPU_TO_LE16(vsi_seid);
-	cmd->old_tag = CPU_TO_LE16(old_tag);
-	cmd->new_tag = CPU_TO_LE16(new_tag);
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
-
-	if (!status) {
-		if (tags_used != NULL)
-			*tags_used = LE16_TO_CPU(resp->tags_used);
-		if (tags_free != NULL)
-			*tags_free = LE16_TO_CPU(resp->tags_free);
-	}
-
-	return status;
-}
-
-/**
- * i40e_aq_dcb_ignore_pfc - Ignore PFC for given TCs
- * @hw: pointer to the hw struct
- * @tcmap: TC map for request/release any ignore PFC condition
- * @request: request or release ignore PFC condition
- * @tcmap_ret: return TCs for which PFC is currently ignored
- * @cmd_details: pointer to command details structure or NULL
- *
- * This sends out request/release to ignore PFC condition for a TC.
- * It will return the TCs for which PFC is currently ignored.
- **/
-i40e_status i40e_aq_dcb_ignore_pfc(struct i40e_hw *hw, u8 tcmap,
-				bool request, u8 *tcmap_ret,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_pfc_ignore *cmd_resp =
-		(struct i40e_aqc_pfc_ignore *)&desc.params.raw;
-	i40e_status status;
-
-	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_dcb_ignore_pfc);
-
-	if (request)
-		cmd_resp->command_flags = I40E_AQC_PFC_IGNORE_SET;
-
-	cmd_resp->tc_bitmap = tcmap;
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
-
-	if (!status) {
-		if (tcmap_ret != NULL)
-			*tcmap_ret = cmd_resp->tc_bitmap;
-	}
-
-	return status;
-}
-
-/**
  * i40e_aq_dcb_updated - DCB Updated Command
  * @hw: pointer to the hw struct
  * @cmd_details: pointer to command details structure or NULL
@@ -4720,117 +4064,6 @@ i40e_status i40e_aq_dcb_updated(struct i40e_hw *hw,
 	i40e_status status;
 
 	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_dcb_updated);
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
-
-	return status;
-}
-
-/**
- * i40e_aq_add_statistics - Add a statistics block to a VLAN in a switch.
- * @hw: pointer to the hw struct
- * @seid: defines the SEID of the switch for which the stats are requested
- * @vlan_id: the VLAN ID for which the statistics are requested
- * @stat_index: index of the statistics counters block assigned to this VLAN
- * @cmd_details: pointer to command details structure or NULL
- *
- * XL710 supports 128 smonVlanStats counters.This command is used to
- * allocate a set of smonVlanStats counters to a specific VLAN in a specific
- * switch.
- **/
-i40e_status i40e_aq_add_statistics(struct i40e_hw *hw, u16 seid,
-				u16 vlan_id, u16 *stat_index,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_add_remove_statistics *cmd_resp =
-		(struct i40e_aqc_add_remove_statistics *)&desc.params.raw;
-	i40e_status status;
-
-	if ((seid == 0) || (stat_index == NULL))
-		return I40E_ERR_PARAM;
-
-	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_add_statistics);
-
-	cmd_resp->seid = CPU_TO_LE16(seid);
-	cmd_resp->vlan = CPU_TO_LE16(vlan_id);
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
-
-	if (!status && stat_index)
-		*stat_index = LE16_TO_CPU(cmd_resp->stat_index);
-
-	return status;
-}
-
-/**
- * i40e_aq_remove_statistics - Remove a statistics block to a VLAN in a switch.
- * @hw: pointer to the hw struct
- * @seid: defines the SEID of the switch for which the stats are requested
- * @vlan_id: the VLAN ID for which the statistics are requested
- * @stat_index: index of the statistics counters block assigned to this VLAN
- * @cmd_details: pointer to command details structure or NULL
- *
- * XL710 supports 128 smonVlanStats counters.This command is used to
- * deallocate a set of smonVlanStats counters to a specific VLAN in a specific
- * switch.
- **/
-i40e_status i40e_aq_remove_statistics(struct i40e_hw *hw, u16 seid,
-				u16 vlan_id, u16 stat_index,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_add_remove_statistics *cmd =
-		(struct i40e_aqc_add_remove_statistics *)&desc.params.raw;
-	i40e_status status;
-
-	if (seid == 0)
-		return I40E_ERR_PARAM;
-
-	i40e_fill_default_direct_cmd_desc(&desc,
-					  i40e_aqc_opc_remove_statistics);
-
-	cmd->seid = CPU_TO_LE16(seid);
-	cmd->vlan  = CPU_TO_LE16(vlan_id);
-	cmd->stat_index = CPU_TO_LE16(stat_index);
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
-
-	return status;
-}
-
-/**
- * i40e_aq_set_port_parameters - set physical port parameters.
- * @hw: pointer to the hw struct
- * @bad_frame_vsi: defines the VSI to which bad frames are forwarded
- * @save_bad_pac: if set packets with errors are forwarded to the bad frames VSI
- * @pad_short_pac: if set transmit packets smaller than 60 bytes are padded
- * @double_vlan: if set double VLAN is enabled
- * @cmd_details: pointer to command details structure or NULL
- **/
-i40e_status i40e_aq_set_port_parameters(struct i40e_hw *hw,
-				u16 bad_frame_vsi, bool save_bad_pac,
-				bool pad_short_pac, bool double_vlan,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aqc_set_port_parameters *cmd;
-	i40e_status status;
-	struct i40e_aq_desc desc;
-	u16 command_flags = 0;
-
-	cmd = (struct i40e_aqc_set_port_parameters *)&desc.params.raw;
-
-	i40e_fill_default_direct_cmd_desc(&desc,
-					  i40e_aqc_opc_set_port_parameters);
-
-	cmd->bad_frame_vsi = CPU_TO_LE16(bad_frame_vsi);
-	if (save_bad_pac)
-		command_flags |= I40E_AQ_SET_P_PARAMS_SAVE_BAD_PACKETS;
-	if (pad_short_pac)
-		command_flags |= I40E_AQ_SET_P_PARAMS_PAD_SHORT_PACKETS;
-	if (double_vlan)
-		command_flags |= I40E_AQ_SET_P_PARAMS_DOUBLE_VLAN_ENA;
-	cmd->command_flags = CPU_TO_LE16(command_flags);
 
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 
@@ -4928,52 +4161,6 @@ i40e_status i40e_aq_config_vsi_bw_limit(struct i40e_hw *hw,
 }
 
 /**
- * i40e_aq_config_switch_comp_bw_limit - Configure Switching component BW Limit
- * @hw: pointer to the hw struct
- * @seid: switching component seid
- * @credit: BW limit credits (0 = disabled)
- * @max_bw: Max BW limit credits
- * @cmd_details: pointer to command details structure or NULL
- **/
-i40e_status i40e_aq_config_switch_comp_bw_limit(struct i40e_hw *hw,
-				u16 seid, u16 credit, u8 max_bw,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_configure_switching_comp_bw_limit *cmd =
-	  (struct i40e_aqc_configure_switching_comp_bw_limit *)&desc.params.raw;
-	i40e_status status;
-
-	i40e_fill_default_direct_cmd_desc(&desc,
-				i40e_aqc_opc_configure_switching_comp_bw_limit);
-
-	cmd->seid = CPU_TO_LE16(seid);
-	cmd->credit = CPU_TO_LE16(credit);
-	cmd->max_bw = max_bw;
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
-
-	return status;
-}
-
-/**
- * i40e_aq_config_vsi_ets_sla_bw_limit - Config VSI BW Limit per TC
- * @hw: pointer to the hw struct
- * @seid: VSI seid
- * @bw_data: Buffer holding enabled TCs, per TC BW limit/credits
- * @cmd_details: pointer to command details structure or NULL
- **/
-i40e_status i40e_aq_config_vsi_ets_sla_bw_limit(struct i40e_hw *hw,
-			u16 seid,
-			struct i40e_aqc_configure_vsi_ets_sla_bw_data *bw_data,
-			struct i40e_asq_cmd_details *cmd_details)
-{
-	return i40e_aq_tx_sched_cmd(hw, seid, (void *)bw_data, sizeof(*bw_data),
-				    i40e_aqc_opc_configure_vsi_ets_sla_bw_limit,
-				    cmd_details);
-}
-
-/**
  * i40e_aq_config_vsi_tc_bw - Config VSI BW Allocation per TC
  * @hw: pointer to the hw struct
  * @seid: VSI seid
@@ -5021,23 +4208,6 @@ i40e_status i40e_aq_config_switch_comp_bw_config(struct i40e_hw *hw,
 {
 	return i40e_aq_tx_sched_cmd(hw, seid, (void *)bw_data, sizeof(*bw_data),
 			    i40e_aqc_opc_configure_switching_comp_bw_config,
-			    cmd_details);
-}
-
-/**
- * i40e_aq_config_switch_comp_ets_bw_limit - Config Switch comp BW Limit per TC
- * @hw: pointer to the hw struct
- * @seid: seid of the switching component
- * @bw_data: Buffer holding enabled TCs, per TC BW limit/credits
- * @cmd_details: pointer to command details structure or NULL
- **/
-i40e_status i40e_aq_config_switch_comp_ets_bw_limit(
-	struct i40e_hw *hw, u16 seid,
-	struct i40e_aqc_configure_switching_comp_ets_bw_limit_data *bw_data,
-	struct i40e_asq_cmd_details *cmd_details)
-{
-	return i40e_aq_tx_sched_cmd(hw, seid, (void *)bw_data, sizeof(*bw_data),
-			    i40e_aqc_opc_configure_switching_comp_ets_bw_limit,
 			    cmd_details);
 }
 
@@ -5333,8 +4503,7 @@ i40e_status i40e_aq_add_rem_control_packet_filter(struct i40e_hw *hw,
 	}
 
 	if (mac_addr)
-		i40e_memcpy(cmd->mac, mac_addr, ETH_ALEN,
-			    I40E_NONDMA_TO_NONDMA);
+		ether_addr_copy(cmd->mac, mac_addr);
 
 	cmd->etype = CPU_TO_LE16(ethtype);
 	cmd->flags = CPU_TO_LE16(flags);
@@ -5393,12 +4562,12 @@ static void i40e_fix_up_geneve_vni(
 		u16 tnl_type;
 		u32 ti;
 
-		tnl_type = (le16_to_cpu(f[i].flags) &
+		tnl_type = (LE16_TO_CPU(f[i].flags) &
 			   I40E_AQC_ADD_CLOUD_TNL_TYPE_MASK) >>
 			   I40E_AQC_ADD_CLOUD_TNL_TYPE_SHIFT;
 		if (tnl_type == I40E_AQC_ADD_CLOUD_TNL_TYPE_GENEVE) {
-			ti = le32_to_cpu(f[i].tenant_id);
-			f[i].tenant_id = cpu_to_le32(ti << 8);
+			ti = LE32_TO_CPU(f[i].tenant_id);
+			f[i].tenant_id = CPU_TO_LE32(ti << 8);
 		}
 	}
 }
@@ -5482,78 +4651,6 @@ i40e_status i40e_aq_remove_cloud_filters(struct i40e_hw *hw,
 }
 
 /**
- * i40e_aq_alternate_write
- * @hw: pointer to the hardware structure
- * @reg_addr0: address of first dword to be read
- * @reg_val0: value to be written under 'reg_addr0'
- * @reg_addr1: address of second dword to be read
- * @reg_val1: value to be written under 'reg_addr1'
- *
- * Write one or two dwords to alternate structure. Fields are indicated
- * by 'reg_addr0' and 'reg_addr1' register numbers.
- *
- **/
-i40e_status i40e_aq_alternate_write(struct i40e_hw *hw,
-				u32 reg_addr0, u32 reg_val0,
-				u32 reg_addr1, u32 reg_val1)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_alternate_write *cmd_resp =
-		(struct i40e_aqc_alternate_write *)&desc.params.raw;
-	i40e_status status;
-
-	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_alternate_write);
-	cmd_resp->address0 = CPU_TO_LE32(reg_addr0);
-	cmd_resp->address1 = CPU_TO_LE32(reg_addr1);
-	cmd_resp->data0 = CPU_TO_LE32(reg_val0);
-	cmd_resp->data1 = CPU_TO_LE32(reg_val1);
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, NULL);
-
-	return status;
-}
-
-/**
- * i40e_aq_alternate_write_indirect
- * @hw: pointer to the hardware structure
- * @addr: address of a first register to be modified
- * @dw_count: number of alternate structure fields to write
- * @buffer: pointer to the command buffer
- *
- * Write 'dw_count' dwords from 'buffer' to alternate structure
- * starting at 'addr'.
- *
- **/
-i40e_status i40e_aq_alternate_write_indirect(struct i40e_hw *hw,
-				u32 addr, u32 dw_count, void *buffer)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_alternate_ind_write *cmd_resp =
-		(struct i40e_aqc_alternate_ind_write *)&desc.params.raw;
-	i40e_status status;
-
-	if (buffer == NULL)
-		return I40E_ERR_PARAM;
-
-	/* Indirect command */
-	i40e_fill_default_direct_cmd_desc(&desc,
-					 i40e_aqc_opc_alternate_write_indirect);
-
-	desc.flags |= CPU_TO_LE16(I40E_AQ_FLAG_RD);
-	desc.flags |= CPU_TO_LE16(I40E_AQ_FLAG_BUF);
-	if (dw_count > (I40E_AQ_LARGE_BUF/4))
-		desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_LB);
-
-	cmd_resp->address = CPU_TO_LE32(addr);
-	cmd_resp->length = CPU_TO_LE32(dw_count);
-
-	status = i40e_asq_send_command(hw, &desc, buffer,
-				       lower_32_bits(4*dw_count), NULL);
-
-	return status;
-}
-
-/**
  * i40e_aq_alternate_read
  * @hw: pointer to the hardware structure
  * @reg_addr0: address of first dword to be read
@@ -5595,127 +4692,6 @@ i40e_status i40e_aq_alternate_read(struct i40e_hw *hw,
 }
 
 /**
- * i40e_aq_alternate_read_indirect
- * @hw: pointer to the hardware structure
- * @addr: address of the alternate structure field
- * @dw_count: number of alternate structure fields to read
- * @buffer: pointer to the command buffer
- *
- * Read 'dw_count' dwords from alternate structure starting at 'addr' and
- * place them in 'buffer'. The buffer should be allocated by caller.
- *
- **/
-i40e_status i40e_aq_alternate_read_indirect(struct i40e_hw *hw,
-				u32 addr, u32 dw_count, void *buffer)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_alternate_ind_write *cmd_resp =
-		(struct i40e_aqc_alternate_ind_write *)&desc.params.raw;
-	i40e_status status;
-
-	if (buffer == NULL)
-		return I40E_ERR_PARAM;
-
-	/* Indirect command */
-	i40e_fill_default_direct_cmd_desc(&desc,
-		i40e_aqc_opc_alternate_read_indirect);
-
-	desc.flags |= CPU_TO_LE16(I40E_AQ_FLAG_RD);
-	desc.flags |= CPU_TO_LE16(I40E_AQ_FLAG_BUF);
-	if (dw_count > (I40E_AQ_LARGE_BUF/4))
-		desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_LB);
-
-	cmd_resp->address = CPU_TO_LE32(addr);
-	cmd_resp->length = CPU_TO_LE32(dw_count);
-
-	status = i40e_asq_send_command(hw, &desc, buffer,
-				       lower_32_bits(4*dw_count), NULL);
-
-	return status;
-}
-
-/**
- *  i40e_aq_alternate_clear
- *  @hw: pointer to the HW structure.
- *
- *  Clear the alternate structures of the port from which the function
- *  is called.
- *
- **/
-i40e_status i40e_aq_alternate_clear(struct i40e_hw *hw)
-{
-	struct i40e_aq_desc desc;
-	i40e_status status;
-
-	i40e_fill_default_direct_cmd_desc(&desc,
-					  i40e_aqc_opc_alternate_clear_port);
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, NULL);
-
-	return status;
-}
-
-/**
- *  i40e_aq_alternate_write_done
- *  @hw: pointer to the HW structure.
- *  @bios_mode: indicates whether the command is executed by UEFI or legacy BIOS
- *  @reset_needed: indicates the SW should trigger GLOBAL reset
- *
- *  Indicates to the FW that alternate structures have been changed.
- *
- **/
-i40e_status i40e_aq_alternate_write_done(struct i40e_hw *hw,
-		u8 bios_mode, bool *reset_needed)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_alternate_write_done *cmd =
-		(struct i40e_aqc_alternate_write_done *)&desc.params.raw;
-	i40e_status status;
-
-	if (reset_needed == NULL)
-		return I40E_ERR_PARAM;
-
-	i40e_fill_default_direct_cmd_desc(&desc,
-					  i40e_aqc_opc_alternate_write_done);
-
-	cmd->cmd_flags = CPU_TO_LE16(bios_mode);
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, NULL);
-	if (!status && reset_needed)
-		*reset_needed = ((LE16_TO_CPU(cmd->cmd_flags) &
-				 I40E_AQ_ALTERNATE_RESET_NEEDED) != 0);
-
-	return status;
-}
-
-/**
- *  i40e_aq_set_oem_mode
- *  @hw: pointer to the HW structure.
- *  @oem_mode: the OEM mode to be used
- *
- *  Sets the device to a specific operating mode. Currently the only supported
- *  mode is no_clp, which causes FW to refrain from using Alternate RAM.
- *
- **/
-i40e_status i40e_aq_set_oem_mode(struct i40e_hw *hw,
-		u8 oem_mode)
-{
-	struct i40e_aq_desc desc;
-	struct i40e_aqc_alternate_write_done *cmd =
-		(struct i40e_aqc_alternate_write_done *)&desc.params.raw;
-	i40e_status status;
-
-	i40e_fill_default_direct_cmd_desc(&desc,
-					  i40e_aqc_opc_alternate_set_mode);
-
-	cmd->cmd_flags = CPU_TO_LE16(oem_mode);
-
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, NULL);
-
-	return status;
-}
-
-/**
  * i40e_aq_resume_port_tx
  * @hw: pointer to the hardware structure
  * @cmd_details: pointer to command details structure or NULL
@@ -5746,17 +4722,17 @@ void i40e_set_pci_config_data(struct i40e_hw *hw, u16 link_status)
 {
 	hw->bus.type = i40e_bus_type_pci_express;
 
-	switch (link_status & I40E_PCI_LINK_WIDTH) {
-	case I40E_PCI_LINK_WIDTH_1:
+	switch (link_status & PCI_EXP_LNKSTA_NLW) {
+	case PCI_EXP_LNKSTA_NLW_X1:
 		hw->bus.width = i40e_bus_width_pcie_x1;
 		break;
-	case I40E_PCI_LINK_WIDTH_2:
+	case PCI_EXP_LNKSTA_NLW_X2:
 		hw->bus.width = i40e_bus_width_pcie_x2;
 		break;
-	case I40E_PCI_LINK_WIDTH_4:
+	case PCI_EXP_LNKSTA_NLW_X4:
 		hw->bus.width = i40e_bus_width_pcie_x4;
 		break;
-	case I40E_PCI_LINK_WIDTH_8:
+	case PCI_EXP_LNKSTA_NLW_X8:
 		hw->bus.width = i40e_bus_width_pcie_x8;
 		break;
 	default:
@@ -5764,14 +4740,14 @@ void i40e_set_pci_config_data(struct i40e_hw *hw, u16 link_status)
 		break;
 	}
 
-	switch (link_status & I40E_PCI_LINK_SPEED) {
-	case I40E_PCI_LINK_SPEED_2500:
+	switch (link_status & PCI_EXP_LNKSTA_CLS) {
+	case PCI_EXP_LNKSTA_CLS_2_5GB:
 		hw->bus.speed = i40e_bus_speed_2500;
 		break;
-	case I40E_PCI_LINK_SPEED_5000:
+	case PCI_EXP_LNKSTA_CLS_5_0GB:
 		hw->bus.speed = i40e_bus_speed_5000;
 		break;
-	case I40E_PCI_LINK_SPEED_8000:
+	case PCI_EXP_LNKSTA_CLS_8_0GB:
 		hw->bus.speed = i40e_bus_speed_8000;
 		break;
 	default:
@@ -5902,9 +4878,6 @@ i40e_status i40e_aq_configure_partition_bw(struct i40e_hw *hw,
 	desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_BUF);
 	desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_RD);
 
-	if (bwd_size > I40E_AQ_LARGE_BUF)
-		desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_LB);
-
 	desc.datalen = CPU_TO_LE16(bwd_size);
 
 	status = i40e_asq_send_command(hw, &desc, bw_data, bwd_size, cmd_details);
@@ -5913,7 +4886,92 @@ i40e_status i40e_aq_configure_partition_bw(struct i40e_hw *hw,
 }
 
 /**
- * i40e_read_phy_register
+ * i40e_read_phy_register_clause22
+ * @hw: pointer to the HW structure
+ * @reg: register address in the page
+ * @phy_adr: PHY address on MDIO interface
+ * @value: PHY register value
+ *
+ * Reads specified PHY register value
+ **/
+i40e_status i40e_read_phy_register_clause22(struct i40e_hw *hw,
+					u16 reg, u8 phy_addr, u16 *value)
+{
+	i40e_status status = I40E_ERR_TIMEOUT;
+	u8 port_num = (u8)hw->func_caps.mdio_port_num;
+	u32 command = 0;
+	u16 retry = 1000;
+
+	command = (reg << I40E_GLGEN_MSCA_DEVADD_SHIFT) |
+		  (phy_addr << I40E_GLGEN_MSCA_PHYADD_SHIFT) |
+		  (I40E_MDIO_CLAUSE22_OPCODE_READ_MASK) |
+		  (I40E_MDIO_CLAUSE22_STCODE_MASK) |
+		  (I40E_GLGEN_MSCA_MDICMD_MASK);
+	wr32(hw, I40E_GLGEN_MSCA(port_num), command);
+	do {
+		command = rd32(hw, I40E_GLGEN_MSCA(port_num));
+		if (!(command & I40E_GLGEN_MSCA_MDICMD_MASK)) {
+			status = I40E_SUCCESS;
+			break;
+		}
+		udelay(10);
+		retry--;
+	} while (retry);
+
+	if (status) {
+		i40e_debug(hw, I40E_DEBUG_PHY,
+			   "PHY: Can't write command to external PHY.\n");
+	} else {
+		command = rd32(hw, I40E_GLGEN_MSRWD(port_num));
+		*value = (command & I40E_GLGEN_MSRWD_MDIRDDATA_MASK) >>
+			 I40E_GLGEN_MSRWD_MDIRDDATA_SHIFT;
+	}
+
+	return status;
+}
+
+/**
+ * i40e_write_phy_register_clause22
+ * @hw: pointer to the HW structure
+ * @reg: register address in the page
+ * @phy_adr: PHY address on MDIO interface
+ * @value: PHY register value
+ *
+ * Writes specified PHY register value
+ **/
+i40e_status i40e_write_phy_register_clause22(struct i40e_hw *hw,
+					u16 reg, u8 phy_addr, u16 value)
+{
+	i40e_status status = I40E_ERR_TIMEOUT;
+	u8 port_num = (u8)hw->func_caps.mdio_port_num;
+	u32 command  = 0;
+	u16 retry = 1000;
+
+	command = value << I40E_GLGEN_MSRWD_MDIWRDATA_SHIFT;
+	wr32(hw, I40E_GLGEN_MSRWD(port_num), command);
+
+	command = (reg << I40E_GLGEN_MSCA_DEVADD_SHIFT) |
+		  (phy_addr << I40E_GLGEN_MSCA_PHYADD_SHIFT) |
+		  (I40E_MDIO_CLAUSE22_OPCODE_WRITE_MASK) |
+		  (I40E_MDIO_CLAUSE22_STCODE_MASK) |
+		  (I40E_GLGEN_MSCA_MDICMD_MASK);
+
+	wr32(hw, I40E_GLGEN_MSCA(port_num), command);
+	do {
+		command = rd32(hw, I40E_GLGEN_MSCA(port_num));
+		if (!(command & I40E_GLGEN_MSCA_MDICMD_MASK)) {
+			status = I40E_SUCCESS;
+			break;
+		}
+		udelay(10);
+		retry--;
+	} while (retry);
+
+	return status;
+}
+
+/**
+ * i40e_read_phy_register_clause45
  * @hw: pointer to the HW structure
  * @page: registers page number
  * @reg: register address in the page
@@ -5922,9 +4980,8 @@ i40e_status i40e_aq_configure_partition_bw(struct i40e_hw *hw,
  *
  * Reads specified PHY register value
  **/
-i40e_status i40e_read_phy_register(struct i40e_hw *hw,
-					     u8 page, u16 reg, u8 phy_addr,
-					     u16 *value)
+i40e_status i40e_read_phy_register_clause45(struct i40e_hw *hw,
+				u8 page, u16 reg, u8 phy_addr, u16 *value)
 {
 	i40e_status status = I40E_ERR_TIMEOUT;
 	u32 command  = 0;
@@ -5934,8 +4991,8 @@ i40e_status i40e_read_phy_register(struct i40e_hw *hw,
 	command = (reg << I40E_GLGEN_MSCA_MDIADD_SHIFT) |
 		  (page << I40E_GLGEN_MSCA_DEVADD_SHIFT) |
 		  (phy_addr << I40E_GLGEN_MSCA_PHYADD_SHIFT) |
-		  (I40E_MDIO_OPCODE_ADDRESS) |
-		  (I40E_MDIO_STCODE) |
+		  (I40E_MDIO_CLAUSE45_OPCODE_ADDRESS_MASK) |
+		  (I40E_MDIO_CLAUSE45_STCODE_MASK) |
 		  (I40E_GLGEN_MSCA_MDICMD_MASK) |
 		  (I40E_GLGEN_MSCA_MDIINPROGEN_MASK);
 	wr32(hw, I40E_GLGEN_MSCA(port_num), command);
@@ -5957,8 +5014,8 @@ i40e_status i40e_read_phy_register(struct i40e_hw *hw,
 
 	command = (page << I40E_GLGEN_MSCA_DEVADD_SHIFT) |
 		  (phy_addr << I40E_GLGEN_MSCA_PHYADD_SHIFT) |
-		  (I40E_MDIO_OPCODE_READ) |
-		  (I40E_MDIO_STCODE) |
+		  (I40E_MDIO_CLAUSE45_OPCODE_READ_MASK) |
+		  (I40E_MDIO_CLAUSE45_STCODE_MASK) |
 		  (I40E_GLGEN_MSCA_MDICMD_MASK) |
 		  (I40E_GLGEN_MSCA_MDIINPROGEN_MASK);
 	status = I40E_ERR_TIMEOUT;
@@ -5988,7 +5045,7 @@ phy_read_end:
 }
 
 /**
- * i40e_write_phy_register
+ * i40e_write_phy_register_clause45
  * @hw: pointer to the HW structure
  * @page: registers page number
  * @reg: register address in the page
@@ -5997,9 +5054,8 @@ phy_read_end:
  *
  * Writes value to specified PHY register
  **/
-i40e_status i40e_write_phy_register(struct i40e_hw *hw,
-					      u8 page, u16 reg, u8 phy_addr,
-					      u16 value)
+i40e_status i40e_write_phy_register_clause45(struct i40e_hw *hw,
+				u8 page, u16 reg, u8 phy_addr, u16 value)
 {
 	i40e_status status = I40E_ERR_TIMEOUT;
 	u32 command  = 0;
@@ -6009,8 +5065,8 @@ i40e_status i40e_write_phy_register(struct i40e_hw *hw,
 	command = (reg << I40E_GLGEN_MSCA_MDIADD_SHIFT) |
 		  (page << I40E_GLGEN_MSCA_DEVADD_SHIFT) |
 		  (phy_addr << I40E_GLGEN_MSCA_PHYADD_SHIFT) |
-		  (I40E_MDIO_OPCODE_ADDRESS) |
-		  (I40E_MDIO_STCODE) |
+		  (I40E_MDIO_CLAUSE45_OPCODE_ADDRESS_MASK) |
+		  (I40E_MDIO_CLAUSE45_STCODE_MASK) |
 		  (I40E_GLGEN_MSCA_MDICMD_MASK) |
 		  (I40E_GLGEN_MSCA_MDIINPROGEN_MASK);
 	wr32(hw, I40E_GLGEN_MSCA(port_num), command);
@@ -6034,8 +5090,8 @@ i40e_status i40e_write_phy_register(struct i40e_hw *hw,
 
 	command = (page << I40E_GLGEN_MSCA_DEVADD_SHIFT) |
 		  (phy_addr << I40E_GLGEN_MSCA_PHYADD_SHIFT) |
-		  (I40E_MDIO_OPCODE_WRITE) |
-		  (I40E_MDIO_STCODE) |
+		  (I40E_MDIO_CLAUSE45_OPCODE_WRITE_MASK) |
+		  (I40E_MDIO_CLAUSE45_STCODE_MASK) |
 		  (I40E_GLGEN_MSCA_MDICMD_MASK) |
 		  (I40E_GLGEN_MSCA_MDIINPROGEN_MASK);
 	status = I40E_ERR_TIMEOUT;
@@ -6052,6 +5108,78 @@ i40e_status i40e_write_phy_register(struct i40e_hw *hw,
 	} while (retry);
 
 phy_write_end:
+	return status;
+}
+
+/**
+ * i40e_write_phy_register
+ * @hw: pointer to the HW structure
+ * @page: registers page number
+ * @reg: register address in the page
+ * @phy_adr: PHY address on MDIO interface
+ * @value: PHY register value
+ *
+ * Writes value to specified PHY register
+ **/
+i40e_status i40e_write_phy_register(struct i40e_hw *hw,
+				u8 page, u16 reg, u8 phy_addr, u16 value)
+{
+	i40e_status status;
+
+	switch (hw->device_id) {
+	case I40E_DEV_ID_1G_BASE_T_X722:
+		status = i40e_write_phy_register_clause22(hw,
+			reg, phy_addr, value);
+		break;
+	case I40E_DEV_ID_10G_BASE_T:
+	case I40E_DEV_ID_10G_BASE_T4:
+	case I40E_DEV_ID_10G_BASE_T_X722:
+	case I40E_DEV_ID_25G_B:
+	case I40E_DEV_ID_25G_SFP28:
+		status = i40e_write_phy_register_clause45(hw,
+			page, reg, phy_addr, value);
+		break;
+	default:
+		status = I40E_ERR_UNKNOWN_PHY;
+		break;
+	}
+
+	return status;
+}
+
+/**
+ * i40e_read_phy_register
+ * @hw: pointer to the HW structure
+ * @page: registers page number
+ * @reg: register address in the page
+ * @phy_adr: PHY address on MDIO interface
+ * @value: PHY register value
+ *
+ * Reads specified PHY register value
+ **/
+i40e_status i40e_read_phy_register(struct i40e_hw *hw,
+				u8 page, u16 reg, u8 phy_addr, u16 *value)
+{
+	i40e_status status;
+
+	switch (hw->device_id) {
+	case I40E_DEV_ID_1G_BASE_T_X722:
+		status = i40e_read_phy_register_clause22(hw, reg, phy_addr,
+							 value);
+		break;
+	case I40E_DEV_ID_10G_BASE_T:
+	case I40E_DEV_ID_10G_BASE_T4:
+	case I40E_DEV_ID_10G_BASE_T_X722:
+	case I40E_DEV_ID_25G_B:
+	case I40E_DEV_ID_25G_SFP28:
+		status = i40e_read_phy_register_clause45(hw, page, reg,
+							 phy_addr, value);
+		break;
+	default:
+		status = I40E_ERR_UNKNOWN_PHY;
+		break;
+	}
+
 	return status;
 }
 
@@ -6097,14 +5225,16 @@ i40e_status i40e_blink_phy_link_led(struct i40e_hw *hw,
 
 	for (gpio_led_port = 0; gpio_led_port < 3; gpio_led_port++,
 	     led_addr++) {
-		status = i40e_read_phy_register(hw, I40E_PHY_COM_REG_PAGE,
-						led_addr, phy_addr, &led_reg);
+		status = i40e_read_phy_register_clause45(hw,
+							 I40E_PHY_COM_REG_PAGE,
+							 led_addr, phy_addr,
+							 &led_reg);
 		if (status)
 			goto phy_blinking_end;
 		led_ctl = led_reg;
 		if (led_reg & I40E_PHY_LED_LINK_MODE_MASK) {
 			led_reg = 0;
-			status = i40e_write_phy_register(hw,
+			status = i40e_write_phy_register_clause45(hw,
 							 I40E_PHY_COM_REG_PAGE,
 							 led_addr, phy_addr,
 							 led_reg);
@@ -6116,20 +5246,18 @@ i40e_status i40e_blink_phy_link_led(struct i40e_hw *hw,
 
 	if (time > 0 && interval > 0) {
 		for (i = 0; i < time * 1000; i += interval) {
-			status = i40e_read_phy_register(hw,
-							I40E_PHY_COM_REG_PAGE,
-							led_addr, phy_addr,
-							&led_reg);
+			status = i40e_read_phy_register_clause45(hw,
+						I40E_PHY_COM_REG_PAGE,
+						led_addr, phy_addr, &led_reg);
 			if (status)
 				goto restore_config;
 			if (led_reg & I40E_PHY_LED_MANUAL_ON)
 				led_reg = 0;
 			else
 				led_reg = I40E_PHY_LED_MANUAL_ON;
-			status = i40e_write_phy_register(hw,
-							 I40E_PHY_COM_REG_PAGE,
-							 led_addr, phy_addr,
-							 led_reg);
+			status = i40e_write_phy_register_clause45(hw,
+						I40E_PHY_COM_REG_PAGE,
+						led_addr, phy_addr, led_reg);
 			if (status)
 				goto restore_config;
 			msleep(interval);
@@ -6137,8 +5265,9 @@ i40e_status i40e_blink_phy_link_led(struct i40e_hw *hw,
 	}
 
 restore_config:
-	status = i40e_write_phy_register(hw, I40E_PHY_COM_REG_PAGE, led_addr,
-					 phy_addr, led_ctl);
+	status = i40e_write_phy_register_clause45(hw,
+						  I40E_PHY_COM_REG_PAGE,
+						  led_addr, phy_addr, led_ctl);
 
 phy_blinking_end:
 	return status;
@@ -6169,8 +5298,10 @@ i40e_status i40e_led_get_phy(struct i40e_hw *hw, u16 *led_addr,
 
 	for (gpio_led_port = 0; gpio_led_port < 3; gpio_led_port++,
 	     temp_addr++) {
-		status = i40e_read_phy_register(hw, I40E_PHY_COM_REG_PAGE,
-						temp_addr, phy_addr, &reg_val);
+		status = i40e_read_phy_register_clause45(hw,
+							 I40E_PHY_COM_REG_PAGE,
+							 temp_addr, phy_addr,
+							 &reg_val);
 		if (status)
 			return status;
 		*val = reg_val;
@@ -6203,41 +5334,42 @@ i40e_status i40e_led_set_phy(struct i40e_hw *hw, bool on,
 	i = rd32(hw, I40E_PFGEN_PORTNUM);
 	port_num = (u8)(i & I40E_PFGEN_PORTNUM_PORT_NUM_MASK);
 	phy_addr = i40e_get_phy_address(hw, port_num);
-
-	status = i40e_read_phy_register(hw, I40E_PHY_COM_REG_PAGE, led_addr,
-					phy_addr, &led_reg);
+	status = i40e_read_phy_register_clause45(hw, I40E_PHY_COM_REG_PAGE,
+						 led_addr, phy_addr, &led_reg);
 	if (status)
 		return status;
 	led_ctl = led_reg;
 	if (led_reg & I40E_PHY_LED_LINK_MODE_MASK) {
 		led_reg = 0;
-		status = i40e_write_phy_register(hw, I40E_PHY_COM_REG_PAGE,
-						 led_addr, phy_addr, led_reg);
+		status = i40e_write_phy_register_clause45(hw,
+							  I40E_PHY_COM_REG_PAGE,
+							  led_addr, phy_addr,
+							  led_reg);
 		if (status)
 			return status;
 	}
-	status = i40e_read_phy_register(hw, I40E_PHY_COM_REG_PAGE,
-					led_addr, phy_addr, &led_reg);
+	status = i40e_read_phy_register_clause45(hw, I40E_PHY_COM_REG_PAGE,
+						 led_addr, phy_addr, &led_reg);
 	if (status)
 		goto restore_config;
 	if (on)
 		led_reg = I40E_PHY_LED_MANUAL_ON;
 	else
 		led_reg = 0;
-	status = i40e_write_phy_register(hw, I40E_PHY_COM_REG_PAGE,
-					 led_addr, phy_addr, led_reg);
+	status = i40e_write_phy_register_clause45(hw, I40E_PHY_COM_REG_PAGE,
+						  led_addr, phy_addr, led_reg);
 	if (status)
 		goto restore_config;
 	if (mode & I40E_PHY_LED_MODE_ORIG) {
 		led_ctl = (mode & I40E_PHY_LED_MODE_MASK);
-		status = i40e_write_phy_register(hw,
+		status = i40e_write_phy_register_clause45(hw,
 						 I40E_PHY_COM_REG_PAGE,
 						 led_addr, phy_addr, led_ctl);
 	}
 	return status;
 restore_config:
-	status = i40e_write_phy_register(hw, I40E_PHY_COM_REG_PAGE, led_addr,
-					 phy_addr, led_ctl);
+	status = i40e_write_phy_register_clause45(hw, I40E_PHY_COM_REG_PAGE,
+						  led_addr, phy_addr, led_ctl);
 	return status;
 }
 
@@ -6384,10 +5516,13 @@ i40e_status i40e_aq_set_arp_proxy_config(struct i40e_hw *hw,
 
 	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_set_proxy_config);
 
+	desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_BUF);
+	desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_RD);
 	desc.params.external.addr_high =
 				  CPU_TO_LE32(upper_32_bits((u64)proxy_config));
 	desc.params.external.addr_low =
 				  CPU_TO_LE32(lower_32_bits((u64)proxy_config));
+	desc.datalen = sizeof(struct i40e_aqc_arp_proxy_data);
 
 	status = i40e_asq_send_command(hw, &desc, proxy_config,
 				       sizeof(struct i40e_aqc_arp_proxy_data),
@@ -6418,10 +5553,13 @@ i40e_status i40e_aq_set_ns_proxy_table_entry(struct i40e_hw *hw,
 	i40e_fill_default_direct_cmd_desc(&desc,
 				i40e_aqc_opc_set_ns_proxy_table_entry);
 
+	desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_BUF);
+	desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_RD);
 	desc.params.external.addr_high =
 		CPU_TO_LE32(upper_32_bits((u64)ns_proxy_table_entry));
 	desc.params.external.addr_low =
 		CPU_TO_LE32(lower_32_bits((u64)ns_proxy_table_entry));
+	desc.datalen = sizeof(struct i40e_aqc_ns_proxy_data);
 
 	status = i40e_asq_send_command(hw, &desc, ns_proxy_table_entry,
 				       sizeof(struct i40e_aqc_ns_proxy_data),
@@ -6468,9 +5606,11 @@ i40e_status i40e_aq_set_clear_wol_filter(struct i40e_hw *hw,
 	if (set_filter) {
 		if (!filter)
 			return  I40E_ERR_PARAM;
+
 		cmd_flags |= I40E_AQC_SET_WOL_FILTER;
-		buff_len = sizeof(*filter);
+		cmd_flags |= I40E_AQC_SET_WOL_FILTER_WOL_PRESERVE_ON_PFR;
 	}
+
 	if (no_wol_tco)
 		cmd_flags |= I40E_AQC_SET_WOL_FILTER_NO_TCO_WOL;
 	cmd->cmd_flags = CPU_TO_LE16(cmd_flags);
@@ -6480,6 +5620,12 @@ i40e_status i40e_aq_set_clear_wol_filter(struct i40e_hw *hw,
 	if (no_wol_tco_valid)
 		valid_flags |= I40E_AQC_SET_WOL_FILTER_NO_TCO_ACTION_VALID;
 	cmd->valid_flags = CPU_TO_LE16(valid_flags);
+
+	buff_len = sizeof(*filter);
+	desc.datalen = buff_len;
+
+	desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_BUF);
+	desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_RD);
 
 	cmd->address_high = CPU_TO_LE32(upper_32_bits((u64)filter));
 	cmd->address_low = CPU_TO_LE32(lower_32_bits((u64)filter));
@@ -6513,6 +5659,27 @@ i40e_status i40e_aq_get_wake_event_reason(struct i40e_hw *hw,
 
 	if (status == I40E_SUCCESS)
 		*wake_reason = LE16_TO_CPU(resp->wake_reason);
+
+	return status;
+}
+
+/**
+* i40e_aq_clear_all_wol_filters
+* @hw: pointer to the hw struct
+* @cmd_details: pointer to command details structure or NULL
+*
+* Get information for the reason of a Wake Up event
+**/
+i40e_status i40e_aq_clear_all_wol_filters(struct i40e_hw *hw,
+	struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aq_desc desc;
+	i40e_status status;
+
+	i40e_fill_default_direct_cmd_desc(&desc,
+					  i40e_aqc_opc_clear_all_wol_filters);
+
+	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 
 	return status;
 }

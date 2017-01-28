@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
+ * Copyright(c) 2013 - 2017 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -157,6 +157,11 @@ struct i40e_virtchnl_vsi_resource {
 #define I40E_VIRTCHNL_VF_OFFLOAD_RX_POLLING	0x00020000
 #define I40E_VIRTCHNL_VF_OFFLOAD_RSS_PCTYPE_V2	0x00040000
 #define I40E_VIRTCHNL_VF_OFFLOAD_RSS_PF		0X00080000
+#define I40E_VIRTCHNL_VF_OFFLOAD_ENCAP_CSUM	0X00100000
+
+#define I40E_VF_BASE_MODE_OFFLOADS (I40E_VIRTCHNL_VF_OFFLOAD_L2 | \
+				    I40E_VIRTCHNL_VF_OFFLOAD_VLAN | \
+				    I40E_VIRTCHNL_VF_OFFLOAD_RSS_PF)
 
 struct i40e_virtchnl_vf_resource {
 	u16 num_vsis;
@@ -370,8 +375,6 @@ enum i40e_virtchnl_event_codes {
 	I40E_VIRTCHNL_EVENT_PF_DRIVER_CLOSE,
 };
 #define I40E_PF_EVENT_SEVERITY_INFO		0
-#define I40E_PF_EVENT_SEVERITY_ATTENTION	1
-#define I40E_PF_EVENT_SEVERITY_ACTION_REQUIRED	2
 #define I40E_PF_EVENT_SEVERITY_CERTAIN_DOOM	255
 
 struct i40e_virtchnl_pf_event {

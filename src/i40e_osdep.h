@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
+ * Copyright(c) 2013 - 2017 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -60,10 +60,10 @@ static inline void writeq(__u64 val, volatile void __iomem *addr)
  * actual OS primitives
  */
 
-#define hw_dbg(h, s, ...) do {				\
-		pr_debug("i40e %02x.%x " s,			\
-			(h)->bus.device, (h)->bus.func,		\
-			##__VA_ARGS__);				\
+#define hw_dbg(h, s, ...) do {					\
+		pr_debug("i40e %02x:%02x.%x " s,		\
+			(h)->bus.bus_id, (h)->bus.device,	\
+			(h)->bus.func, ##__VA_ARGS__);		\
 } while (0)
 
 
@@ -93,12 +93,12 @@ struct i40e_virt_mem {
 #define i40e_allocate_virt_mem(h, m, s) i40e_allocate_virt_mem_d(h, m, s)
 #define i40e_free_virt_mem(h, m) i40e_free_virt_mem_d(h, m)
 
-#define i40e_debug(h, m, s, ...)                                \
-do {                                                            \
-	if (((m) & (h)->debug_mask))                            \
-		pr_info("i40e %02x.%x " s,                      \
-			(h)->bus.device, (h)->bus.func,         \
-			##__VA_ARGS__);                         \
+#define i40e_debug(h, m, s, ...)				\
+do {								\
+	if (((m) & (h)->debug_mask))				\
+		pr_info("i40e %02x:%02x.%x " s,			\
+			(h)->bus.bus_id, (h)->bus.device,	\
+			(h)->bus.func, ##__VA_ARGS__);		\
 } while (0)
 
 /* these things are all directly replaced with sed during the kernel build */

@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
+ * Copyright(c) 2013 - 2017 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -57,7 +57,7 @@ static u64 i40e_align_l2obj_base(u64 offset)
  * Calculates the maximum amount of memory for the function required, based
  * on the number of resources it must provide context for.
  **/
-u64 i40e_calculate_l2fpm_size(u32 txq_num, u32 rxq_num,
+static u64 i40e_calculate_l2fpm_size(u32 txq_num, u32 rxq_num,
 			      u32 fcoe_cntx_num, u32 fcoe_filt_num)
 {
 	u64 fpm_size = 0;
@@ -295,7 +295,7 @@ static i40e_status i40e_remove_sd_bp(struct i40e_hw *hw,
  * This will allocate memory for PDs and backing pages and populate
  * the sd and pd entries.
  **/
-i40e_status i40e_create_lan_hmc_object(struct i40e_hw *hw,
+static i40e_status i40e_create_lan_hmc_object(struct i40e_hw *hw,
 				struct i40e_hmc_lan_create_obj_info *info)
 {
 	i40e_status ret_code = I40E_SUCCESS;
@@ -539,7 +539,7 @@ configure_lan_hmc_out:
  * caller should deallocate memory allocated previously for
  * book-keeping information about PDs and backing storage.
  **/
-i40e_status i40e_delete_lan_hmc_object(struct i40e_hw *hw,
+static i40e_status i40e_delete_lan_hmc_object(struct i40e_hw *hw,
 				struct i40e_hmc_lan_delete_obj_info *info)
 {
 	i40e_status ret_code = I40E_SUCCESS;
@@ -929,228 +929,6 @@ static void i40e_write_qword(u8 *hmc_bits,
 }
 
 /**
- * i40e_read_byte - read HMC context byte into struct
- * @hmc_bits: pointer to the HMC memory
- * @ce_info: a description of the struct to be filled
- * @dest: the struct to be filled
- **/
-static void i40e_read_byte(u8 *hmc_bits,
-			   struct i40e_context_ele *ce_info,
-			   u8 *dest)
-{
-	u8 dest_byte, mask;
-	u8 *src, *target;
-	u16 shift_width;
-
-	/* prepare the bits and mask */
-	shift_width = ce_info->lsb % 8;
-	mask = (u8)(BIT(ce_info->width) - 1);
-
-	/* shift to correct alignment */
-	mask <<= shift_width;
-
-	/* get the current bits from the src bit string */
-	src = hmc_bits + (ce_info->lsb / 8);
-
-	i40e_memcpy(&dest_byte, src, sizeof(dest_byte), I40E_DMA_TO_NONDMA);
-
-	dest_byte &= ~(mask);
-
-	dest_byte >>= shift_width;
-
-	/* get the address from the struct field */
-	target = dest + ce_info->offset;
-
-	/* put it back in the struct */
-	i40e_memcpy(target, &dest_byte, sizeof(dest_byte), I40E_NONDMA_TO_DMA);
-}
-
-/**
- * i40e_read_word - read HMC context word into struct
- * @hmc_bits: pointer to the HMC memory
- * @ce_info: a description of the struct to be filled
- * @dest: the struct to be filled
- **/
-static void i40e_read_word(u8 *hmc_bits,
-			   struct i40e_context_ele *ce_info,
-			   u8 *dest)
-{
-	u16 dest_word, mask;
-	u8 *src, *target;
-	u16 shift_width;
-	__le16 src_word;
-
-	/* prepare the bits and mask */
-	shift_width = ce_info->lsb % 8;
-	mask = BIT(ce_info->width) - 1;
-
-	/* shift to correct alignment */
-	mask <<= shift_width;
-
-	/* get the current bits from the src bit string */
-	src = hmc_bits + (ce_info->lsb / 8);
-
-	i40e_memcpy(&src_word, src, sizeof(src_word), I40E_DMA_TO_NONDMA);
-
-	/* the data in the memory is stored as little endian so mask it
-	 * correctly
-	 */
-	src_word &= ~(CPU_TO_LE16(mask));
-
-	/* get the data back into host order before shifting */
-	dest_word = LE16_TO_CPU(src_word);
-
-	dest_word >>= shift_width;
-
-	/* get the address from the struct field */
-	target = dest + ce_info->offset;
-
-	/* put it back in the struct */
-	i40e_memcpy(target, &dest_word, sizeof(dest_word), I40E_NONDMA_TO_DMA);
-}
-
-/**
- * i40e_read_dword - read HMC context dword into struct
- * @hmc_bits: pointer to the HMC memory
- * @ce_info: a description of the struct to be filled
- * @dest: the struct to be filled
- **/
-static void i40e_read_dword(u8 *hmc_bits,
-			    struct i40e_context_ele *ce_info,
-			    u8 *dest)
-{
-	u32 dest_dword, mask;
-	u8 *src, *target;
-	u16 shift_width;
-	__le32 src_dword;
-
-	/* prepare the bits and mask */
-	shift_width = ce_info->lsb % 8;
-
-	/* if the field width is exactly 32 on an x86 machine, then the shift
-	 * operation will not work because the SHL instructions count is masked
-	 * to 5 bits so the shift will do nothing
-	 */
-	if (ce_info->width < 32)
-		mask = BIT(ce_info->width) - 1;
-	else
-		mask = ~(u32)0;
-
-	/* shift to correct alignment */
-	mask <<= shift_width;
-
-	/* get the current bits from the src bit string */
-	src = hmc_bits + (ce_info->lsb / 8);
-
-	i40e_memcpy(&src_dword, src, sizeof(src_dword), I40E_DMA_TO_NONDMA);
-
-	/* the data in the memory is stored as little endian so mask it
-	 * correctly
-	 */
-	src_dword &= ~(CPU_TO_LE32(mask));
-
-	/* get the data back into host order before shifting */
-	dest_dword = LE32_TO_CPU(src_dword);
-
-	dest_dword >>= shift_width;
-
-	/* get the address from the struct field */
-	target = dest + ce_info->offset;
-
-	/* put it back in the struct */
-	i40e_memcpy(target, &dest_dword, sizeof(dest_dword),
-		    I40E_NONDMA_TO_DMA);
-}
-
-/**
- * i40e_read_qword - read HMC context qword into struct
- * @hmc_bits: pointer to the HMC memory
- * @ce_info: a description of the struct to be filled
- * @dest: the struct to be filled
- **/
-static void i40e_read_qword(u8 *hmc_bits,
-			    struct i40e_context_ele *ce_info,
-			    u8 *dest)
-{
-	u64 dest_qword, mask;
-	u8 *src, *target;
-	u16 shift_width;
-	__le64 src_qword;
-
-	/* prepare the bits and mask */
-	shift_width = ce_info->lsb % 8;
-
-	/* if the field width is exactly 64 on an x86 machine, then the shift
-	 * operation will not work because the SHL instructions count is masked
-	 * to 6 bits so the shift will do nothing
-	 */
-	if (ce_info->width < 64)
-		mask = BIT_ULL(ce_info->width) - 1;
-	else
-		mask = ~(u64)0;
-
-	/* shift to correct alignment */
-	mask <<= shift_width;
-
-	/* get the current bits from the src bit string */
-	src = hmc_bits + (ce_info->lsb / 8);
-
-	i40e_memcpy(&src_qword, src, sizeof(src_qword), I40E_DMA_TO_NONDMA);
-
-	/* the data in the memory is stored as little endian so mask it
-	 * correctly
-	 */
-	src_qword &= ~(CPU_TO_LE64(mask));
-
-	/* get the data back into host order before shifting */
-	dest_qword = LE64_TO_CPU(src_qword);
-
-	dest_qword >>= shift_width;
-
-	/* get the address from the struct field */
-	target = dest + ce_info->offset;
-
-	/* put it back in the struct */
-	i40e_memcpy(target, &dest_qword, sizeof(dest_qword),
-		    I40E_NONDMA_TO_DMA);
-}
-
-/**
- * i40e_get_hmc_context - extract HMC context bits
- * @context_bytes: pointer to the context bit array
- * @ce_info: a description of the struct to be filled
- * @dest: the struct to be filled
- **/
-static i40e_status i40e_get_hmc_context(u8 *context_bytes,
-					struct i40e_context_ele *ce_info,
-					u8 *dest)
-{
-	int f;
-
-	for (f = 0; ce_info[f].width != 0; f++) {
-		switch (ce_info[f].size_of) {
-		case 1:
-			i40e_read_byte(context_bytes, &ce_info[f], dest);
-			break;
-		case 2:
-			i40e_read_word(context_bytes, &ce_info[f], dest);
-			break;
-		case 4:
-			i40e_read_dword(context_bytes, &ce_info[f], dest);
-			break;
-		case 8:
-			i40e_read_qword(context_bytes, &ce_info[f], dest);
-			break;
-		default:
-			/* nothing to do, just keep going */
-			break;
-		}
-	}
-
-	return I40E_SUCCESS;
-}
-
-/**
  * i40e_clear_hmc_context - zero out the HMC context bits
  * @hw:       the hardware struct
  * @context_bytes: pointer to the context bit array (DMA memory)
@@ -1229,11 +1007,6 @@ i40e_status i40e_hmc_get_object_va(struct i40e_hw *hw,
 	u64 obj_offset_in_fpm;
 	u32 sd_idx, sd_lmt;
 
-	if (NULL == hmc_info) {
-		ret_code = I40E_ERR_BAD_PTR;
-		hw_dbg(hw, "i40e_hmc_get_object_va: bad hmc_info ptr\n");
-		goto exit;
-	}
 	if (NULL == hmc_info->hmc_obj) {
 		ret_code = I40E_ERR_BAD_PTR;
 		hw_dbg(hw, "i40e_hmc_get_object_va: bad hmc_info->hmc_obj ptr\n");
@@ -1281,27 +1054,6 @@ exit:
 }
 
 /**
- * i40e_get_lan_tx_queue_context - return the HMC context for the queue
- * @hw:    the hardware struct
- * @queue: the queue we care about
- * @s:     the struct to be filled
- **/
-i40e_status i40e_get_lan_tx_queue_context(struct i40e_hw *hw,
-						    u16 queue,
-						    struct i40e_hmc_obj_txq *s)
-{
-	i40e_status err;
-	u8 *context_bytes;
-
-	err = i40e_hmc_get_object_va(hw, &context_bytes, I40E_HMC_LAN_TX, queue);
-	if (err < 0)
-		return err;
-
-	return i40e_get_hmc_context(context_bytes,
-				    i40e_hmc_txq_ce_info, (u8 *)s);
-}
-
-/**
  * i40e_clear_lan_tx_queue_context - clear the HMC context for the queue
  * @hw:    the hardware struct
  * @queue: the queue we care about
@@ -1338,27 +1090,6 @@ i40e_status i40e_set_lan_tx_queue_context(struct i40e_hw *hw,
 
 	return i40e_set_hmc_context(context_bytes,
 				    i40e_hmc_txq_ce_info, (u8 *)s);
-}
-
-/**
- * i40e_get_lan_rx_queue_context - return the HMC context for the queue
- * @hw:    the hardware struct
- * @queue: the queue we care about
- * @s:     the struct to be filled
- **/
-i40e_status i40e_get_lan_rx_queue_context(struct i40e_hw *hw,
-						    u16 queue,
-						    struct i40e_hmc_obj_rxq *s)
-{
-	i40e_status err;
-	u8 *context_bytes;
-
-	err = i40e_hmc_get_object_va(hw, &context_bytes, I40E_HMC_LAN_RX, queue);
-	if (err < 0)
-		return err;
-
-	return i40e_get_hmc_context(context_bytes,
-				    i40e_hmc_rxq_ce_info, (u8 *)s);
 }
 
 /**

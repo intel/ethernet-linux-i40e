@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
+ * Copyright(c) 2013 - 2017 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -221,9 +221,8 @@ i40e_status i40e_read_nvm_word(struct i40e_hw *hw, u16 offset,
  *
  * Reads one 16 bit word from the Shadow RAM using the GLNVM_SRCTL register.
  **/
-i40e_status __i40e_read_nvm_word(struct i40e_hw *hw,
-					   u16 offset,
-					   u16 *data)
+static i40e_status __i40e_read_nvm_word(struct i40e_hw *hw,
+						  u16 offset, u16 *data)
 {
 	i40e_status ret_code = I40E_SUCCESS;
 
@@ -312,9 +311,9 @@ i40e_status i40e_read_nvm_word_aq(struct i40e_hw *hw, u16 offset,
  * method. The buffer read is preceded by the NVM ownership take
  * and followed by the release.
  **/
-i40e_status __i40e_read_nvm_buffer(struct i40e_hw *hw,
-					     u16 offset,
-					     u16 *words, u16 *data)
+static i40e_status __i40e_read_nvm_buffer(struct i40e_hw *hw,
+						    u16 offset, u16 *words,
+						    u16 *data)
 {
 	i40e_status ret_code = I40E_SUCCESS;
 
@@ -537,57 +536,6 @@ i40e_status i40e_write_nvm_aq(struct i40e_hw *hw, u8 module_pointer,
 }
 
 /**
- * __i40e_write_nvm_word - Writes Shadow RAM word
- * @hw: pointer to the HW structure
- * @offset: offset of the Shadow RAM word to write
- * @data: word to write to the Shadow RAM
- *
- * Writes a 16 bit word to the SR using the i40e_write_nvm_aq() method.
- * NVM ownership have to be acquired and released (on ARQ completion event
- * reception) by caller. To commit SR to NVM update checksum function
- * should be called.
- **/
-i40e_status __i40e_write_nvm_word(struct i40e_hw *hw, u32 offset,
-					    void *data)
-{
-	*((__le16 *)data) = CPU_TO_LE16(*((u16 *)data));
-
-	/* Value 0x00 below means that we treat SR as a flat mem */
-	return i40e_write_nvm_aq(hw, 0x00, offset, 1, data, false);
-}
-
-/**
- * __i40e_write_nvm_buffer - Writes Shadow RAM buffer
- * @hw: pointer to the HW structure
- * @module_pointer: module pointer location in words from the NVM beginning
- * @offset: offset of the Shadow RAM buffer to write
- * @words: number of words to write
- * @data: words to write to the Shadow RAM
- *
- * Writes a 16 bit words buffer to the Shadow RAM using the admin command.
- * NVM ownership must be acquired before calling this function and released
- * on ARQ completion event reception by caller. To commit SR to NVM update
- * checksum function should be called.
- **/
-i40e_status __i40e_write_nvm_buffer(struct i40e_hw *hw,
-					      u8 module_pointer, u32 offset,
-					      u16 words, void *data)
-{
-	__le16 *le_word_ptr = (__le16 *)data;
-	u16 *word_ptr = (u16 *)data;
-	u32 i = 0;
-
-	for (i = 0; i < words; i++)
-		le_word_ptr[i] = CPU_TO_LE16(word_ptr[i]);
-
-	/* Here we will only write one buffer as the size of the modules
-	 * mirrored in the Shadow RAM is always less than 4K.
-	 */
-	return i40e_write_nvm_aq(hw, module_pointer, offset, words,
-				 data, false);
-}
-
-/**
  * i40e_calc_nvm_checksum - Calculates and returns the checksum
  * @hw: pointer to hardware structure
  * @checksum: pointer to the checksum
@@ -597,7 +545,8 @@ i40e_status __i40e_write_nvm_buffer(struct i40e_hw *hw,
  * is customer specific and unknown. Therefore, this function skips all maximum
  * possible size of VPD (1kB).
  **/
-i40e_status i40e_calc_nvm_checksum(struct i40e_hw *hw, u16 *checksum)
+static i40e_status i40e_calc_nvm_checksum(struct i40e_hw *hw,
+						    u16 *checksum)
 {
 	i40e_status ret_code = I40E_SUCCESS;
 	struct i40e_virt_mem vmem;
@@ -843,7 +792,18 @@ i40e_status i40e_nvmupd_command(struct i40e_hw *hw,
 			*((u16 *)&bytes[2]) = hw->nvm_wait_opcode;
 		}
 
+		/* Clear error status on read */
+		if (hw->nvmupd_state == I40E_NVMUPD_STATE_ERROR)
+			hw->nvmupd_state = I40E_NVMUPD_STATE_INIT;
+
 		return I40E_SUCCESS;
+	}
+
+	/* Clear status even it is not read and log */
+	if (hw->nvmupd_state == I40E_NVMUPD_STATE_ERROR) {
+		i40e_debug(hw, I40E_DEBUG_NVM,
+			   "Clearing I40E_NVMUPD_STATE_ERROR state without reading\n");
+		hw->nvmupd_state = I40E_NVMUPD_STATE_INIT;
 	}
 
 	switch (hw->nvmupd_state) {
@@ -1198,6 +1158,11 @@ void i40e_nvmupd_check_wait_event(struct i40e_hw *hw, u16 opcode)
 		}
 		hw->nvm_wait_opcode = 0;
 
+		if (hw->aq.arq_last_status) {
+			hw->nvmupd_state = I40E_NVMUPD_STATE_ERROR;
+			return;
+		}
+
 		switch (hw->nvmupd_state) {
 		case I40E_NVMUPD_STATE_INIT_WAIT:
 			hw->nvmupd_state = I40E_NVMUPD_STATE_INIT;
@@ -1358,7 +1323,8 @@ static i40e_status i40e_nvmupd_exec_aq(struct i40e_hw *hw,
 
 		if (hw->nvm_buff.va) {
 			buff = hw->nvm_buff.va;
-			memcpy(buff, &bytes[aq_desc_len], aq_data_len);
+			i40e_memcpy(buff, &bytes[aq_desc_len], aq_data_len,
+				I40E_NONDMA_TO_NONDMA);
 		}
 	}
 
@@ -1431,7 +1397,7 @@ static i40e_status i40e_nvmupd_get_aq_result(struct i40e_hw *hw,
 			   __func__, cmd->offset, cmd->offset + len);
 
 		buff = ((u8 *)&hw->nvm_wb_desc) + cmd->offset;
-		memcpy(bytes, buff, len);
+		i40e_memcpy(bytes, buff, len, I40E_NONDMA_TO_NONDMA);
 
 		bytes += len;
 		remainder -= len;
@@ -1445,7 +1411,7 @@ static i40e_status i40e_nvmupd_get_aq_result(struct i40e_hw *hw,
 
 		i40e_debug(hw, I40E_DEBUG_NVM, "%s: databuf bytes %d to %d\n",
 			   __func__, start_byte, start_byte + remainder);
-		memcpy(bytes, buff, remainder);
+		i40e_memcpy(bytes, buff, remainder, I40E_NONDMA_TO_NONDMA);
 	}
 
 	return I40E_SUCCESS;

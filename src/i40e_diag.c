@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
+ * Copyright(c) 2013 - 2017 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -23,24 +23,6 @@
 
 #include "i40e_diag.h"
 #include "i40e_prototype.h"
-
-/**
- * i40e_diag_set_loopback
- * @hw: pointer to the hw struct
- * @mode: loopback mode
- *
- * Set chosen loopback mode
- **/
-i40e_status i40e_diag_set_loopback(struct i40e_hw *hw,
-					     enum i40e_lb_mode mode)
-{
-	i40e_status ret_code = I40E_SUCCESS;
-
-	if (i40e_aq_set_lb_modes(hw, mode, NULL))
-		ret_code = I40E_ERR_DIAG_TEST_FAILED;
-
-	return ret_code;
-}
 
 /**
  * i40e_diag_reg_pattern_test
@@ -160,15 +142,4 @@ i40e_status i40e_diag_eeprom_test(struct i40e_hw *hw)
 		return i40e_validate_nvm_checksum(hw, NULL);
 	else
 		return I40E_ERR_DIAG_TEST_FAILED;
-}
-
-/**
- * i40e_diag_fw_alive_test
- * @hw: pointer to the hw struct
- *
- * Perform FW alive diagnostic test
- **/
-i40e_status i40e_diag_fw_alive_test(struct i40e_hw *hw)
-{
-	return I40E_SUCCESS;
 }

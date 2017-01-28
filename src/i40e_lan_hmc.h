@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
+ * Copyright(c) 2013 - 2017 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -164,27 +164,15 @@ i40e_status i40e_configure_lan_hmc(struct i40e_hw *hw,
 					     enum i40e_hmc_model model);
 i40e_status i40e_shutdown_lan_hmc(struct i40e_hw *hw);
 
-u64 i40e_calculate_l2fpm_size(u32 txq_num, u32 rxq_num,
-			      u32 fcoe_cntx_num, u32 fcoe_filt_num);
-i40e_status i40e_get_lan_tx_queue_context(struct i40e_hw *hw,
-						    u16 queue,
-						    struct i40e_hmc_obj_txq *s);
 i40e_status i40e_clear_lan_tx_queue_context(struct i40e_hw *hw,
 						      u16 queue);
 i40e_status i40e_set_lan_tx_queue_context(struct i40e_hw *hw,
 						    u16 queue,
 						    struct i40e_hmc_obj_txq *s);
-i40e_status i40e_get_lan_rx_queue_context(struct i40e_hw *hw,
-						    u16 queue,
-						    struct i40e_hmc_obj_rxq *s);
 i40e_status i40e_clear_lan_rx_queue_context(struct i40e_hw *hw,
 						      u16 queue);
 i40e_status i40e_set_lan_rx_queue_context(struct i40e_hw *hw,
 						    u16 queue,
 						    struct i40e_hmc_obj_rxq *s);
-i40e_status i40e_create_lan_hmc_object(struct i40e_hw *hw,
-				struct i40e_hmc_lan_create_obj_info *info);
-i40e_status i40e_delete_lan_hmc_object(struct i40e_hw *hw,
-				struct i40e_hmc_lan_delete_obj_info *info);
 
 #endif /* _I40E_LAN_HMC_H_ */

@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
+ * Copyright(c) 2013 - 2017 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -65,7 +65,7 @@ static void i40e_adminq_init_regs(struct i40e_hw *hw)
  *  i40e_alloc_adminq_asq_ring - Allocate Admin Queue send rings
  *  @hw: pointer to the hardware structure
  **/
-i40e_status i40e_alloc_adminq_asq_ring(struct i40e_hw *hw)
+static i40e_status i40e_alloc_adminq_asq_ring(struct i40e_hw *hw)
 {
 	i40e_status ret_code;
 
@@ -92,7 +92,7 @@ i40e_status i40e_alloc_adminq_asq_ring(struct i40e_hw *hw)
  *  i40e_alloc_adminq_arq_ring - Allocate Admin Queue receive rings
  *  @hw: pointer to the hardware structure
  **/
-i40e_status i40e_alloc_adminq_arq_ring(struct i40e_hw *hw)
+static i40e_status i40e_alloc_adminq_arq_ring(struct i40e_hw *hw)
 {
 	i40e_status ret_code;
 
@@ -112,7 +112,7 @@ i40e_status i40e_alloc_adminq_arq_ring(struct i40e_hw *hw)
  *  This assumes the posted send buffers have already been cleaned
  *  and de-allocated
  **/
-void i40e_free_adminq_asq(struct i40e_hw *hw)
+static void i40e_free_adminq_asq(struct i40e_hw *hw)
 {
 	i40e_free_dma_mem(hw, &hw->aq.asq.desc_buf);
 }
@@ -124,7 +124,7 @@ void i40e_free_adminq_asq(struct i40e_hw *hw)
  *  This assumes the posted receive buffers have already been cleaned
  *  and de-allocated
  **/
-void i40e_free_adminq_arq(struct i40e_hw *hw)
+static void i40e_free_adminq_arq(struct i40e_hw *hw)
 {
 	i40e_free_dma_mem(hw, &hw->aq.arq.desc_buf);
 }
@@ -352,7 +352,7 @@ static i40e_status i40e_config_arq_regs(struct i40e_hw *hw)
  *  Do *NOT* hold the lock when calling this as the memory allocation routines
  *  called are not going to be atomic context safe
  **/
-i40e_status i40e_init_asq(struct i40e_hw *hw)
+static i40e_status i40e_init_asq(struct i40e_hw *hw)
 {
 	i40e_status ret_code = I40E_SUCCESS;
 
@@ -411,7 +411,7 @@ init_adminq_exit:
  *  Do *NOT* hold the lock when calling this as the memory allocation routines
  *  called are not going to be atomic context safe
  **/
-i40e_status i40e_init_arq(struct i40e_hw *hw)
+static i40e_status i40e_init_arq(struct i40e_hw *hw)
 {
 	i40e_status ret_code = I40E_SUCCESS;
 
@@ -463,7 +463,7 @@ init_adminq_exit:
  *
  *  The main shutdown routine for the Admin Send Queue
  **/
-i40e_status i40e_shutdown_asq(struct i40e_hw *hw)
+static i40e_status i40e_shutdown_asq(struct i40e_hw *hw)
 {
 	i40e_status ret_code = I40E_SUCCESS;
 
@@ -497,7 +497,7 @@ shutdown_asq_out:
  *
  *  The main shutdown routine for the Admin Receive Queue
  **/
-i40e_status i40e_shutdown_arq(struct i40e_hw *hw)
+static i40e_status i40e_shutdown_arq(struct i40e_hw *hw)
 {
 	i40e_status ret_code = I40E_SUCCESS;
 
@@ -677,7 +677,7 @@ i40e_status i40e_shutdown_adminq(struct i40e_hw *hw)
  *
  *  returns the number of free desc
  **/
-u16 i40e_clean_asq(struct i40e_hw *hw)
+static u16 i40e_clean_asq(struct i40e_hw *hw)
 {
 	struct i40e_adminq_ring *asq = &(hw->aq.asq);
 	struct i40e_asq_cmd_details *details;
@@ -995,11 +995,11 @@ i40e_status i40e_clean_arq_element(struct i40e_hw *hw,
 	desc = I40E_ADMINQ_DESC(hw->aq.arq, ntc);
 	desc_idx = ntc;
 
+	hw->aq.arq_last_status =
+		(enum i40e_admin_queue_err)LE16_TO_CPU(desc->retval);
 	flags = LE16_TO_CPU(desc->flags);
 	if (flags & I40E_AQ_FLAG_ERR) {
 		ret_code = I40E_ERR_ADMIN_QUEUE_ERROR;
-		hw->aq.arq_last_status =
-			(enum i40e_admin_queue_err)LE16_TO_CPU(desc->retval);
 		i40e_debug(hw,
 			   I40E_DEBUG_AQ_MESSAGE,
 			   "AQRX: Event received with error 0x%X.\n",

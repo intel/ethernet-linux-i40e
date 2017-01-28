@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
+ * Copyright(c) 2013 - 2017 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -109,7 +109,7 @@ struct i40e_vf {
 
 	unsigned long vf_caps;	/* vf's adv. capabilities */
 	unsigned long vf_states;	/* vf's runtime states */
-	unsigned int tx_rate;	/* tx bandwidth limit in Mbps */
+	unsigned int tx_rate;	/* Tx bandwidth limit in Mbps */
 #ifdef HAVE_NDO_SET_VF_LINK_STATE
 	bool link_forced;
 	bool link_up;		/* only valid if VF link is forced */
@@ -135,8 +135,13 @@ void i40e_vc_notify_vf_reset(struct i40e_vf *vf);
 
 /* VF configuration related iplink handlers */
 int i40e_ndo_set_vf_mac(struct net_device *netdev, int vf_id, u8 *mac);
+#ifdef IFLA_VF_VLAN_INFO_MAX
+int i40e_ndo_set_vf_port_vlan(struct net_device *netdev, int vf_id,
+			      u16 vlan_id, u8 qos, __be16 vlan_proto);
+#else
 int i40e_ndo_set_vf_port_vlan(struct net_device *netdev,
 			      int vf_id, u16 vlan_id, u8 qos);
+#endif
 #ifdef HAVE_NDO_SET_VF_MIN_MAX_TX_RATE
 int i40e_ndo_set_vf_bw(struct net_device *netdev, int vf_id, int min_tx_rate,
 		       int max_tx_rate);

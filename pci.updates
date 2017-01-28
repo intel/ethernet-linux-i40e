@@ -1,7 +1,7 @@
 ################################################################################
 #
 # Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
-# Copyright(c) 2013 - 2016 Intel Corporation.
+# Copyright(c) 2013 - 2017 Intel Corporation.
 #
 # This program is free software; you can redistribute it and/or modify it
 # under the terms and conditions of the GNU General Public License,
@@ -54,6 +54,7 @@
 		8086 0008  Ethernet Converged Network Adapter X710-2
 		8086 0009  Ethernet Controller X710 for 10GbE SFP+
 		8086 000a  Ethernet Controller X710 for 10GbE SFP+
+		8086 000b  Ethernet Server Adapter X710-DA2 for OCP
 		8086 000d  Ethernet Controller X710 for 10GbE SFP+
 		8086 4005  Ethernet Controller X710 for 10GbE SFP+
 		8086 4006  Ethernet Controller X710 for 10GbE SFP+
@@ -63,6 +64,8 @@
 		1028 0000  Ethernet 10G X710-k bNDC
 		1028 1f98  Ethernet 10G 4P X710-k bNDC
 		1028 1f9e  Ethernet 10G 2P X710-k bNDC
+		1590 0000  Ethernet 10Gb 2-port 563i Adapter
+		1590 00f8  Ethernet 10Gb 2-port 563i Adapter
 		8086 0000  Ethernet Converged Network Adapter XL710-Q2
 	1583  Ethernet Controller XL710 for 40GbE QSFP+
 		1028 0000  Ethernet 40G 2P XL710 QSFP+ rNDC
@@ -88,21 +91,45 @@
 		108e 0000  Ethernet Controller X710 for 10GBASE-T
 		108e 4857  Ethernet Controller X710 for 10GBASE-T
 	1587  Ethernet Controller XL710 for 20GbE backplane
-		103c 0000  Flex-20 20Gb 2-port 660FLB Adapter
-		103c 22fe  Flex-20 20Gb 2-port 660FLB Adapter
+		103c 0000  Eth 10/20Gb 2p 660FLB Adptr
+		103c 22fe  Eth 10/20Gb 2p 660FLB Adptr
 	1588  Ethernet Controller XL710 for 20GbE backplane
-		103c 0000  Flex-20 20Gb 2-port 660M Adapter
-		103c 22ff  Flex-20 20Gb 2-port 660M Adapter
+		103c 0000  Eth 10/20Gb 2p 660M Adptr
+		103c 22ff  Eth 10/20Gb 2p 660M Adptr
 	1589  Ethernet Controller X710/X557-AT 10GBASE-T
 		108e 0000  Quad Port 10GBase-T Adapter
 		108e 7b1c  Quad Port 10GBase-T Adapter
 		8086 0000  Ethernet Converged Network Adapter X710-T
 		8086 0001  Ethernet Converged Network Adapter X710-T4
 		8086 0002  Ethernet Converged Network Adapter X710-T4
+		8086 0003  Ethernet Converged Network Adapter X710-T
+		8086 00A0  Ethernet Converged Network Adapter X710-T4
+	158a  Ethernet Controller XXV710 for 25GbE backplane
+	158b  Ethernet Controller XXV710 for 25GbE SFP28
+		8086 0000  Ethernet Network Adapter XXV710
+		8086 0001  Ethernet Network Adapter XXV710-2
+		8086 0002  Ethernet Network Adapter XXV710-2
+		8086 0003  Ethernet Network Adapter XXV710-1
+		8086 0004  Ethernet Network Adapter XXV710-1
+		8086 0007  Ethernet Network Adapter OCP XXV710-1
+		8086 0008  Ethernet Network Adapter OCP XXV710-1
 	37ce  Ethernet Connection X722 for 10GbE backplane
+		1590 0215  Ethernet 10Gb 2-port 568i Adapter
+		17aa 4023  Ethernet Connection X722 for 10GbE backplane
 	37cf  Ethernet Connection X722 for 10GbE QSFP+
 	37d0  Ethernet Connection X722 for 10GbE SFP+
+		17aa 4020  Ethernet Connection X722 for 10GbE SFP+
+		17aa 4021  Ethernet Connection X722 for 10GbE SFP+
+		17aa 4022  Ethernet Connection X722 for 10GbE SFP+
 	37d1  Ethernet Connection X722 for 1GbE
+		1590 0216  Ethernet 1Gb 2-port 368i Adapter
+		1590 0217  Ethernet 1Gb 2-port 368FLR-MMT Adapter
+		17aa 4020  Ethernet Connection X722 for 1GbE
+		17aa 4021  Ethernet Connection X722 for 1GbE
 	37d2  Ethernet Connection X722 for 10GBASE-T
+		1590 0218  Ethernet 10Gb 2-port 568FLR-MMT Adapter
+		1590 0219  Ethernet 10Gb 2-port 568FLR-MMSFP+ Adapter
+		17aa 4020  Ethernet Connection X722 for 10GBASE-T
+		17aa 4021  Ethernet Connection X722 for 10GBASE-T
+		17aa 4022  Ethernet Connection X722 for 10GBASE-T
 	37d3  Ethernet Connection X722 for 10GbE SFP+
-	37d4  Ethernet Connection X722 for 10GbE QSFP+

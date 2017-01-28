@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2016 Intel Corporation.
+ * Copyright(c) 2013 - 2017 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -233,7 +233,7 @@ static int i40e_dcbnl_vsi_del_app(struct i40e_vsi *vsi,
  * Delete given APP from all the VSIs for given PF
  **/
 static void i40e_dcbnl_del_app(struct i40e_pf *pf,
-			      struct i40e_dcb_app_priority_table *app)
+			       struct i40e_dcb_app_priority_table *app)
 {
 	int v, err;
 
