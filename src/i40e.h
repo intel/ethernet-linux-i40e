@@ -66,6 +66,7 @@
 #ifdef I40E_FCOE
 #include "i40e_fcoe.h"
 #endif
+#include "i40e_client.h"
 #include "i40e_virtchnl.h"
 #include "i40e_virtchnl_pf.h"
 #include "i40e_txrx.h"
@@ -188,6 +189,7 @@ struct i40e_lump_tracking {
 	u16 search_hint;
 	u16 list[0];
 #define I40E_PILE_VALID_BIT  0x8000
+#define I40E_IWARP_IRQ_PILE_ID  (I40E_PILE_VALID_BIT - 2)
 };
 
 #define I40E_DEFAULT_ATR_SAMPLE_RATE	20
@@ -224,8 +226,8 @@ struct i40e_fdir_filter {
 	u8 flow_type;
 	u8 ip4_proto;
 	/* TX packet view of src and dst */
-	__be32 dst_ip[4];
-	__be32 src_ip[4];
+	__be32 dst_ip;
+	__be32 src_ip;
 	__be16 src_port;
 	__be16 dst_port;
 	__be32 sctp_v_tag;
@@ -351,6 +353,8 @@ struct i40e_pf {
 #endif /* I40E_FCOE */
 	u16 num_lan_qps;           /* num lan queues this PF has set up */
 	u16 num_lan_msix;          /* num queue vectors for the base PF vsi */
+	u16 num_iwarp_msix;        /* num of iwarp vectors for this PF */
+	int iwarp_base_vector;
 	int queues_left;           /* queues left unclaimed */
 	u16 alloc_rss_size;        /* allocated RSS queues */
 	u16 rss_size_max;          /* HW defined max RSS queues */
@@ -428,12 +432,14 @@ struct i40e_pf {
 #define I40E_FLAG_VMDQ_ENABLED			BIT_ULL(7)
 #define I40E_FLAG_FDIR_REQUIRES_REINIT		BIT_ULL(8)
 #define I40E_FLAG_NEED_LINK_UPDATE		BIT_ULL(9)
+#define I40E_FLAG_IWARP_ENABLED			BIT_ULL(10)
 #ifdef I40E_FCOE
 #define I40E_FLAG_FCOE_ENABLED			BIT_ULL(11)
 #endif /* I40E_FCOE */
 #define I40E_FLAG_IN_NETPOLL			BIT_ULL(12)
 #define I40E_FLAG_CLEAN_ADMINQ			BIT_ULL(14)
 #define I40E_FLAG_FILTER_SYNC			BIT_ULL(15)
+#define I40E_FLAG_SERVICE_CLIENT_REQUESTED	BIT_ULL(16)
 #define I40E_FLAG_PROCESS_MDD_EVENT		BIT_ULL(17)
 #define I40E_FLAG_PROCESS_VFLR_EVENT		BIT_ULL(18)
 #define I40E_FLAG_SRIOV_ENABLED			BIT_ULL(19)
@@ -468,6 +474,9 @@ struct i40e_pf {
 #define I40E_FLAG_TRUE_PROMISC_SUPPORT		BIT_ULL(50)
 #define I40E_FLAG_HAVE_CRT_RETIMER		BIT_ULL(51)
 #define I40E_FLAG_PTP_L4_CAPABLE		BIT_ULL(52)
+#define I40E_FLAG_CLIENT_L2_CHANGE		BIT_ULL(53)
+#define I40E_FLAG_CLIENT_RESET			BIT_ULL(54)
+#define I40E_FLAG_WOL_MC_MAGIC_PKT_WAKE		BIT_ULL(55)
 #define I40E_FLAG_TEMP_LINK_POLLING		BIT_ULL(56)
 
 	/* flag to enable/disable vf base mode support */
@@ -483,6 +492,7 @@ struct i40e_pf {
 	struct i40e_fcoe fcoe;
 
 #endif /* I40E_FCOE */
+	struct i40e_client_instance *cinst;
 	bool stat_offsets_loaded;
 	struct i40e_hw_port_stats stats;
 	struct i40e_hw_port_stats stats_offsets;
@@ -606,6 +616,22 @@ struct i40e_mac_filter {
 	u8 macaddr[ETH_ALEN];
 #define I40E_VLAN_ANY -1
 	s16 vlan;
+	enum i40e_filter_state state;
+};
+
+/* Wrapper structure to keep track of filters while we are preparing to send
+ * firmware commands. We cannot send firmware commands while holding a
+ * spinlock, since it might sleep. To avoid this, we wrap the added filters in
+ * a separate structure, which will track the state change and update the real
+ * filter while under lock. We can't simply hold the filters in a separate
+ * list, as this opens a window for a race condition when adding new MAC
+ * addresses to all VLANs, or when adding new VLANs to all MAC addresses.
+ */
+struct i40e_new_mac_filter {
+	struct hlist_node hlist;
+	struct i40e_mac_filter *f;
+
+	/* Track future changes to state separately */
 	enum i40e_filter_state state;
 };
 
@@ -735,6 +761,8 @@ struct i40e_vsi {
 	struct kobject *kobj;	/* sysfs object */
 	bool current_isup;	/* Sync 'link up' logging */
 	enum i40e_aq_link_speed current_speed;	/* Sync link speed logging */
+
+	void *priv;	/* client driver data reference. */
 	bool block_tx_timeout;
 
 	/* VSI specific handlers */
@@ -973,6 +1001,9 @@ void i40e_vsi_setup_queue_map(struct i40e_vsi *vsi,
 			      u8 enabled_tc, bool is_add);
 #endif
 void i40e_service_event_schedule(struct i40e_pf *pf);
+void i40e_notify_client_of_vf_msg(struct i40e_vsi *vsi, u32 vf_id,
+				  u8 *msg, u16 len);
+
 int i40e_vsi_start_rings(struct i40e_vsi *vsi);
 void i40e_vsi_stop_rings(struct i40e_vsi *vsi);
 void i40e_quiesce_vsi(struct i40e_vsi *vsi);
@@ -1003,6 +1034,15 @@ static inline void i40e_dbg_pf_exit(struct i40e_pf *pf) {}
 static inline void i40e_dbg_init(void) {}
 static inline void i40e_dbg_exit(void) {}
 #endif /* CONFIG_DEBUG_FS*/
+/* needed by client drivers */
+int i40e_lan_add_device(struct i40e_pf *pf);
+int i40e_lan_del_device(struct i40e_pf *pf);
+void i40e_client_subtask(struct i40e_pf *pf);
+void i40e_notify_client_of_l2_param_changes(struct i40e_vsi *vsi);
+void i40e_notify_client_of_netdev_close(struct i40e_vsi *vsi, bool reset);
+void i40e_notify_client_of_vf_enable(struct i40e_pf *pf, u32 num_vfs);
+void i40e_notify_client_of_vf_reset(struct i40e_pf *pf, u32 vf_id);
+int i40e_vf_client_capable(struct i40e_pf *pf, u32 vf_id);
 /**
  * i40e_irq_dynamic_enable - Enable default interrupt generation settings
  * @vsi: pointer to a vsi

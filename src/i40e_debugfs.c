@@ -1039,10 +1039,10 @@ static inline void i40e_dbg_dump_fdir_filter(struct i40e_pf *pf,
 	dev_info(&pf->pdev->dev, "fdir filter %d:\n", f->fd_id);
 	dev_info(&pf->pdev->dev, "    flow_type=%d ip4_proto=%d\n",
 		 f->flow_type, f->ip4_proto);
-	dev_info(&pf->pdev->dev, "    dst_ip[0]= %pi4  dst_port=%d\n",
-		 f->dst_ip, f->dst_port);
-	dev_info(&pf->pdev->dev, "    src_ip[0]= %pi4  src_port=%d\n",
-		 f->src_ip, f->src_port);
+	dev_info(&pf->pdev->dev, "    dst_ip= %pi4  dst_port=%d\n",
+		 &f->dst_ip, f->dst_port);
+	dev_info(&pf->pdev->dev, "    src_ip= %pi4  src_port=%d\n",
+		 &f->src_ip, f->src_port);
 	dev_info(&pf->pdev->dev, "    sctp_v_tag=%d q_index=%d flex_off=%d\n",
 		 f->sctp_v_tag, f->q_index, f->flex_off);
 	dev_info(&pf->pdev->dev, "    pctype=%d dest_vsi=%d dest_ctl=%d\n",

@@ -95,12 +95,25 @@ supported in this release.
 
 
 
+NOTE: 1 Gb devices based on the Intel(R) Ethernet Controller X722 do not
+support the following features:
+  * Data Center Bridging (DCB)
+  * QOS
+  * VMQ
+  * SR-IOV
+  * Task Encapsulation offload (VxLAN, NVGRE)
+  * Energy Efficient Ethernet (EEE)
+  * Auto-media detect
+
+
+
+
 Identifying Your Adapter
 ------------------------
 The driver in this release is compatible with devices based on the following:
   * Intel(R) Ethernet Controller X710
   * Intel(R) Ethernet Controller XL710
-  * Intel(R) Ethernet Controller XXV710
+  * Intel(R) Ethernet Controller X722
 
 
 
@@ -152,13 +165,6 @@ SFP+ and QSFP+ Direct Attach Cables
   Intel(R) Ethernet SFP+ Twinaxial Cable	XDACBL1M, XDACBL3M, XDACBL5M
   Intel(R) Ethernet QSFP+ Breakout Cable	X4DACBL1, X4DACBL3, X4DACBL5
   Intel(R) Ethernet QSFP+ Twinaxial Cable	XLDACBL1, XLDACBL3, XLDACBL5
-
-SFP+ Devices for XXV710-Based Adapters
---------------------------------------
-  Intel(R) Ethernet SFP28 SR Optic		E25GSFP28SR
-  Intel(R) Ethernet SFP28 Twinaxial Cable	XXVDACBL1M, XXVDACBL2M, XXVDACBL3M
-  Intel(R) Ethernet QSFP28 to SFP28 Twinaxial	XXV4DACBL1M, XXV4DACBL2M, XXV4DACBL3M
-  Breakout Cable
 
 
 ================================================================================
@@ -688,13 +694,6 @@ speed or duplex mode. Your link partner must match the setting you choose.
 1 Gbps speeds and higher cannot be forced. Use the autonegotiation
 advertising setting to manually set devices for 1 Gbps and higher.
 
-NOTE: You cannot set the speed for Intel(R) Ethernet Network Adapter
-XXV710 based devices.
-
-
-
-
-
 
 Speed, duplex, and autonegotiation advertising are configured through
 the ethtool* utility. ethtool is included with all versions of Red Hat
@@ -937,6 +936,11 @@ Performance Optimization:
 Driver defaults are meant to fit a wide variety of workloads, but if further
 optimization is required we recommend experimenting with the following
 settings.
+
+NOTE: For better performance when processing small (64B) frame sizes,
+try enabling Hyper threading in the BIOS in order to increase the number
+of logical cores in the system and subsequently increase the number of
+queues available to the adapter.
 
 Virtualized Environments:
 

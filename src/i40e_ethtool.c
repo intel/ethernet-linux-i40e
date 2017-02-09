@@ -2650,8 +2650,8 @@ static int i40e_get_ethtool_fdir_entry(struct i40e_pf *pf,
 	 */
 	fsp->h_u.tcp_ip4_spec.psrc = rule->dst_port;
 	fsp->h_u.tcp_ip4_spec.pdst = rule->src_port;
-	fsp->h_u.tcp_ip4_spec.ip4src = rule->dst_ip[0];
-	fsp->h_u.tcp_ip4_spec.ip4dst = rule->src_ip[0];
+	fsp->h_u.tcp_ip4_spec.ip4src = rule->dst_ip;
+	fsp->h_u.tcp_ip4_spec.ip4dst = rule->src_ip;
 
 	if (rule->dest_ctl == I40E_FILTER_PROGRAM_DESC_DEST_DROP_PACKET)
 		fsp->ring_cookie = RX_CLS_FLOW_DISC;
@@ -3117,8 +3117,8 @@ static void i40e_handle_flex_filter_del(struct i40e_vsi *vsi,
 static bool i40e_match_fdir_input_set(struct i40e_fdir_filter *rule,
 				      struct i40e_fdir_filter *input)
 {
-	if ((rule->dst_ip[0] != input->dst_ip[0]) ||
-	    (rule->src_ip[0] != input->src_ip[0]) ||
+	if ((rule->dst_ip != input->dst_ip) ||
+	    (rule->src_ip != input->src_ip) ||
 	    (rule->dst_port != input->dst_port) ||
 	    (rule->src_port != input->src_port) ||
 	    (rule->flow_type != input->flow_type) ||
@@ -3755,8 +3755,8 @@ static int i40e_add_fdir_ethtool(struct i40e_vsi *vsi,
 	 */
 	input->dst_port = fsp->h_u.tcp_ip4_spec.psrc;
 	input->src_port = fsp->h_u.tcp_ip4_spec.pdst;
-	input->dst_ip[0] = fsp->h_u.tcp_ip4_spec.ip4src;
-	input->src_ip[0] = fsp->h_u.tcp_ip4_spec.ip4dst;
+	input->dst_ip = fsp->h_u.tcp_ip4_spec.ip4src;
+	input->src_ip = fsp->h_u.tcp_ip4_spec.ip4dst;
 
 	/* Deciding factor, whether it is flex filter or filter for VF
 	 * is value of 'mask' (user-def N m)
@@ -3820,14 +3820,20 @@ static int i40e_add_fdir_ethtool(struct i40e_vsi *vsi,
 	}
 
 	ret = i40e_add_del_fdir(vsi, input, true);
-free_input:
 	if (ret)
-		kfree(input);
-	else {
-		(void)i40e_del_cloud_filter_ethtool(pf, cmd);
-		i40e_update_ethtool_fdir_entry(vsi, input, fsp->location);
-	}
+		goto free_input;
 
+	/* Add the input filter to the fdir_filter_list, possibly replacing
+	 * a previous filter. Do not free the input structure after adding it
+	 * to the list as this would cause a use after free bug.
+	 */
+	(void)i40e_del_cloud_filter_ethtool(pf, cmd);
+	i40e_update_ethtool_fdir_entry(vsi, input, fsp->location);
+
+	return 0;
+
+free_input:
+	kfree(input);
 	return ret;
 }
 
