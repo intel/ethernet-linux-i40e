@@ -880,10 +880,48 @@ struct _kc_ethtool_pauseparam {
 #endif /* SLE_LOCALVERSION_CODE */
 
 #ifdef __KLOCWORK__
+/* The following are not compiled into the binary driver; they are here
+ * only to tune Klocwork scans to workaround false-positive issues.
+ */
 #ifdef ARRAY_SIZE
 #undef ARRAY_SIZE
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
 #endif
+
+#define memcpy(dest, src, len)	memcpy_s(dest, len, src, len)
+
+static inline int _kc_test_and_clear_bit(int nr, volatile unsigned long *addr)
+{
+	unsigned long mask = BIT_MASK(nr);
+	unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
+	unsigned long old;
+	unsigned long flags = 0;
+
+	_atomic_spin_lock_irqsave(p, flags);
+	old = *p;
+	*p = old & ~mask;
+	_atomic_spin_unlock_irqrestore(p, flags);
+
+	return (old & mask) != 0;
+}
+#define test_and_clear_bit(nr, addr) _kc_test_and_clear_bit(nr, addr)
+
+static inline int _kc_test_and_set_bit(int nr, volatile unsigned long *addr)
+{
+	unsigned long mask = BIT_MASK(nr);
+	unsigned long *p = ((unsigned long *)addr) + BIT_WORD(nr);
+	unsigned long old;
+	unsigned long flags = 0;
+
+	_atomic_spin_lock_irqsave(p, flags);
+	old = *p;
+	*p = old | mask;
+	_atomic_spin_unlock_irqrestore(p, flags);
+
+	return (old & mask) != 0;
+}
+#define test_and_set_bit(nr, addr) _kc_test_and_set_bit(nr, addr)
+
 #endif /* __KLOCWORK__ */
 
 /*****************************************************************************/
@@ -1315,7 +1353,6 @@ static inline struct device *pci_dev_to_dev(struct pci_dev *pdev)
 {
 	return (struct device *) pdev;
 }
-
 #define pdev_printk(lvl, pdev, fmt, args...) 	\
 	printk("%s %s: " fmt, lvl, pci_name(pdev), ## args)
 #define dev_err(dev, fmt, args...)            \
@@ -2248,7 +2285,9 @@ static inline __wsum csum_unfold(__sum16 n)
 extern struct pci_dev *_kc_netdev_to_pdev(struct net_device *netdev);
 #define netdev_to_dev(netdev)	\
 	pci_dev_to_dev(_kc_netdev_to_pdev(netdev))
-#else
+#define devm_kzalloc(dev, size, flags) kzalloc(size, flags)
+#define devm_kfree(dev, p) kfree(p)
+#else /* 2.6.21 */
 static inline struct device *netdev_to_dev(struct net_device *netdev)
 {
 	return &netdev->dev;
@@ -2337,6 +2376,11 @@ static inline int compound_order(struct page *page)
 {
 	return 0;
 }
+
+#ifndef SKB_WITH_OVERHEAD
+#define SKB_WITH_OVERHEAD(X) \
+	((X) - SKB_DATA_ALIGN(sizeof(struct skb_shared_info)))
+#endif
 #else /* 2.6.22 */
 #define ETH_TYPE_TRANS_SETS_DEV
 #define HAVE_NETDEV_STATS_IN_NETDEV
@@ -2773,6 +2817,9 @@ static inline void __kc_skb_queue_head_init(struct sk_buff_head *list)
 
 #define PCI_EXP_DEVCAP2		36	/* Device Capabilities 2 */
 #define PCI_EXP_DEVCTL2		40	/* Device Control 2 */
+
+#define PCI_EXP_DEVCAP_FLR	0x10000000 /* Function Level Reset */
+#define PCI_EXP_DEVCTL_BCR_FLR	0x8000 /* Bridge Configuration Retry / FLR */
 
 #endif /* < 2.6.28 */
 
@@ -4511,6 +4558,17 @@ int __kc_ipv6_find_hdr(const struct sk_buff *skb, unsigned int *offset,
 	     pos && ({ n = pos->member.next; 1; });			    \
 	     pos = hlist_entry_safe(n, typeof(*pos), member))
 
+#undef hlist_for_each_entry_continue
+#define hlist_for_each_entry_continue(pos, member)			\
+	for (pos = hlist_entry_safe((pos)->member.next, typeof(*(pos)), member);\
+	     pos;							\
+	     pos = hlist_entry_safe((pos)->member.next, typeof(*(pos)), member))
+
+#undef hlist_for_each_entry_from
+#define hlist_for_each_entry_from(pos, member)				\
+	for (; pos;							\
+	     pos = hlist_entry_safe((pos)->member.next, typeof(*(pos)), member))
+
 #undef hash_for_each
 #define hash_for_each(name, bkt, obj, member)				\
 	for ((bkt) = 0, obj = NULL; obj == NULL && (bkt) < HASH_SIZE(name);\
@@ -4636,14 +4694,23 @@ of_get_mac_address(struct device_node __always_unused *np)
 #define USE_DEFAULT_FDB_DEL_DUMP
 #define HAVE_SKB_INNER_NETWORK_HEADER
 #if (RHEL_RELEASE_CODE && \
-     (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,3)) && \
+     (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,0)) && \
      (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(8,0)))
+#define HAVE_RHEL7_PCI_DRIVER_RH
+#if (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,2))
+#define HAVE_RHEL7_PCI_RESET_NOTIFY
+#endif /* RHEL >= 7.2 */
+#if (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,3))
 #define HAVE_RHEL7_NET_DEVICE_OPS_EXT
 #define HAVE_GENEVE_RX_OFFLOAD
+#if !defined(HAVE_UDP_ENC_TUNNEL) && IS_ENABLED(CONFIG_GENEVE)
+#define HAVE_UDP_ENC_TUNNEL
+#endif
 #ifdef ETHTOOL_GLINKSETTINGS
 #define HAVE_ETHTOOL_25G_BITS
 #endif /* ETHTOOL_GLINKSETTINGS */
-#endif
+#endif /* RHEL >= 7.3 */
+#endif /* RHEL >= 7.0 && RHEL < 8.0 */
 #endif /* >= 3.10.0 */
 
 /*****************************************************************************/
@@ -4676,6 +4743,9 @@ extern int __kc_pcie_get_minimum_link(struct pci_dev *dev,
 #endif
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(4,8,0) )
 #define HAVE_VXLAN_RX_OFFLOAD
+#if !defined(HAVE_UDP_ENC_TUNNEL) && IS_ENABLED(CONFIG_VXLAN)
+#define HAVE_UDP_ENC_TUNNEL
+#endif
 #endif /* < 4.8.0 */
 #define HAVE_NDO_GET_PHYS_PORT_ID
 #endif /* >= 3.12.0 */
@@ -4771,6 +4841,10 @@ static inline void __kc_skb_set_hash(struct sk_buff __maybe_unused *skb,
 #ifndef HAVE_VXLAN_RX_OFFLOAD
 #define HAVE_VXLAN_RX_OFFLOAD
 #endif /* HAVE_VXLAN_RX_OFFLOAD */
+
+#if !defined(HAVE_UDP_ENC_TUNNEL) && IS_ENABLED(CONFIG_VXLAN)
+#define HAVE_UDP_ENC_TUNNEL
+#endif
 
 #ifndef HAVE_VXLAN_CHECKS
 #define HAVE_VXLAN_CHECKS
@@ -4923,6 +4997,9 @@ static inline void __kc_dev_mc_unsync(struct net_device __maybe_unused *dev,
 #define NETIF_F_GSO_UDP_TUNNEL_CSUM 0
 #define SKB_GSO_UDP_TUNNEL_CSUM 0
 #endif
+extern void *__kc_devm_kmemdup(struct device *dev, const void *src, size_t len,
+			       unsigned int gfp);
+#define devm_kmemdup __kc_devm_kmemdup
 
 #else
 #define HAVE_PCI_ERROR_HANDLER_RESET_NOTIFY
@@ -5265,6 +5342,9 @@ extern int _kc_eth_platform_get_mac_address(struct device *dev, u8 *mac_addr);
 #else /* 4.5.0 */
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(4,8,0) )
 #define HAVE_GENEVE_RX_OFFLOAD
+#if !defined(HAVE_UDP_ENC_TUNNEL) && IS_ENABLED(CONFIG_GENEVE)
+#define HAVE_UDP_ENC_TUNNEL
+#endif
 #endif /* < 4.8.0 */
 #define HAVE_NETIF_NAPI_ADD_CALLS_NAPI_HASH_ADD
 #endif /* 4.5.0 */
@@ -5303,6 +5383,7 @@ static inline void page_ref_inc(struct page *page)
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4,7,0))
 #else
 #define HAVE_NETIF_TRANS_UPDATE
+#define HAVE_ETHTOOL_CONVERT_U32_AND_LINK_MODE
 #ifdef ETHTOOL_GLINKSETTINGS
 #define HAVE_ETHTOOL_25G_BITS
 #endif /* ETHTOOL_GLINKSETTINGS */
@@ -5411,7 +5492,10 @@ static inline void __page_frag_cache_drain(struct page *page,
 
 /*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4,11,0))
-#else
+#ifdef CONFIG_NET_RX_BUSY_POLL
+#define HAVE_NDO_BUSY_POLL
+#endif
+#else /* > 4.11 */
 #define HAVE_VOID_NDO_GET_STATS64
 #endif /* 4.11.0 */
 

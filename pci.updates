@@ -56,8 +56,10 @@
 		8086 000a  Ethernet Controller X710 for 10GbE SFP+
 		8086 000b  Ethernet Server Adapter X710-DA2 for OCP
 		8086 000d  Ethernet Controller X710 for 10GbE SFP+
+		8086 000e  Ethernet Server Adapter OCP X710-2
 		8086 4005  Ethernet Controller X710 for 10GbE SFP+
 		8086 4006  Ethernet Controller X710 for 10GbE SFP+
+		8086 4007  Ethernet Controller X710 for 10GbE SFP+
 	1574  Ethernet Controller XL710 Emulation
 	1580  Ethernet Controller XL710 for 40GbE backplane
 	1581  Ethernet Controller X710 for 10GbE backplane
@@ -113,6 +115,7 @@
 		8086 0004  Ethernet Network Adapter XXV710-1
 		8086 0007  Ethernet Network Adapter OCP XXV710-1
 		8086 0008  Ethernet Network Adapter OCP XXV710-1
+		8086 4001  Ethernet Network Adapter XXV710-2
 	374c  Ethernet Connection X722 for A0
 	37ce  Ethernet Connection X722 for 10GbE backplane
 		1590 0215  Ethernet 10Gb 2-port 568i Adapter

@@ -276,8 +276,8 @@ endif
 # KBUILD_OUTPUT #
 #################
 
-# Only set KBUILD_OUTPUT if KOBJ differs from KSRC
-ifneq (${KSRC},${KOBJ})
+# Only set KBUILD_OUTPUT if the real paths of KOBJ and KSRC differ
+ifneq ($(call readlink,${KSRC}),$(call readlink,${KOBJ}))
 export KBUILD_OUTPUT ?= ${KOBJ}
 endif
 

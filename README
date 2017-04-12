@@ -4,13 +4,14 @@ i40e Linux* Base Driver for the Intel(R) XL710 Ethernet Controller Family
 
 ===============================================================================
 
-November 28, 2016
+February 23, 2017
 
 ===============================================================================
 
 Contents
 --------
 
+- Important Notes
 - Overview
 - Identifying Your Adapter
 - Building and Installation
@@ -115,6 +116,8 @@ The driver in this release is compatible with devices based on the following:
   * Intel(R) Ethernet Controller XL710
   * Intel(R) Ethernet Controller X722
 
+  * Intel(R) Ethernet Controller XXV710
+
 
 
 For information on how to identify your adapter, go to the Adapter &
@@ -131,13 +134,17 @@ http://www.intel.com/support
 
 SFP+ and QSFP+ Devices:
 
-NOTE:
+NOTES:
 * Some Intel branded network adapters based on the X710/XL710 controller
-  may only support Intel branded modules for 40Gbps and 10Gbps. For other
-  connections based on the X710/XL710 controller, support is dependent on
-  your system board. Please see your vendor for details. Intel recommends
-  using Intel optics; other modules may function but are not validated by
-  Intel. Contact Intel for supported media types.
+  only support Intel branded modules. On these adapters, other modules
+  are not supported and will not function.
+* For connections based on the X710/XL710 controller, support is
+  dependent on your system board. Please see your vendor for details.
+* In all cases Intel recommends using Intel optics; other modules may
+  function but are not validated by Intel. Contact Intel for supported
+  media types.
+* In systems that do not have adequate airflow to cool the adapter and
+  optical modules, you must use high temperature optical modules.
 
 Supplier	Type						Part Numbers
 SR Modules
@@ -165,6 +172,13 @@ SFP+ and QSFP+ Direct Attach Cables
   Intel(R) Ethernet SFP+ Twinaxial Cable	XDACBL1M, XDACBL3M, XDACBL5M
   Intel(R) Ethernet QSFP+ Breakout Cable	X4DACBL1, X4DACBL3, X4DACBL5
   Intel(R) Ethernet QSFP+ Twinaxial Cable	XLDACBL1, XLDACBL3, XLDACBL5
+
+SFP+ Devices for XXV710-Based Adapters
+--------------------------------------
+  Intel(R) Ethernet SFP28 SR Optic		E25GSFP28SR
+  Intel(R) Ethernet SFP28 Twinaxial Cable	XXVDACBL1M, XXVDACBL2M, XXVDACBL3M
+  Intel(R) Ethernet QSFP28 to SFP28 Twinaxial	XXV4DACBL1M, XXV4DACBL2M, XXV4DACBL3M
+  Breakout Cable
 
 
 ================================================================================
@@ -632,6 +646,9 @@ Use the ifconfig command to increase the MTU size. For example, enter the
 following where <x> is the interface number:
 
    ifconfig eth<x> mtu 9000 up
+Alternatively, you can use the ip command as follows:
+   ip link set mtu 9000 dev eth<x>
+   ip link set up dev eth<x>
 
 This setting is not saved across reboots. The setting change can be made
 permanent by adding 'MTU=9000' to the file:
@@ -693,6 +710,13 @@ does not support auto-negotiation or one that has been forced to a specific
 speed or duplex mode. Your link partner must match the setting you choose.
 1 Gbps speeds and higher cannot be forced. Use the autonegotiation
 advertising setting to manually set devices for 1 Gbps and higher.
+
+NOTE: You cannot set the speed for Intel(R) Ethernet Network Adapter
+XXV710 based devices.
+
+
+
+
 
 
 Speed, duplex, and autonegotiation advertising are configured through
@@ -784,8 +808,8 @@ supported by the device.
 
 
 
-VXLAN Overlay HW Offloading
----------------------------
+VXLAN and Geneve Overlay HW Offloading
+--------------------------------------
 
 Virtual Extensible LAN (VXLAN) allows you to extend an L2 network over an L3
 network, which may be useful in a virtualized or cloud environment. Some Intel(R)
@@ -796,7 +820,7 @@ VXLAN offloading is controlled by the tx and rx checksum offload options
 provided by ethtool. That is, if tx checksum offload is enabled, and the
 adapter has the capability, VXLAN offloading is also enabled.
 
-Support for VXLAN HW offloading is dependent on
+Support for VXLAN and Geneve HW offloading is dependent on
 kernel support of the HW offloading features.
 
 
@@ -1007,6 +1031,14 @@ Known Issues/Troubleshooting
 ----------------------------
 
 
+Driver Buffer Overflow Fix
+--------------------------
+
+The fix to resolve CVE-2016-8105, referenced in Intel SA-00069
+https://security-center.intel.com/advisory.aspx?intelid=INTEL-SA-00069
+&languageid=en-fr, is included in this and future versions of the driver.
+
+
 depmod warning messages about unknown symbol during installation
 ----------------------------------------------------------------
 
@@ -1187,16 +1219,6 @@ stressed condition.
 
 
 
-Disable GRO when routing/bridging
----------------------------------
-
-Due to a known kernel issue, GRO must be turned off when routing/bridging. GRO
-can be turned off via ethtool.
-ethtool -K ethX gro off
-
-where ethX is the ethernet interface being modified.
-
-
 Lower than expected performance
 -------------------------------
 
@@ -1300,7 +1322,7 @@ St - Fifth Floor, Boston, MA 02110-1301 USA.
 The full GNU General Public License is included in this distribution in the
 file called "COPYING".
 
-Copyright(c) 2014-2016 Intel Corporation.
+Copyright(c) 2014-2017 Intel Corporation.
 ================================================================================
 
 
@@ -1309,7 +1331,7 @@ Trademarks
 ----------
 
 Intel, Itanium, and Pentium are trademarks or registered trademarks of Intel
-Corporation or its subsidiaries in the United States and other countries.
+Corporation or its subsidiaries in the United States and/or other countries.
 
 * Other names and brands may be claimed as the property of others.
 
