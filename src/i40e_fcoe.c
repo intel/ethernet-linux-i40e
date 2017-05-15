@@ -316,7 +316,7 @@ void i40e_init_pf_fcoe(struct i40e_pf *pf)
 	/* Setup max frame with FCoE_MTU plus L2 overheads */
 	val = i40e_read_rx_ctl(hw, I40E_GLFCOE_RCTL);
 	val &= ~I40E_GLFCOE_RCTL_MAX_SIZE_MASK;
-	val |= ((FCOE_MTU + ETH_HLEN + VLAN_HLEN + ETH_FCS_LEN)
+	val |= ((FCOE_MTU + I40E_PACKET_HDR_PAD)
 		 << I40E_GLFCOE_RCTL_MAX_SIZE_SHIFT);
 	i40e_write_rx_ctl(hw, I40E_GLFCOE_RCTL, val);
 

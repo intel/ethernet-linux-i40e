@@ -265,6 +265,7 @@ static const char i40e_priv_flags_strings[][ETH_GSTRING_LEN] = {
 	"LinkPolling",
 	"flow-director-atr",
 	"veb-stats",
+	"link-down-on-close",
 	"hw-atr-eviction",
 };
 
@@ -4476,6 +4477,8 @@ static u32 i40e_get_priv_flags(struct net_device *dev)
 		I40E_PRIV_FLAGS_FD_ATR : 0;
 	ret_flags |= pf->flags & I40E_FLAG_VEB_STATS_ENABLED ?
 		I40E_PRIV_FLAGS_VEB_STATS : 0;
+	ret_flags |= pf->flags & I40E_FLAG_LINK_DOWN_ON_CLOSE_ENABLED ?
+		I40E_FLAG_LINK_DOWN_ON_CLOSE_FLAG : 0;
 	ret_flags |= pf->hw_disabled_flags & I40E_FLAG_HW_ATR_EVICT_CAPABLE ?
 		0 : I40E_PRIV_FLAGS_HW_ATR_EVICT;
 	if (pf->hw.pf_id == 0) {
@@ -4507,6 +4510,11 @@ static int i40e_set_priv_flags(struct net_device *dev, u32 flags)
 		pf->flags |= I40E_FLAG_LINK_POLLING_ENABLED;
 	else
 		pf->flags &= ~I40E_FLAG_LINK_POLLING_ENABLED;
+
+	if (flags & I40E_FLAG_LINK_DOWN_ON_CLOSE_FLAG)
+		pf->flags |= I40E_FLAG_LINK_DOWN_ON_CLOSE_ENABLED;
+	else
+		pf->flags &= ~I40E_FLAG_LINK_DOWN_ON_CLOSE_ENABLED;
 
 	/* allow the user to control the state of the Flow
 	 * Director ATR (Application Targeted Routing) feature
