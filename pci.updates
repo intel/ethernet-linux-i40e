@@ -105,7 +105,7 @@
 		8086 0001  Ethernet Converged Network Adapter X710-T4
 		8086 0002  Ethernet Converged Network Adapter X710-T4
 		8086 0003  Ethernet Converged Network Adapter X710-T
-		8086 00A0  Ethernet Converged Network Adapter X710-T4
+		8086 00a0  Ethernet Converged Network Adapter X710-T4
 	158a  Ethernet Controller XXV710 for 25GbE backplane
 	158b  Ethernet Controller XXV710 for 25GbE SFP28
 		8086 0000  Ethernet Network Adapter XXV710

@@ -54,7 +54,7 @@ static const char i40e_driver_string[] =
 
 #define DRV_VERSION_MAJOR 2
 #define DRV_VERSION_MINOR 0
-#define DRV_VERSION_BUILD 26
+#define DRV_VERSION_BUILD 30
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
 	__stringify(DRV_VERSION_BUILD) \
@@ -3178,7 +3178,7 @@ static void i40e_config_xps_tx_ring(struct i40e_ring *ring)
 	if (vsi->tc_config.numtc <= 1) {
 		if (!test_and_set_bit(__I40E_TX_XPS_INIT_DONE, &ring->state))
 			netif_set_xps_queue(ring->netdev,
-					    &ring->q_vector->affinity_mask,
+					    get_cpu_mask(ring->q_vector->v_idx),
 					    ring->queue_index);
 	} else if (alloc_cpumask_var(&mask, GFP_KERNEL)) {
 		/* Disable XPS to allow selection based on TC */
@@ -3792,9 +3792,11 @@ int i40e_vsi_request_irq_msix(struct i40e_vsi *vsi, char *basename)
 		irq_set_affinity_notifier(irq_num, &q_vector->affinity_notify);
 #endif
 #ifdef HAVE_IRQ_AFFINITY_HINT
-		/* assign the mask for this irq */
-		irq_set_affinity_hint(irq_num, &q_vector->affinity_mask);
-#endif
+		/* get_cpu_mask returns a static constant mask with
+		 * a permanent lifetime so it's ok to use here.
+		 */
+		irq_set_affinity_hint(irq_num, get_cpu_mask(q_vector->v_idx));
+#endif /* HAVE_IRQ_AFFINITY_HINT */
 	}
 
 	vsi->irqs_ready = true;
@@ -4478,7 +4480,7 @@ static void i40e_vsi_free_irq(struct i40e_vsi *vsi)
 			irq_set_affinity_notifier(irq_num, NULL);
 #endif
 #ifdef HAVE_IRQ_AFFINITY_HINT
-			/* clear the affinity_mask in the IRQ descriptor */
+			/* remove our suggested affinity mask for this IRQ */
 			irq_set_affinity_hint(irq_num, NULL);
 #endif
 			synchronize_irq(irq_num);
@@ -8433,8 +8435,6 @@ static int i40e_init_msix(struct i40e_pf *pf)
 static int i40e_vsi_alloc_q_vector(struct i40e_vsi *vsi, int v_idx)
 {
 	struct i40e_q_vector *q_vector;
-#ifdef HAVE_IRQ_AFFINITY_HINT
-#endif
 
 	/* allocate q_vector */
 	q_vector = kzalloc(sizeof(struct i40e_q_vector), GFP_KERNEL);
@@ -8443,8 +8443,8 @@ static int i40e_vsi_alloc_q_vector(struct i40e_vsi *vsi, int v_idx)
 
 	q_vector->vsi = vsi;
 	q_vector->v_idx = v_idx;
-#ifdef HAVE_IRQ_AFFINITY_HINT
-	cpumask_set_cpu(v_idx, &q_vector->affinity_mask);
+#ifdef HAVE_IRQ_AFFINITY_NOTIFY
+	cpumask_copy(&q_vector->affinity_mask, cpu_possible_mask);
 #endif
 	if (vsi->netdev)
 		netif_napi_add(vsi->netdev, &q_vector->napi,
@@ -9560,7 +9560,7 @@ not_found:
 		    port);
 }
 
-#if defined(HAVE_VXLAN_RX_OFFLOAD)
+#if defined(HAVE_VXLAN_RX_OFFLOAD) && !defined(HAVE_UDP_ENC_RX_OFFLOAD)
 #if IS_ENABLED(CONFIG_VXLAN)
 /**
  * i40e_add_vxlan_port - Get notifications about vxlan ports that come up
@@ -9598,8 +9598,8 @@ static void i40e_del_vxlan_port(struct net_device *netdev,
 	i40e_udp_tunnel_del(netdev, &ti);
 }
 #endif /* CONFIG_VXLAN */
-#endif /* HAVE_VXLAN_RX_OFFLOAD */
-#if defined(HAVE_GENEVE_RX_OFFLOAD)
+#endif /* HAVE_VXLAN_RX_OFFLOAD && !HAVE_UDP_ENC_RX_OFFLOAD */
+#if defined(HAVE_GENEVE_RX_OFFLOAD) && !defined(HAVE_UDP_ENC_RX_OFFLOAD)
 #if IS_ENABLED(CONFIG_GENEVE)
 /**
  * i40e_add_geneve_port - Get notifications about GENEVE ports that come up
@@ -9638,7 +9638,7 @@ static void i40e_del_geneve_port(struct net_device *netdev,
 }
 
 #endif /* CONFIG_GENEVE */
-#endif /* HAVE_GENEVE_RX_OFFLOAD */
+#endif /* HAVE_GENEVE_RX_OFFLOAD  && !HAVE_UDP_ENC_RX_OFFLOAD */
 #ifdef HAVE_NDO_GET_PHYS_PORT_ID
 static int i40e_get_phys_port_id(struct net_device *netdev,
 				 struct netdev_phys_item_id *ppid)
@@ -10015,7 +10015,11 @@ static const struct net_device_ops i40e_netdev_ops = {
 #endif
 #ifdef IFLA_VF_MAX
 	.ndo_set_vf_mac		= i40e_ndo_set_vf_mac,
+#ifdef HAVE_RHEL7_NETDEV_OPS_EXT_NDO_SET_VF_VLAN
+	.extended.ndo_set_vf_vlan = i40e_ndo_set_vf_port_vlan,
+#else
 	.ndo_set_vf_vlan	= i40e_ndo_set_vf_port_vlan,
+#endif
 #ifdef HAVE_NDO_SET_VF_MIN_MAX_TX_RATE
 	.ndo_set_vf_rate	= i40e_ndo_set_vf_bw,
 #else
@@ -10033,6 +10037,15 @@ static const struct net_device_ops i40e_netdev_ops = {
 #endif /* HAVE_RHEL7_NET_DEVICE_OPS_EXT */
 #endif /* HAVE_NDO_SET_VF_TRUST */
 #endif /* IFLA_VF_MAX */
+#ifdef HAVE_UDP_ENC_RX_OFFLOAD
+#ifdef HAVE_RHEL7_NETDEV_OPS_EXT_NDO_UDP_TUNNEL
+	.extended.ndo_udp_tunnel_add = i40e_udp_tunnel_add,
+	.extended.ndo_udp_tunnel_del = i40e_udp_tunnel_del,
+#else
+	.ndo_udp_tunnel_add	= i40e_udp_tunnel_add,
+	.ndo_udp_tunnel_del	= i40e_udp_tunnel_del,
+#endif
+#else /* !HAVE_UDP_ENC_RX_OFFLOAD */
 #ifdef HAVE_VXLAN_RX_OFFLOAD
 #if IS_ENABLED(CONFIG_VXLAN)
 	.ndo_add_vxlan_port	= i40e_add_vxlan_port,
@@ -10045,10 +10058,7 @@ static const struct net_device_ops i40e_netdev_ops = {
 	.ndo_del_geneve_port	= i40e_del_geneve_port,
 #endif
 #endif /* HAVE_GENEVE_RX_OFFLOAD */
-#ifdef HAVE_UDP_ENC_RX_OFFLOAD
-	.ndo_udp_tunnel_add	= i40e_udp_tunnel_add,
-	.ndo_udp_tunnel_del	= i40e_udp_tunnel_del,
-#endif
+#endif /* HAVE_UDP_ENC_RX_OFFLOAD */
 #ifdef HAVE_NDO_GET_PHYS_PORT_ID
 	.ndo_get_phys_port_id   = i40e_get_phys_port_id,
 #endif /* HAVE_NDO_GET_PHYS_PORT_ID */

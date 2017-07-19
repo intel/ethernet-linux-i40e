@@ -4,13 +4,14 @@ i40e Linux* Base Driver for the Intel(R) XL710 Ethernet Controller Family
 
 ===============================================================================
 
-January 7, 2017
+March 10, 2017
 
 ===============================================================================
 
 Contents
 --------
 
+- Important Notes
 - Overview
 - Identifying Your Adapter
 - Building and Installation
@@ -95,11 +96,26 @@ supported in this release.
 
 
 
+NOTE: 1 Gb devices based on the Intel(R) Ethernet Controller X722 do not
+support the following features:
+  * Data Center Bridging (DCB)
+  * QOS
+  * VMQ
+  * SR-IOV
+  * Task Encapsulation offload (VxLAN, NVGRE)
+  * Energy Efficient Ethernet (EEE)
+  * Auto-media detect
+
+
+
+
 Identifying Your Adapter
 ------------------------
 The driver in this release is compatible with devices based on the following:
   * Intel(R) Ethernet Controller X710
   * Intel(R) Ethernet Controller XL710
+  * Intel(R) Ethernet Controller X722
+
   * Intel(R) Ethernet Controller XXV710
 
 
@@ -118,13 +134,17 @@ http://www.intel.com/support
 
 SFP+ and QSFP+ Devices:
 
-NOTE:
+NOTES:
 * Some Intel branded network adapters based on the X710/XL710 controller
-  may only support Intel branded modules for 40Gbps and 10Gbps. For other
-  connections based on the X710/XL710 controller, support is dependent on
-  your system board. Please see your vendor for details. Intel recommends
-  using Intel optics; other modules may function but are not validated by
-  Intel. Contact Intel for supported media types.
+  only support Intel branded modules. On these adapters, other modules
+  are not supported and will not function.
+* For connections based on the X710/XL710 controller, support is
+  dependent on your system board. Please see your vendor for details.
+* In all cases Intel recommends using Intel optics; other modules may
+  function but are not validated by Intel. Contact Intel for supported
+  media types.
+* In systems that do not have adequate airflow to cool the adapter and
+  optical modules, you must use high temperature optical modules.
 
 Supplier	Type						Part Numbers
 SR Modules
@@ -343,7 +363,7 @@ to set the VF to promiscuous mode.
   #ip link set eth2 promisc on
     Where eth2 is a VF interface in the VM
   For promiscuous Multicast:
-  #ip link set eth2 allmulti on
+  #ip link set eth2 allmulticast on
     Where eth2 is a VF interface in the VM
 
     NOTE: By default, the ethtool priv-flag vf-true-promisc-support is set to 
@@ -362,7 +382,7 @@ to set the VF to promiscuous mode.
 Now add a VLAN interface on the VF interface.
   #ip link add link eth2 name eth2.100 type vlan id 100
 
-Note that the order in which you set the VF?to promiscuous mode and add
+Note that the order in which you set the VF to promiscuous mode and add
 the VLAN interface does not matter (you can do either first). The end result
 in this example is that the VF will get all traffic that is tagged with
 VLAN 100.
@@ -606,6 +626,17 @@ distribution documentation. If during this process you are asked for the
 driver or module name, the name for the Base Driver is i40e.
 
 
+Setting the link-down-on-close Private Flag
+-------------------------------------------
+When the link-down-on-close private flag is set to "on", the port's link
+will go down when the interface is brought down using the ifconfig ethX down
+command.
+
+Use ethtool to view and set link-down-on-close, as follows:
+  ethtool --show-priv-flags ethX
+  ethtool --set-priv-flags ethX link-down-on-close [on|off]
+
+
 Viewing Link Messages
 ---------------------
 
@@ -626,6 +657,9 @@ Use the ifconfig command to increase the MTU size. For example, enter the
 following where <x> is the interface number:
 
    ifconfig eth<x> mtu 9000 up
+Alternatively, you can use the ip command as follows:
+   ip link set mtu 9000 dev eth<x>
+   ip link set up dev eth<x>
 
 This setting is not saved across reboots. The setting change can be made
 permanent by adding 'MTU=9000' to the file:
@@ -736,7 +770,7 @@ Flow Control is disabled by default.
 Use ethtool to change the flow control settings.
 
 ethtool:
-ethtool -A eth? autoneg off rx on tx on
+ethtool -s eth? autoneg off rx on tx on
 
 
 
@@ -785,8 +819,8 @@ supported by the device.
 
 
 
-VXLAN Overlay HW Offloading
----------------------------
+VXLAN and Geneve Overlay HW Offloading
+--------------------------------------
 
 Virtual Extensible LAN (VXLAN) allows you to extend an L2 network over an L3
 network, which may be useful in a virtualized or cloud environment. Some Intel(R)
@@ -797,7 +831,7 @@ VXLAN offloading is controlled by the tx and rx checksum offload options
 provided by ethtool. That is, if tx checksum offload is enabled, and the
 adapter has the capability, VXLAN offloading is also enabled.
 
-Support for VXLAN HW offloading is dependent on
+Support for VXLAN and Geneve HW offloading is dependent on
 kernel support of the HW offloading features.
 
 
@@ -1008,6 +1042,13 @@ Known Issues/Troubleshooting
 ----------------------------
 
 
+Poor performance when using VXLAN encapsulation
+-----------------------------------------------
+When using VXLAN encapsulation on Red Hat Enterprise Linux 7.2 and 7.3,
+you may experience poor performance due to limitations in the kernel on
+these OS releases. To resolve this issue, upgrade your kernel.
+
+
 Driver Buffer Overflow Fix
 --------------------------
 
@@ -1196,16 +1237,6 @@ stressed condition.
 
 
 
-Disable GRO when routing/bridging
----------------------------------
-
-Due to a known kernel issue, GRO must be turned off when routing/bridging. GRO
-can be turned off via ethtool.
-ethtool -K ethX gro off
-
-where ethX is the ethernet interface being modified.
-
-
 Lower than expected performance
 -------------------------------
 
@@ -1318,7 +1349,7 @@ Trademarks
 ----------
 
 Intel, Itanium, and Pentium are trademarks or registered trademarks of Intel
-Corporation or its subsidiaries in the United States and other countries.
+Corporation or its subsidiaries in the United States and/or other countries.
 
 * Other names and brands may be claimed as the property of others.
 

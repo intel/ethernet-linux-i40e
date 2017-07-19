@@ -1582,7 +1582,7 @@ struct _kc_netdev_queue_attribute {
 #define to_kc_netdev_queue_attr(_attr) container_of(_attr,		\
     struct _kc_netdev_queue_attribute, attr)
 
-int __kc_netif_set_xps_queue(struct net_device *dev, struct cpumask *mask,
+int __kc_netif_set_xps_queue(struct net_device *dev, const struct cpumask *mask,
 			     u16 index)
 {
 	struct netdev_queue *txq = netdev_get_tx_queue(dev, index);
@@ -1927,6 +1927,23 @@ int __kc_pci_enable_msix_range(struct pci_dev *dev, struct msix_entry *entries,
 }
 #endif /* 3.14.0 */
 
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(3,15,0))
+char *_kc_devm_kstrdup(struct device *dev, const char *s, gfp_t gfp)
+{
+	size_t size;
+	char *buf;
+
+	if (!s)
+		return NULL;
+
+	size = strlen(s) + 1;
+	buf = devm_kzalloc(dev, size, gfp);
+	if (buf)
+		memcpy(buf, s, size);
+	return buf;
+}
+#endif /* 3.15.0 */
+
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,16,0) )
 #ifdef HAVE_SET_RX_MODE
 #ifdef NETDEV_HW_ADDR_T_UNICAST
@@ -2270,14 +2287,61 @@ void __kc_netdev_rss_key_fill(void *buffer, size_t len)
 #endif
 
 /******************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(4,1,0) )
+#if !((RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(6,8) && RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7,0)) && \
+      (RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(7,2)) && \
+      (SLE_VERSION_CODE > SLE_VERSION(12,1,0)))
+unsigned int _kc_cpumask_local_spread(unsigned int i, int node)
+{
+	int cpu;
+
+	/* Wrap: we always want a cpu. */
+	i %= num_online_cpus();
+
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,6,28) )
+	/* Kernels prior to 2.6.28 do not have for_each_cpu or
+	 * cpumask_of_node, so just use for_each_online_cpu()
+	 */
+	for_each_online_cpu(cpu)
+		if (i-- == 0)
+			return cpu;
+
+	return 0;
+#else
+	if (node == -1) {
+		for_each_cpu(cpu, cpu_online_mask)
+			if (i-- == 0)
+				return cpu;
+	} else {
+		/* NUMA first. */
+		for_each_cpu_and(cpu, cpumask_of_node(node), cpu_online_mask)
+			if (i-- == 0)
+				return cpu;
+
+		for_each_cpu(cpu, cpu_online_mask) {
+			/* Skip NUMA nodes, done above. */
+			if (cpumask_test_cpu(cpu, cpumask_of_node(node)))
+				continue;
+
+			if (i-- == 0)
+				return cpu;
+		}
+	}
+#endif /* KERNEL_VERSION >= 2.6.28 */
+	BUG();
+}
+#endif
+#endif
+
+/******************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(4,5,0) )
 #if (!(RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,3)))
 #ifdef CONFIG_SPARC
 #include <asm/idprom.h>
 #include <asm/prom.h>
 #endif
-int _kc_eth_platform_get_mac_address(struct __maybe_unused device *dev,
-				     u8 __maybe_unused *mac_addr)
+int _kc_eth_platform_get_mac_address(struct device *dev __maybe_unused,
+				     u8 *mac_addr __maybe_unused)
 {
 #if (((LINUX_VERSION_CODE < KERNEL_VERSION(3,1,0)) && defined(CONFIG_OF) && \
       !defined(HAVE_STRUCT_DEVICE_OF_NODE) || !defined(CONFIG_OF)) && \

@@ -791,10 +791,8 @@ struct i40e_q_vector {
 
 	u8 num_ringpairs;	/* total number of ring pairs in vector */
 
-#ifdef HAVE_IRQ_AFFINITY_HINT
-	cpumask_t affinity_mask;
-#endif
 #ifdef HAVE_IRQ_AFFINITY_NOTIFY
+	cpumask_t affinity_mask;
 	struct irq_affinity_notify affinity_notify;
 #endif
 
