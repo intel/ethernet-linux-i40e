@@ -27,6 +27,9 @@ ifneq ($(KERNELRELEASE),)
 # Makefile for the Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
 #
 
+ccflags-y += -I$(src)
+subdir-ccflags-y += -I$(src)
+
 obj-$(CONFIG_I40E) += i40e.o
 
 i40e-y := i40e_main.o \
@@ -44,7 +47,6 @@ i40e-y := i40e_main.o \
 	i40e_virtchnl_pf.o
 
 i40e-$(CONFIG_DCB) += i40e_dcb.o i40e_dcb_nl.o
-i40e-$(CONFIG_FCOE:m=y) += i40e_fcoe.o
 i40e-y += kcompat.o
 
 else	# ifneq($(KERNELRELEASE),)

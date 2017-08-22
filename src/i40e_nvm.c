@@ -201,14 +201,14 @@ i40e_status i40e_read_nvm_word(struct i40e_hw *hw, u16 offset,
 {
 	i40e_status ret_code = I40E_SUCCESS;
 
-	if (hw->flags & I40E_HW_FLAG_AQ_SRCTL_ACCESS_ENABLE) {
-		ret_code = i40e_acquire_nvm(hw, I40E_RESOURCE_READ);
-		if (!ret_code) {
+	ret_code = i40e_acquire_nvm(hw, I40E_RESOURCE_READ);
+	if (!ret_code) {
+		if (hw->flags & I40E_HW_FLAG_AQ_SRCTL_ACCESS_ENABLE) {
 			ret_code = i40e_read_nvm_word_aq(hw, offset, data);
-			i40e_release_nvm(hw);
+		} else {
+			ret_code = i40e_read_nvm_word_srctl(hw, offset, data);
 		}
-	} else {
-		ret_code = i40e_read_nvm_word_srctl(hw, offset, data);
+		i40e_release_nvm(hw);
 	}
 	return ret_code;
 }
@@ -658,12 +658,18 @@ i40e_status i40e_validate_nvm_checksum(struct i40e_hw *hw,
 	u16 checksum_sr = 0;
 	u16 checksum_local = 0;
 
-	if (hw->flags & I40E_HW_FLAG_AQ_SRCTL_ACCESS_ENABLE)
-		ret_code = i40e_acquire_nvm(hw, I40E_RESOURCE_READ);
+	/* acquire_nvm provides exclusive NVM lock to synchronize access across
+	 * PFs. X710 uses i40e_read_nvm_word_srctl which polls for done bit
+	 * twice (first time to be able to write address to I40E_GLNVM_SRCTL
+	 * register, second to read data from I40E_GLNVM_SRDATA. One PF can see
+	 * done bit and try to write address, while another one will interpret
+	 * it as a good time to read data. It will cause invalid data to be
+	 * read.
+	 */
+	ret_code = i40e_acquire_nvm(hw, I40E_RESOURCE_READ);
 	if (!ret_code) {
 		ret_code = i40e_calc_nvm_checksum(hw, &checksum_local);
-		if (hw->flags & I40E_HW_FLAG_AQ_SRCTL_ACCESS_ENABLE)
-			i40e_release_nvm(hw);
+	i40e_release_nvm(hw);
 		if (ret_code != I40E_SUCCESS)
 			goto i40e_validate_nvm_checksum_exit;
 	} else {
@@ -806,6 +812,15 @@ i40e_status i40e_nvmupd_command(struct i40e_hw *hw,
 		hw->nvmupd_state = I40E_NVMUPD_STATE_INIT;
 	}
 
+	/* Acquire lock to prevent race condition where adminq_task
+	 * can execute after i40e_nvmupd_nvm_read/write but before state
+	 * variables (nvm_wait_opcode, nvm_release_on_done) are updated.
+	 *
+	 * During NVMUpdate, it is observed that lock could be held for
+	 * ~5ms for most commands. However lock is held for ~60ms for
+	 * NVMUPD_CSUM_LCB command.
+	 */
+	i40e_acquire_spinlock(&hw->aq.arq_spinlock);
 	switch (hw->nvmupd_state) {
 	case I40E_NVMUPD_STATE_INIT:
 		status = i40e_nvmupd_state_init(hw, cmd, bytes, perrno);
@@ -826,7 +841,8 @@ i40e_status i40e_nvmupd_command(struct i40e_hw *hw,
 		 */
 		if (cmd->offset == 0xffff) {
 			i40e_nvmupd_check_wait_event(hw, hw->nvm_wait_opcode);
-			return I40E_SUCCESS;
+			status = I40E_SUCCESS;
+			goto exit;
 		}
 
 		status = I40E_ERR_NOT_READY;
@@ -841,6 +857,8 @@ i40e_status i40e_nvmupd_command(struct i40e_hw *hw,
 		*perrno = -ESRCH;
 		break;
 	}
+exit:
+	i40e_release_spinlock(&hw->aq.arq_spinlock);
 	return status;
 }
 

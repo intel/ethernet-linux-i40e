@@ -4,7 +4,7 @@ i40e Linux* Base Driver for the Intel(R) XL710 Ethernet Controller Family
 
 ===============================================================================
 
-March 10, 2017
+June 21, 2017
 
 ===============================================================================
 
@@ -60,7 +60,6 @@ VLAN tagging. This configuration allows unexpected, and potentially malicious,
 frames to be dropped.
 
 
-
 Overview
 --------
 
@@ -93,7 +92,6 @@ Channel Bonding documentation can be found in the Linux kernel source:
 
 The driver information previously displayed in the /proc file system is not
 supported in this release.
-
 
 
 NOTE: 1 Gb devices based on the Intel(R) Ethernet Controller X722 do not
@@ -134,6 +132,9 @@ http://www.intel.com/support
 
 SFP+ and QSFP+ Devices:
 
+For information about supported media, follow the link below:
+  http://www.intel.com/content/dam/www/public/us/en/documents/
+  release-notes/xl710-ethernet-controller-feature-matrix.pdf
 NOTES:
 * Some Intel branded network adapters based on the X710/XL710 controller
   only support Intel branded modules. On these adapters, other modules
@@ -145,40 +146,6 @@ NOTES:
   media types.
 * In systems that do not have adequate airflow to cool the adapter and
   optical modules, you must use high temperature optical modules.
-
-Supplier	Type						Part Numbers
-SR Modules
-  Intel		DUAL RATE 1G/10G SFP+ SR (bailed)		E10GSFPSR
-LR Modules
-  Intel		DUAL RATE 1G/10G SFP+ LR (bailed)		E10GSFPLR
-1G SFP Modules
-  The following is a list of 3rd party SFP modules that have received some
-  testing. Not all modules are applicable to all devices.
-  Finisar	1000BASE-T SFP		FCLF-8251-3
-  Kinnex A	1000BASE-T SFP		XSFP-T-RJ12-0101-DLL
-  Avago		1000BASE-T SFP		ABCU-5710RZ
-QSFP+ Modules
-  Intel		TRIPLE RATE 1G/10G/40G QSFP+ SR (bailed)	E40GQSFPSR
-  Intel		TRIPLE RATE 1G/10G/40G QSFP+ LR (bailed)	E40GQSFPLR
-  QSFP+ 1G speed is not supported on XL710 based devices.
-SFP+ and QSFP+ Direct Attach Cables
-  X710/XL710 based SFP+/QSFP+ adapters support passive SFP+/QSFP+ Direct
-  Attach cables. Intel recommends using Intel(R) Ethernet SFP+/QSFP+ Twinaxial
-  Cables . Other cables may function but are not validated by Intel. Contact
-  Intel for supported media types.
-  X710 based SFP+ adapters support all passive and active limiting direct
-  attach cables that comply with SFF-8431 v4.1 and SFF-8472 v10.4
-  specifications.
-  Intel(R) Ethernet SFP+ Twinaxial Cable	XDACBL1M, XDACBL3M, XDACBL5M
-  Intel(R) Ethernet QSFP+ Breakout Cable	X4DACBL1, X4DACBL3, X4DACBL5
-  Intel(R) Ethernet QSFP+ Twinaxial Cable	XLDACBL1, XLDACBL3, XLDACBL5
-
-SFP+ Devices for XXV710-Based Adapters
---------------------------------------
-  Intel(R) Ethernet SFP28 SR Optic		E25GSFP28SR
-  Intel(R) Ethernet SFP28 Twinaxial Cable	XXVDACBL1M, XXVDACBL2M, XXVDACBL3M
-  Intel(R) Ethernet QSFP28 to SFP28 Twinaxial	XXV4DACBL1M, XXV4DACBL2M, XXV4DACBL3M
-  Breakout Cable
 
 
 ================================================================================
@@ -280,7 +247,9 @@ Valid Range:
 
 
 NOTE: This parameter is only used on kernel 3.7.x and below. On kernel 3.8.x
-and above, use sysfs to enable VFs. For example:
+and above, use sysfs to enable VFs. Also, for Red Hat distributions,
+this parameter is only used on version 6.6 and older. For version 6.7 and
+newer, use sysfs. For example:
 #echo $num_vf_enabled > /sys/class/net/$dev/device/sriov_numvfs	//enable VFs
 #echo 0 > /sys/class/net/$dev/device/sriov_numvfs	//disable VFs
 
@@ -405,6 +374,7 @@ NOTES:
 
   - An included script (set_irq_affinity) automates setting the IRQ to
     CPU affinity.
+
   - The Linux i40e driver supports the following flow types: IPv4, TCPv4, and
     UDPv4. For a given flow type, it supports valid combinations of
     IP addresses (source or destination) and UDP/TCP ports (source and 
@@ -468,40 +438,93 @@ ethtool, which also can be used to verify whether ATR rules still exist.
 
 Sideband Perfect Filters
 ------------------------
-Sideband Perfect Filters is an interface for loading the filter table that
-funnels all flow into queue_0 unless an alternative queue is specified
-using "action." If action is used, any flow that matches the filter criteria
-will be directed to the appropriate queue. Rules may be deleted from the
-table. This is done via
 
-  ethtool -U ethX delete N
+Sideband Perfect Filters are used to direct traffic that matches specified
+characteristics. They are enabled through ethtool's ntuple interface.
+To add a new filter use the following command:
+  ethtool -U <device> flow-type <type> src-ip <ip> dst-ip <ip> src-port <port>
+dst-port <port> action <queue>
+Where:
+  <device> - the ethernet device to program
+  <type> - can be ip4, tcp4, udp4, or sctp4
+  <ip> - the ip address to match on
+  <port> - the port number to match on
+  <queue> - the queue to direct traffic towards (-1 discards the matched traffic)
+Use the following command to display all of the active filters:
+  ethtool -u <device>
+Use the following command to delete a filter:
+  ethtool -U <device> delete <N>
+<N> is the filter id displayed when printing all the active filters, and may
+also have been specified using "loc <N>" when adding the filter.
 
-  where N is the rule number to be deleted, as specified in the loc value in
-  the filter add command.
+The following example matches TCP traffic sent from 192.168.0.1, port 5300,
+directed to 192.168.0.5, port 80, and sends it to queue 7:
+  ethtool -U enp130s0 flow-type tcp4 src-ip 192.168.0.1 dst-ip 192.168.0.5
+  src-port 5300 dst-port 7 action 7
 
-  If the queue is defined as -1, the filter drops matching packets. To account
-  for Sideband filter matches, the fdir_sb_match stats in ethtool can be used.
+For each flow-type, the programmed filters must all have the same matching
+input set. For example, issuing the following two commands is acceptable:
+  ethtool -U enp130s0 flow-type ip4 src-ip 192.168.0.1 src-port 5300 action 7
+  ethtool -U enp130s0 flow-type ip4 src-ip 192.168.0.5 src-port 55 action 10
+Issuing the next two commands, however, is not acceptable, since the first
+specifies scr-ip and the second specifies dst-ip:
+  ethtool -U enp130s0 flow-type ip4 src-ip 192.168.0.1 src-port 5300 action 7
+  ethtool -U enp130s0 flow-type ip4 dst-ip 192.168.0.5 src-port 55 action 10
+The second command will fail with an error. You may program multiple filters
+with the same fields, using different values, but, on one device, you may not
+program two tcp4 filters with different matching fields.
 
-  In addition, rx-N.rx_packets shows the number of packets processed by the
-  Nth queue.
+Matching on a sub-portion of a field is not supported by the i40e driver,
+thus partial mask fields are not supported.
 
-NOTES:
-Receive Packet Steering (RPS) and Receive Flow Steering (RFS) are not compatible
-with Flow Director. If Flow Director is enabled, these will be disabled.
+The driver also supports matching user-defined data within the packet payload.
+This flexible data is specified using the "user-def" field of the ethtool
+command in the following way:
++----------------------------+--------------------------+
+| 31    28    24    20    16 | 15    12    8    4    0  |
++----------------------------+--------------------------+
+| offset into packet payload | 2 bytes of flexible data |
++----------------------------+--------------------------+
 
-The VLAN field for Flow Director is not explicitly supported in the i40e
-driver.
+For example,
+  ... user-def 0x4FFFF ...
 
-When filter rules are added from Sideband or ATR and the Flow Director filter
-table is full, the ATR rule is turned off by the driver. Subsequently, the
-Sideband filter rule is then turned off. When space becomes available in the
-filter table through filter rule deletion (i.e., an ATR rule or Sideband rule
-is deleted), the Sideband and ATR rule additions are turned back on.
+tells the filter to look 4 bytes into the payload and match that value against
+0xFFFF. The offset is based on the beginning of the payload, and not the
+beginning of the packet. Thus
 
-Occasionally, when the filter table is full, you will notice HW errors when
-you try to add new rules. The i40e driver will call for a filter flush and
-sideband filter list replay. This will help flush any stale ATR rules and
-create space.
+  flow-type tcp4 ... user-def 0x8BEAF ...
+
+would match TCP/IPv4 packets which have the value 0xBEAF 8 bytes into the TCP/IPv4 payload.
+
+Note that ICMP headers are parsed as 4 bytes of header and 4 bytes of payload.
+Thus to match the first byte of the payload, you must actually add 4 bytes
+to the offset. Also note that ip4 filters match both ICMP frames as well as
+raw (unknown) ip4 frames, where the payload will be the L3 payload of the
+IP4 frame.
+
+The maximum offset is 64. The hardware will only read up to 64 bytes of data
+from the payload. The offset must be even because the flexible data is 2 bytes
+long and must be aligned to byte 0 of the packet payload.
+
+The user-defined flexible offset is also considered part of the input set and
+cannot be programmed separately for multiple filters of the same type. However,
+the flexible data is not part of the input set and multiple filters may use the
+same offset but match against different data.
+
+To create filters that direct traffic to a specific Virtual Function, use the
+?action" parameter. Specify the action as a 64 bit value, where the lower 32
+bits represents the queue number, while the next 8 bits represent which VF.
+Note that 0 is the PF, so the VF identifier is offset by 1. For example:
+
+  ... action 0x800000002 ...
+
+specifies to direct traffic to Virtual Function 7 (8 minus 1) into queue 2 of
+that VF.
+
+Note that these filters will not break internal routing rules, and will not
+route traffic that otherwise would not have been sent to the specified Virtual
+Function.
 
 
 Cloud Filter Support
@@ -521,7 +544,7 @@ NOTES:
   - The "action -1" option, which drops matching packets in regular Flow
     Director filters, is not available to drop packets when used with 
     cloud filters.
-  - For IPv4 and ether flow-types, cloud filters cannot be used for TCP?or
+  - For IPv4 and ether flow-types, cloud filters cannot be used for TCP or
     UDP filters.
   - Cloud filters can be used as a method for implementing queue splitting in
     the PF.
@@ -540,44 +563,45 @@ The following filters are supported:
   L3 filters
     Application Destination IP
 
-Use ethtool's flow director and user defined (user-def) options to define
-cloud filters for tunneled packets (VF) and L3 filters for non-tunneled
-packets (PF or VF). In this case, the user-def field specifies that a cloud
-filter is being programmed instead of a Flow Director filter. Note that this
-is not the same as setting filters using a user-defined pattern and offset,
-which requires using the mask ('m') parameter in conjunction with the user-def
-field (see the Intel Ethernet Flow Director section in this document).
+Cloud filters are specified using ethtool's ntuple interface, but the driver
+uses user-def to determine whether to treat the filter as a cloud filter or a
+regular filter. To enable a cloud filter, set the highest bit of the user-def
+field, "user-def 0x8000000000000000" to enable the cloud features described
+below. This specifies to the driver to treat the filter specially and not treat
+it like the regular filters described above. Note that cloud filters also read
+the other bits in the user-def field separately so you cannot use the flexible
+data feature described above.
 
 For regular Flow Director filters:
 
-  - No user-def specified or upper 32 bits of user-def is all 0s
+  - No user-def specified or highest bit (bit 63) is 0
 
   Example:
 
-    ethtool -N p258p1 flow-type ip4 src-ip 192.168.1.108 dst-ip 192.168.1.109 /
-    action 6 loc 3
+    ethtool -U enp130s0 flow-type ip4 src-ip 192.168.0.1 dst-ip 192.168.0.109
+    action 6 loc
 
 For L3 filters (non-tunneled packets):
 
-  - "user-def 0xffffffff00000002" (no Tenant ID/VNI specified in the upper
-    32 bits of the user-def field and send to VF id 2)
+  - "user-def 0x8000000000000000" (no Tenant ID/VNI specified in remaining
+    bits of the user-def field)
   - Only L3 parameters (src-IP, dst-IP) are considered
 
   Example:
 
-    ethtool -N p4p2 flow-type ip4 src-ip 192.168.42.13 dst-ip 192.168.42.33 /
-    src-port 12344 dst-port 12344 user-def 0xffffffff00000001 loc 3
+    ethtool -U enp130s0 flow-type ip4 src-ip 192.168.42.13 dst-ip 192.168.42.33 /
+    src-port 12344 dst-port 12344 user-def 0x8000000000000000 action /
+    0x200000000 loc 3
       Redirect traffic coming from 192.168.42.13 port 12344 with destination
-      192.168.42.33 port 12344 into VF id 1, and call this ?rule 3?
+      192.168.42.33 port 12344 into VF id 1, and call this "rule 3"
 
 For cloud filters (tunneled packets):
 
   - All other filters, including where Tenant ID/VNI is specified.
-  - The upper 32 bits of the user def field can carry the tenant ID/VNI
-    if specified or required.
-  - The lower 32 bits of the 'user-def' field can be used to specify the
-    VF ID. If the ID is greater than the maximum number of VFs currently
-    enabled then the ID will default back to the main VSI.
+  - The lower 32 bits of the user-def field can carry the tenant ID/VNI
+    if required.
+  - The VF can be specified using the "action" field, just as regular filters
+    described in the Flow director Filter section above.
   - Cloud filters can be defined with inner MAC, outer MAC, inner IP address,
      inner VLAN, and VNI as part of the cloud tuple. Cloud filters filter on
     destination (not source) MAC and IP. The destination and source MAC
@@ -588,22 +612,12 @@ For cloud filters (tunneled packets):
 
   Example:
 
-    ethtool -N p4p2 flow-type ip4 src-ip 192.168.42.13 dst-ip 192.168.42.33 /
-    src-port 12344 dst-port 12344 user-def 0x0000000001 loc 38
+    ethtool -U enp130s0 flow-type ip4 src-ip 192.168.42.13 dst-ip 192.168.42.33 /
+    src-port 12344 dst-port 12344 user-def 0x8000000000000022 loc 38 action /
+    0x200000000
       Redirect traffic on VXLAN using tunnel id 34 (hex 0x22) coming from
       192.168.42.13 port 12344 with destination 192.168.42.33 port 12344 into
       VF id 1, and call this "rule 38"
-      NOTE: If the VF id given is larger than the number of active VFs (e.g.
-      if you set num_vfs to 8 and use VF id 12 in the ethtool command) the
-      traffic will be redirected to the PF rather than to the VF.
-
-To see the list of filters currently present:
-    ethtool <-u|-n> ethX
-      NOTE: For cloud filters in which the specified VF is greater than
-      the number of VFs supported, the cloud filter will send traffic
-      to the PF. However, the driver does not store the specified VF
-      number, so in this case the ethtool -n command will display
-      0xffff for the VF number.
 
 
 ================================================================================
@@ -624,17 +638,6 @@ distributions ship with tools to make these changes for you. To learn the
 proper way to configure a network device for your system, refer to your
 distribution documentation. If during this process you are asked for the
 driver or module name, the name for the Base Driver is i40e.
-
-
-Setting the link-down-on-close Private Flag
--------------------------------------------
-When the link-down-on-close private flag is set to "on", the port's link
-will go down when the interface is brought down using the ifconfig ethX down
-command.
-
-Use ethtool to view and set link-down-on-close, as follows:
-  ethtool --show-priv-flags ethX
-  ethtool --set-priv-flags ethX link-down-on-close [on|off]
 
 
 Viewing Link Messages
@@ -669,7 +672,7 @@ permanent by adding 'MTU=9000' to the file:
 
 
 NOTES:
-- The maximum MTU setting for Jumbo Frames is 9706. This value coincides
+- The maximum MTU setting for Jumbo Frames is 9702. This value coincides
   with the maximum Jumbo Frames size of 9728 bytes.
 - This driver will attempt to use multiple page sized buffers to receive
   each jumbo packet. This should help to avoid buffer starvation issues
@@ -819,8 +822,8 @@ supported by the device.
 
 
 
-VXLAN and Geneve Overlay HW Offloading
---------------------------------------
+VXLAN Overlay HW Offloading
+---------------------------
 
 Virtual Extensible LAN (VXLAN) allows you to extend an L2 network over an L3
 network, which may be useful in a virtualized or cloud environment. Some Intel(R)
@@ -831,7 +834,7 @@ VXLAN offloading is controlled by the tx and rx checksum offload options
 provided by ethtool. That is, if tx checksum offload is enabled, and the
 adapter has the capability, VXLAN offloading is also enabled.
 
-Support for VXLAN and Geneve HW offloading is dependent on
+Support for VXLAN HW offloading is dependent on
 kernel support of the HW offloading features.
 
 
@@ -859,61 +862,6 @@ limiter, should you chose that any one particular function not be able to
 consume 100% of a port's bandwidth (should it be available). The sum of
 all the values for Maximum Bandwidth is not restricted, because no more than
 100% of a port's bandwidth can ever be used.
-
-Once the initial configuration is complete, you can set different
-bandwidth allocations on each function as follows:
-1. Make a new directory named /config
-2. edit etc/fstab to include:
-
-	configfs /config configfs defaults
-
-3. Mount /config
-4. Load (or reload) the i40e driver
-5. Make a new directory under config/i40e for each partition upon which you
-   wish to configure the bandwidth.
-6. The following files will appear under the config/partition directory:
-   - max_bw
-   - min_bw
-   - commit
-   - ports
-   - partitions
-   read from max_bw to get display the current maximum bandwidth setting.
-   write to max_bw to set the maximum bandwidth for this function.
-   read from min_bw to display the current minimum bandwidth setting.
-   Write to min_bw to set the minimum bandwidth for this function.
-   Write a '1' to commit to save your changes.
-
-Notes: -commit is write only. Attempting to read it will result in an
-	 error.
-	-Writing to commit is only supported on the first function of
-	 a given port. Writing to a subsequent function will result in an
-	 error.
-	-Oversubscribing the minimum bandwidth is not supported. The underlying
-	 device's NVM will set the minimum bandwidth to supported values in an
-	 indeterminate manner. Remove all of the directories under config and
-	 reload them to see what the actual values are.
-	-To unload the driver you must first remove the directories created in
-	 step 5, above.
-
-Example of Setting the minimum and maximum bandwidth (assume there are four
-function on the port eth6-eth9, and that eth6 is the first function on
-the port):
-
- # mkdir /config/eth6
- # mkdir /config/eth7
- # mkdir /config/eth8
- # mkdir /config/eth9
-
- # echo 50 > /config/eth6/min_bw
- # echo 100 > /config/eth6/max_bw
- # echo 20 > /config/eth7/min_bw
- # echo 100 > /config/eth7/max_bw
- # echo 20 > /config/eth8/min_bw
- # echo 100 > /config/eth8/max_bw
- # echo 10 > /config/eth9/min_bw
- # echo 25 > /config/eth9/max_bw
-
- # echo 1 > /config/eth6/commit
 
 
 Data Center Bridging (DCB)
@@ -1040,6 +988,32 @@ using ethtool.
 
 Known Issues/Troubleshooting
 ----------------------------
+
+
+ip link show command shows incorrect VF MAC if VF MAC was set from VF side
+--------------------------------------------------------------------------
+
+Executing the command "ip link show" only shows MAC addresses if they
+are set by the PF. Otherwise, it shows all zeros.
+
+This is expected behavior. The PF driver is passing zeroes to the VF
+driver that the VF driver can generate its own random MAC address and report
+it to the guest OS. Without this feature, some guest operating systems
+will incorrectly assign the VF a new interface name each time they reboot.
+
+
+SSL error (No such file) when installing driver on Ubuntu 14.04
+---------------------------------------------------------------
+When installing the driver on Ubuntu 14.04, you may get an SSL error stating
+"no such file or directory." This issue does not affect driver installation
+or performance and can be ignored.
+
+
+IPv6/UDP checksum offload does not work on some older kernels
+-------------------------------------------------------------
+Some distributions with older kernels do not properly enable IPv6/UDP
+checksum offload. To use IPv6 checksum offload, it may be necessary to
+upgrade to a newer kernel.
 
 
 Poor performance when using VXLAN encapsulation
@@ -1231,8 +1205,9 @@ appears to be the only remedy.
 Rx Page Allocation Errors
 -------------------------
 
-'Page allocation failure. order:0' errors may occur under stress with kernels
-2.6.25 and newer. This is caused by the way the Linux kernel reports this
+'Page allocation failure. order:0' errors may occur under stress.
+with kernels 2.6.25 and newer.
+This is caused by the way the Linux kernel reports this
 stressed condition.
 
 
@@ -1280,15 +1255,21 @@ Intel XL710-based controllers.
 Unable to obtain DHCP lease on boot with RedHat
 -----------------------------------------------
 
-For configurations where the auto-negotiation process takes more than 5
+In configurations where the auto-negotiation process takes more than 5
 seconds, the boot script may fail with the following message:
 "ethX: failed. No link present. Check cable?"
 
-If this error appears even though the presence of a link can be confirmed
-using ethtool ethX, try setting "LINKDELAY=5" in
-/etc/sysconfig/network-scripts/ifcfg-ethX.
+This error may occur even though the presence of link can be confirmed using
+ethtool ethx. In this case, try setting "LINKDELAY=30" in
+/etc/sysconfig/network-scripts/ifdfg-ethx.
 
-NOTE: Link time can take up to 30 seconds. Adjust LINKDELAY value accordingly.
+The same issue can occur during a network boot (via PXE) on RedHat
+distributions that use the dracut script:
+"Warning: No carrier detected on interface <interface_name>"
+
+In this case add "rd.net.timeout.carrier=30" at the kernel command line.
+
+NOTE: Link time can vary. Adjust LINKDELAY value accordingly.
 
 Alternatively, NetworkManager can be used to configure the interfaces, which
 avoids the set timeout. For configuration instructions of NetworkManager
@@ -1344,11 +1325,10 @@ Copyright(c) 2014-2017 Intel Corporation.
 ================================================================================
 
 
-
 Trademarks
 ----------
 
-Intel, Itanium, and Pentium are trademarks or registered trademarks of Intel
+Intel and Itanium are trademarks or registered trademarks of Intel
 Corporation or its subsidiaries in the United States and/or other countries.
 
 * Other names and brands may be claimed as the property of others.

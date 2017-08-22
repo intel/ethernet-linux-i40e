@@ -78,7 +78,7 @@ struct i40e_dma_mem {
 	void *va;
 	dma_addr_t pa;
 	u32 size;
-} __packed;
+};
 
 #define i40e_allocate_dma_mem(h, m, unused, s, a) \
 			i40e_allocate_dma_mem_d(h, m, unused, s, a)
@@ -88,7 +88,7 @@ struct i40e_dma_mem {
 struct i40e_virt_mem {
 	void *va;
 	u32 size;
-} __packed;
+};
 
 #define i40e_allocate_virt_mem(h, m, s) i40e_allocate_virt_mem_d(h, m, s)
 #define i40e_free_virt_mem(h, m) i40e_free_virt_mem_d(h, m)
@@ -138,9 +138,4 @@ static inline void i40e_no_action(struct i40e_spinlock *sp)
 #define i40e_memcpy(a, b, c, d)  memcpy((a), (b), (c))
 
 typedef enum i40e_status_code i40e_status;
-#if defined(CONFIG_FCOE) || defined(CONFIG_FCOE_MODULE)
-#ifdef WITH_FCOE
-#define I40E_FCOE
-#endif
-#endif /* CONFIG_FCOE or CONFIG_FCOE_MODULE */
 #endif /* _I40E_OSDEP_H_ */

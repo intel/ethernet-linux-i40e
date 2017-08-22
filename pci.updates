@@ -107,6 +107,8 @@
 		8086 0003  Ethernet Converged Network Adapter X710-T
 		8086 00a0  Ethernet Converged Network Adapter X710-T4
 	158a  Ethernet Controller XXV710 for 25GbE backplane
+		8086 0000  Ethernet Controller XXV710 for 25GbE backplane
+		8086 000a  Ethernet 25G 2P XXV710 Mezz
 	158b  Ethernet Controller XXV710 for 25GbE SFP28
 		8086 0000  Ethernet Network Adapter XXV710
 		8086 0001  Ethernet Network Adapter XXV710-2
@@ -115,8 +117,8 @@
 		8086 0004  Ethernet Network Adapter XXV710-1
 		8086 0007  Ethernet Network Adapter OCP XXV710-1
 		8086 0008  Ethernet Network Adapter OCP XXV710-1
+		8086 0009  Ethernet 25G 2P XXV710 Adapter
 		8086 4001  Ethernet Network Adapter XXV710-2
-	374c  Ethernet Connection X722 for A0
 	37ce  Ethernet Connection X722 for 10GbE backplane
 		1590 0215  Ethernet 10Gb 2-port 568i Adapter
 		17aa 4023  Ethernet Connection X722 for 10GbE backplane

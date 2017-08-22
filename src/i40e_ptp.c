@@ -173,14 +173,14 @@ static int i40e_ptp_adjtime(struct ptp_clock_info *ptp, s64 delta)
 }
 
 /**
- * i40e_ptp_gettime64 - Get the time of the PHC
+ * i40e_ptp_gettime - Get the time of the PHC
  * @ptp: The PTP clock structure
  * @ts: timespec64 structure to hold the current time value
  *
  * Read the device clock and return the correct value on ns, after converting it
  * into a timespec struct.
  **/
-static int i40e_ptp_gettime64(struct ptp_clock_info *ptp, struct timespec64 *ts)
+static int i40e_ptp_gettime(struct ptp_clock_info *ptp, struct timespec64 *ts)
 {
 	struct i40e_pf *pf = container_of(ptp, struct i40e_pf, ptp_caps);
 
@@ -191,14 +191,14 @@ static int i40e_ptp_gettime64(struct ptp_clock_info *ptp, struct timespec64 *ts)
 }
 
 /**
- * i40e_ptp_settime64 - Set the time of the PHC
+ * i40e_ptp_settime - Set the time of the PHC
  * @ptp: The PTP clock structure
  * @ts: timespec64 structure that holds the new time value
  *
  * Set the device clock to the user input value. The conversion from timespec
  * to ns happens in the write function.
  **/
-static int i40e_ptp_settime64(struct ptp_clock_info *ptp,
+static int i40e_ptp_settime(struct ptp_clock_info *ptp,
 			    const struct timespec64 *ts)
 {
 	struct i40e_pf *pf = container_of(ptp, struct i40e_pf, ptp_caps);
@@ -211,19 +211,19 @@ static int i40e_ptp_settime64(struct ptp_clock_info *ptp,
 
 #ifndef HAVE_PTP_CLOCK_INFO_GETTIME64
 /**
- * i40e_ptp_gettime - Get the time of the PHC
+ * i40e_ptp_gettime32 - Get the time of the PHC
  * @ptp: The PTP clock structure
  * @ts: timespec structure to hold the current time value
  *
  * Read the device clock and return the correct value on ns, after converting it
  * into a timespec struct.
  **/
-static int i40e_ptp_gettime(struct ptp_clock_info *ptp, struct timespec *ts)
+static int i40e_ptp_gettime32(struct ptp_clock_info *ptp, struct timespec *ts)
 {
 	struct timespec64 ts64;
 	int err;
 
-	err = i40e_ptp_gettime64(ptp, &ts64);
+	err = i40e_ptp_gettime(ptp, &ts64);
 	if (err)
 		return err;
 
@@ -232,19 +232,19 @@ static int i40e_ptp_gettime(struct ptp_clock_info *ptp, struct timespec *ts)
 }
 
 /**
- * i40e_ptp_settime - Set the time of the PHC
+ * i40e_ptp_settime32 - Set the time of the PHC
  * @ptp: The PTP clock structure
  * @ts: timespec structure that holds the new time value
  *
  * Set the device clock to the user input value. The conversion from timespec
  * to ns happens in the write function.
  **/
-static int i40e_ptp_settime(struct ptp_clock_info *ptp,
-			    const struct timespec *ts)
+static int i40e_ptp_settime32(struct ptp_clock_info *ptp,
+			      const struct timespec *ts)
 {
 	struct timespec64 ts64 = timespec_to_timespec64(*ts);
 
-	return i40e_ptp_settime64(ptp, &ts64);
+	return i40e_ptp_settime(ptp, &ts64);
 }
 #endif
 
@@ -306,16 +306,15 @@ static u32 i40e_ptp_get_rx_events(struct i40e_pf *pf)
 
 /**
  * i40e_ptp_rx_hang - Detect error case when Rx timestamp registers are hung
- * @vsi: The VSI with the rings relevant to 1588
+ * @pf: The PF private data structure
  *
  * This watchdog task is scheduled to detect error case where hardware has
  * dropped an Rx packet that was timestamped when the ring is full. The
  * particular error is rare but leaves the device in a state unable to timestamp
  * any future packets.
  **/
-void i40e_ptp_rx_hang(struct i40e_vsi *vsi)
+void i40e_ptp_rx_hang(struct i40e_pf *pf)
 {
-	struct i40e_pf *pf = vsi->back;
 	struct i40e_hw *hw = &pf->hw;
 	unsigned int i, cleared = 0;
 
@@ -365,6 +364,36 @@ void i40e_ptp_rx_hang(struct i40e_vsi *vsi)
 }
 
 /**
+ * i40e_ptp_tx_hang - Detect error case when Tx timestamp register is hung
+ * @pf: The PF private data structure
+ *
+ * This watchdog task is run periodically to make sure that we clear the Tx
+ * timestamp logic if we don't obtain a timestamp in a reasonable amount of
+ * time. It is unexpected in the normal case but if it occurs it results in
+ * permanently prevent timestamps of future packets
+ **/
+void i40e_ptp_tx_hang(struct i40e_pf *pf)
+{
+	if (!(pf->flags & I40E_FLAG_PTP) || !pf->ptp_tx)
+		return;
+
+	/* Nothing to do if we're not already waiting for a timestamp */
+	if (!test_bit(__I40E_PTP_TX_IN_PROGRESS, pf->state))
+		return;
+
+	/* We already have a handler routine which is run when we are notified
+	 * of a Tx timestamp in the hardware. If we don't get an interrupt
+	 * within a second it is reasonable to assume that we never will.
+	 */
+	if (time_is_before_jiffies(pf->ptp_tx_start + HZ)) {
+		dev_kfree_skb_any(pf->ptp_tx_skb);
+		pf->ptp_tx_skb = NULL;
+		clear_bit_unlock(__I40E_PTP_TX_IN_PROGRESS, pf->state);
+		pf->tx_hwtstamp_timeouts++;
+	}
+}
+
+/**
  * i40e_ptp_tx_hwtstamp - Utility function which returns the Tx timestamp
  * @pf: Board private structure
  *
@@ -375,6 +404,7 @@ void i40e_ptp_rx_hang(struct i40e_vsi *vsi)
 void i40e_ptp_tx_hwtstamp(struct i40e_pf *pf)
 {
 	struct skb_shared_hwtstamps shhwtstamps;
+	struct sk_buff *skb = pf->ptp_tx_skb;
 	struct i40e_hw *hw = &pf->hw;
 	u32 hi, lo;
 	u64 ns;
@@ -390,12 +420,19 @@ void i40e_ptp_tx_hwtstamp(struct i40e_pf *pf)
 	hi = rd32(hw, I40E_PRTTSYN_TXTIME_H);
 
 	ns = (((u64)hi) << 32) | lo;
-
 	i40e_ptp_convert_to_hwtstamp(&shhwtstamps, ns);
-	skb_tstamp_tx(pf->ptp_tx_skb, &shhwtstamps);
-	dev_kfree_skb_any(pf->ptp_tx_skb);
+
+	/* Clear the bit lock as soon as possible after reading the register,
+	 * and prior to notifying the stack via skb_tstamp_tx(). Otherwise
+	 * applications might wake up and attempt to request another transmit
+	 * timestamp prior to the bit lock being cleared.
+	 */
 	pf->ptp_tx_skb = NULL;
-	clear_bit_unlock(__I40E_PTP_TX_IN_PROGRESS, &pf->state);
+	clear_bit_unlock(__I40E_PTP_TX_IN_PROGRESS, pf->state);
+
+	/* Notify the stack and free the skb after we've unlocked */
+	skb_tstamp_tx(skb, &shhwtstamps);
+	dev_kfree_skb_any(skb);
 }
 
 /**
@@ -474,10 +511,17 @@ void i40e_ptp_set_increment(struct i40e_pf *pf)
 		incval = I40E_PTP_1GB_INCVAL;
 		break;
 	case I40E_LINK_SPEED_100MB:
-		dev_warn(&pf->pdev->dev,
-			 "1588 functionality is not supported at 100 Mbps. Stopping the PHC.\n");
+	{
+		static int warn_once;
+
+		if (!warn_once) {
+			dev_warn(&pf->pdev->dev,
+				 "1588 functionality is not supported at 100 Mbps. Stopping the PHC.\n");
+			warn_once++;
+		}
 		incval = 0;
 		break;
+	}
 	case I40E_LINK_SPEED_40GB:
 	default:
 		incval = I40E_PTP_40GB_INCVAL;
@@ -562,7 +606,7 @@ static int i40e_ptp_set_timestamp_mode(struct i40e_pf *pf,
 	case HWTSTAMP_FILTER_PTP_V1_L4_SYNC:
 	case HWTSTAMP_FILTER_PTP_V1_L4_DELAY_REQ:
 	case HWTSTAMP_FILTER_PTP_V1_L4_EVENT:
-		if (!(pf->flags & I40E_FLAG_PTP_L4_CAPABLE))
+		if (!(pf->hw_features & I40E_HW_PTP_L4_CAPABLE))
 			return -ERANGE;
 		pf->ptp_rx = true;
 		tsyntype = I40E_PRTTSYN_CTL1_V1MESSTYPE0_MASK |
@@ -576,7 +620,7 @@ static int i40e_ptp_set_timestamp_mode(struct i40e_pf *pf,
 	case HWTSTAMP_FILTER_PTP_V2_L4_SYNC:
 	case HWTSTAMP_FILTER_PTP_V2_DELAY_REQ:
 	case HWTSTAMP_FILTER_PTP_V2_L4_DELAY_REQ:
-		if (!(pf->flags & I40E_FLAG_PTP_L4_CAPABLE))
+		if (!(pf->hw_features & I40E_HW_PTP_L4_CAPABLE))
 			return -ERANGE;
 		/* fall through */
 	case HWTSTAMP_FILTER_PTP_V2_L2_EVENT:
@@ -585,13 +629,16 @@ static int i40e_ptp_set_timestamp_mode(struct i40e_pf *pf,
 		pf->ptp_rx = true;
 		tsyntype = I40E_PRTTSYN_CTL1_V2MESSTYPE0_MASK |
 			   I40E_PRTTSYN_CTL1_TSYNTYPE_V2;
-		if (pf->flags & I40E_FLAG_PTP_L4_CAPABLE) {
+		if (pf->hw_features & I40E_HW_PTP_L4_CAPABLE) {
 			tsyntype |= I40E_PRTTSYN_CTL1_UDP_ENA_MASK;
 			config->rx_filter = HWTSTAMP_FILTER_PTP_V2_EVENT;
 		} else {
 			config->rx_filter = HWTSTAMP_FILTER_PTP_V2_L2_EVENT;
 		}
 		break;
+#ifdef HAVE_HWTSTAMP_FILTER_NTP_ALL
+	case HWTSTAMP_FILTER_NTP_ALL:
+#endif /* HAVE_HWTSTAMP_FILTER_NTP_ALL */
 	case HWTSTAMP_FILTER_ALL:
 	default:
 		return -ERANGE;
@@ -699,11 +746,11 @@ static long i40e_ptp_create_clock(struct i40e_pf *pf)
 	pf->ptp_caps.adjfreq = i40e_ptp_adjfreq;
 	pf->ptp_caps.adjtime = i40e_ptp_adjtime;
 #ifdef HAVE_PTP_CLOCK_INFO_GETTIME64
-	pf->ptp_caps.gettime64 = i40e_ptp_gettime64;
-	pf->ptp_caps.settime64 = i40e_ptp_settime64;
+	pf->ptp_caps.gettime64 = i40e_ptp_gettime;
+	pf->ptp_caps.settime64 = i40e_ptp_settime;
 #else
-	pf->ptp_caps.gettime = i40e_ptp_gettime;
-	pf->ptp_caps.settime = i40e_ptp_settime;
+	pf->ptp_caps.gettime = i40e_ptp_gettime32;
+	pf->ptp_caps.settime = i40e_ptp_settime32;
 #endif
 	pf->ptp_caps.enable = i40e_ptp_feature_enable;
 
@@ -780,7 +827,7 @@ void i40e_ptp_init(struct i40e_pf *pf)
 
 		/* Set the clock value. */
 		ts = ktime_to_timespec64(ktime_get_real());
-		i40e_ptp_settime64(&pf->ptp_caps, &ts);
+		i40e_ptp_settime(&pf->ptp_caps, &ts);
 	}
 }
 
@@ -800,7 +847,7 @@ void i40e_ptp_stop(struct i40e_pf *pf)
 	if (pf->ptp_tx_skb) {
 		dev_kfree_skb_any(pf->ptp_tx_skb);
 		pf->ptp_tx_skb = NULL;
-		clear_bit_unlock(__I40E_PTP_TX_IN_PROGRESS, &pf->state);
+		clear_bit_unlock(__I40E_PTP_TX_IN_PROGRESS, pf->state);
 	}
 
 	if (pf->ptp_clock) {
