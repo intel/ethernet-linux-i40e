@@ -35,8 +35,10 @@
 #define I40E_ITR_8K                0x003E
 #define I40E_ITR_4K                0x007A
 #define I40E_MAX_INTRL             0x3B    /* reg uses 4 usec resolution */
-#define I40E_ITR_RX_DEF            I40E_ITR_20K
-#define I40E_ITR_TX_DEF            I40E_ITR_20K
+#define I40E_ITR_RX_DEF            (ITR_REG_TO_USEC(I40E_ITR_20K) | \
+				    I40E_ITR_DYNAMIC)
+#define I40E_ITR_TX_DEF            (ITR_REG_TO_USEC(I40E_ITR_20K) | \
+				    I40E_ITR_DYNAMIC)
 #define I40E_ITR_DYNAMIC           0x8000  /* use top bit as a flag */
 #define I40E_MIN_INT_RATE          250     /* ~= 1000000 / (I40E_MAX_ITR * 2) */
 #define I40E_MAX_INT_RATE          500000  /* == 1000000 / (I40E_MIN_ITR * 2) */
@@ -128,7 +130,11 @@ enum i40e_dyn_idx_t {
  */
 #define I40E_RX_HDR_SIZE I40E_RXBUFFER_256
 #define I40E_PACKET_HDR_PAD (ETH_HLEN + ETH_FCS_LEN + (VLAN_HLEN * 2))
+#ifdef I40E_32BYTE_RX
 #define i40e_rx_desc i40e_32byte_rx_desc
+#else
+#define i40e_rx_desc i40e_16byte_rx_desc
+#endif
 
 #ifdef HAVE_STRUCT_DMA_ATTRS
 #define I40E_RX_DMA_ATTR NULL
@@ -207,7 +213,7 @@ static inline bool i40e_test_staterr(union i40e_rx_desc *rx_desc,
 }
 
 /* How many Rx Buffers do we bundle into one write to the hardware ? */
-#define I40E_RX_BUFFER_WRITE	16	/* Must be power of 2 */
+#define I40E_RX_BUFFER_WRITE	32	/* Must be power of 2 */
 #define I40E_RX_INCREMENT(r, i) \
 	do {					\
 		(i)++;				\
@@ -336,6 +342,7 @@ struct i40e_tx_queue_stats {
 	u64 tx_done_old;
 	u64 tx_linearize;
 	u64 tx_force_wb;
+	int prev_pkt_ctr;
 };
 
 struct i40e_rx_queue_stats {
@@ -494,7 +501,8 @@ void i40e_free_tx_resources(struct i40e_ring *tx_ring);
 void i40e_free_rx_resources(struct i40e_ring *rx_ring);
 int i40e_napi_poll(struct napi_struct *napi, int budget);
 void i40e_force_wb(struct i40e_vsi *vsi, struct i40e_q_vector *q_vector);
-u32 i40e_get_tx_pending(struct i40e_ring *ring);
+u32 i40e_get_tx_pending(struct i40e_ring *ring, bool in_sw);
+void i40e_detect_recover_hung(struct i40e_vsi *vsi);
 int __i40e_maybe_stop_tx(struct i40e_ring *tx_ring, int size);
 bool __i40e_chk_linearize(struct sk_buff *skb);
 

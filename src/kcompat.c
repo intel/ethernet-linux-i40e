@@ -1817,7 +1817,7 @@ int __kc_pci_vfs_assigned(struct pci_dev __maybe_unused *dev)
 
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,12,0) )
-const unsigned char pcie_link_speed[] = {
+static const unsigned char pcie_link_speed[] = {
 	PCI_SPEED_UNKNOWN,      /* 0 */
 	PCIE_SPEED_2_5GT,       /* 1 */
 	PCIE_SPEED_5_0GT,       /* 2 */
@@ -2089,7 +2089,7 @@ void __kc_dev_addr_unsync_dev(struct dev_addr_list **list, int *count,
 #endif /* NETDEV_HW_ADDR_T_MULTICAST  */
 #endif /* HAVE_SET_RX_MODE */
 void *__kc_devm_kmemdup(struct device *dev, const void *src, size_t len,
-			unsigned int gfp)
+			gfp_t gfp)
 {
 	void *p;
 
@@ -2380,4 +2380,23 @@ int _kc_eth_platform_get_mac_address(struct device *dev __maybe_unused,
 #endif
 }
 #endif /* !(RHEL_RELEASE >= 7.3) */
-#endif
+#endif /* < 4.5.0 */
+
+/******************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(4,15,0) )
+#ifdef ETHTOOL_GLINKSETTINGS
+void _kc_ethtool_intersect_link_masks(struct ethtool_link_ksettings *dst,
+				      struct ethtool_link_ksettings *src)
+{
+	unsigned int size = BITS_TO_LONGS(__ETHTOOL_LINK_MODE_MASK_NBITS);
+	unsigned int idx = 0;
+
+	for (; idx < size; idx++) {
+		dst->link_modes.supported[idx] &=
+			src->link_modes.supported[idx];
+		dst->link_modes.advertising[idx] &=
+			src->link_modes.advertising[idx];
+	}
+}
+#endif /* ETHTOOL_GKLINKSETTINGS */
+#endif /* 4.15.0 */

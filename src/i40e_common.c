@@ -275,6 +275,8 @@ const char *i40e_stat_str(struct i40e_hw *hw, i40e_status stat_err)
 		return "I40E_NOT_SUPPORTED";
 	case I40E_ERR_FIRMWARE_API_VERSION:
 		return "I40E_ERR_FIRMWARE_API_VERSION";
+	case I40E_ERR_ADMIN_QUEUE_CRITICAL_ERROR:
+		return "I40E_ERR_ADMIN_QUEUE_CRITICAL_ERROR";
 	}
 
 	snprintf(hw->err_str, sizeof(hw->err_str), "%d", stat_err);
@@ -944,7 +946,8 @@ i40e_status i40e_init_shared_code(struct i40e_hw *hw)
 		hw->pf_id = (u8)(func_rid & 0x7);
 
 	if (hw->mac.type == I40E_MAC_X722)
-		hw->flags |= I40E_HW_FLAG_AQ_SRCTL_ACCESS_ENABLE;
+		hw->flags |= I40E_HW_FLAG_AQ_SRCTL_ACCESS_ENABLE |
+			     I40E_HW_FLAG_NVM_READ_REQUIRES_LOCK;
 
 	status = i40e_init_nvm(hw);
 	return status;
@@ -1462,6 +1465,7 @@ u32 i40e_led_get(struct i40e_hw *hw)
 		case I40E_COMBINED_ACTIVITY:
 		case I40E_FILTER_ACTIVITY:
 		case I40E_MAC_ACTIVITY:
+		case I40E_LINK_ACTIVITY:
 			continue;
 		default:
 			break;
@@ -1510,6 +1514,7 @@ void i40e_led_set(struct i40e_hw *hw, u32 mode, bool blink)
 		case I40E_COMBINED_ACTIVITY:
 		case I40E_FILTER_ACTIVITY:
 		case I40E_MAC_ACTIVITY:
+		case I40E_LINK_ACTIVITY:
 			continue;
 		default:
 			break;
@@ -1519,9 +1524,6 @@ void i40e_led_set(struct i40e_hw *hw, u32 mode, bool blink)
 		/* this & is a bit of paranoia, but serves as a range check */
 		gpio_val |= ((mode << I40E_GLGEN_GPIO_CTL_LED_MODE_SHIFT) &
 			     I40E_GLGEN_GPIO_CTL_LED_MODE_MASK);
-
-		if (mode == I40E_LINK_ACTIVITY)
-			blink = false;
 
 		if (blink)
 			gpio_val |= BIT(I40E_GLGEN_GPIO_CTL_LED_BLINK_SHIFT);
@@ -1552,31 +1554,47 @@ i40e_status i40e_aq_get_phy_capabilities(struct i40e_hw *hw,
 {
 	struct i40e_aq_desc desc;
 	i40e_status status;
+	u16 max_delay = I40E_MAX_PHY_TIMEOUT, total_delay = 0;
 	u16 abilities_size = sizeof(struct i40e_aq_get_phy_abilities_resp);
 
 	if (!abilities)
 		return I40E_ERR_PARAM;
 
-	i40e_fill_default_direct_cmd_desc(&desc,
-					  i40e_aqc_opc_get_phy_abilities);
+	do {
+		i40e_fill_default_direct_cmd_desc(&desc,
+					       i40e_aqc_opc_get_phy_abilities);
 
-	desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_BUF);
-	if (abilities_size > I40E_AQ_LARGE_BUF)
-		desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_LB);
+		desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_BUF);
+		if (abilities_size > I40E_AQ_LARGE_BUF)
+			desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_LB);
 
-	if (qualified_modules)
-		desc.params.external.param0 |=
+		if (qualified_modules)
+			desc.params.external.param0 |=
 			CPU_TO_LE32(I40E_AQ_PHY_REPORT_QUALIFIED_MODULES);
 
-	if (report_init)
-		desc.params.external.param0 |=
+		if (report_init)
+			desc.params.external.param0 |=
 			CPU_TO_LE32(I40E_AQ_PHY_REPORT_INITIAL_VALUES);
 
-	status = i40e_asq_send_command(hw, &desc, abilities, abilities_size,
-				    cmd_details);
+		status = i40e_asq_send_command(hw, &desc, abilities,
+					       abilities_size, cmd_details);
 
-	if (hw->aq.asq_last_status == I40E_AQ_RC_EIO)
-		status = I40E_ERR_UNKNOWN_PHY;
+		if (status != I40E_SUCCESS)
+			break;
+
+		if (hw->aq.asq_last_status == I40E_AQ_RC_EIO) {
+			status = I40E_ERR_UNKNOWN_PHY;
+			break;
+		} else if (hw->aq.asq_last_status == I40E_AQ_RC_EAGAIN) {
+			usleep_range(1000, 2000);
+			total_delay++;
+			status = I40E_ERR_TIMEOUT;
+		}
+	} while ((hw->aq.asq_last_status != I40E_AQ_RC_OK) &&
+		 (total_delay < max_delay));
+
+	if (status != I40E_SUCCESS)
+		return status;
 
 	if (report_init) {
 		if (hw->mac.type ==  I40E_MAC_XL710 &&
@@ -1845,7 +1863,11 @@ i40e_status i40e_aq_get_link_info(struct i40e_hw *hw,
 
 	if (hw->aq.api_maj_ver == I40E_FW_API_VERSION_MAJOR &&
 	    hw->aq.api_min_ver >= 7) {
-		hw->phy.phy_types = LE32_TO_CPU(*(__le32 *)resp->link_type);
+		__le32 tmp;
+
+		i40e_memcpy(&tmp, resp->link_type, sizeof(tmp),
+			    I40E_NONDMA_TO_NONDMA);
+		hw->phy.phy_types = LE32_TO_CPU(tmp);
 		hw->phy.phy_types |= ((u64)resp->link_type_ext << 32);
 	}
 
@@ -3651,13 +3673,14 @@ exit:
  * @length: length of the section to be written (in bytes from the offset)
  * @data: command buffer (size [bytes] = length)
  * @last_command: tells if this is the last command in a series
+ * @preservation_flags: Preservation mode flags
  * @cmd_details: pointer to command details structure or NULL
  *
  * Update the NVM using the admin queue commands
  **/
 i40e_status i40e_aq_update_nvm(struct i40e_hw *hw, u8 module_pointer,
 				u32 offset, u16 length, void *data,
-				bool last_command,
+				bool last_command, u8 preservation_flags,
 				struct i40e_asq_cmd_details *cmd_details)
 {
 	struct i40e_aq_desc desc;
@@ -3676,6 +3699,16 @@ i40e_status i40e_aq_update_nvm(struct i40e_hw *hw, u8 module_pointer,
 	/* If this is the last command in a series, set the proper flag. */
 	if (last_command)
 		cmd->command_flags |= I40E_AQ_NVM_LAST_CMD;
+	if (hw->mac.type == I40E_MAC_X722) {
+		if (preservation_flags == I40E_NVM_PRESERVATION_FLAGS_SELECTED)
+			cmd->command_flags |=
+				(I40E_AQ_NVM_PRESERVATION_FLAGS_SELECTED <<
+				 I40E_AQ_NVM_PRESERVATION_FLAGS_SHIFT);
+		else if (preservation_flags == I40E_NVM_PRESERVATION_FLAGS_ALL)
+			cmd->command_flags |=
+				(I40E_AQ_NVM_PRESERVATION_FLAGS_ALL <<
+				 I40E_AQ_NVM_PRESERVATION_FLAGS_SHIFT);
+	}
 	cmd->module_pointer = module_pointer;
 	cmd->offset = CPU_TO_LE32(offset);
 	cmd->length = CPU_TO_LE16(length);
@@ -3687,6 +3720,25 @@ i40e_status i40e_aq_update_nvm(struct i40e_hw *hw, u8 module_pointer,
 	status = i40e_asq_send_command(hw, &desc, data, length, cmd_details);
 
 i40e_aq_update_nvm_exit:
+	return status;
+}
+
+/**
+ * i40e_aq_nvm_progress
+ * @hw: pointer to the hw struct
+ * @progress: pointer to progress returned from AQ
+ *
+ * Gets progress of flash rearrangement process
+ **/
+i40e_status i40e_aq_nvm_progress(struct i40e_hw *hw, u8 *progress,
+				struct i40e_asq_cmd_details *cmd_details)
+{
+	i40e_status status;
+	struct i40e_aq_desc desc;
+
+	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_nvm_progress);
+	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
+	*progress = desc.params.raw[0];
 	return status;
 }
 
@@ -3854,7 +3906,34 @@ i40e_status i40e_aq_start_lldp(struct i40e_hw *hw,
 	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_lldp_start);
 
 	cmd->command = I40E_AQ_LLDP_AGENT_START;
+	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 
+	return status;
+}
+
+/**
+ * i40e_aq_set_dcb_parameters
+ * @hw: pointer to the hw struct
+ * @cmd_details: pointer to command details structure or NULL
+ * @dcb_enable: True if DCB configuration needs to be applied
+ *
+ **/
+enum i40e_status_code
+i40e_aq_set_dcb_parameters(struct i40e_hw *hw, bool dcb_enable,
+			   struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aq_desc desc;
+	struct i40e_aqc_set_dcb_parameters *cmd =
+		(struct i40e_aqc_set_dcb_parameters *)&desc.params.raw;
+	i40e_status status;
+
+	i40e_fill_default_direct_cmd_desc(&desc,
+					  i40e_aqc_opc_set_dcb_parameters);
+
+	if (dcb_enable) {
+		cmd->valid_flags = I40E_DCB_VALID;
+		cmd->command = I40E_AQ_DCB_SET_AGENT;
+	}
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 
 	return status;
@@ -5429,6 +5508,64 @@ phy_blinking_end:
 }
 
 /**
+ * i40e_led_get_reg - read LED register
+ * @hw: pointer to the HW structure
+ * @led_addr: LED register address
+ * @reg_val: read register value
+ **/
+static i40e_status i40e_led_get_reg(struct i40e_hw *hw, u16 led_addr,
+					      u32 *reg_val)
+{
+	i40e_status status;
+	u8 phy_addr = 0;
+
+	*reg_val = 0;
+	if (hw->flags & I40E_HW_FLAG_AQ_PHY_ACCESS_CAPABLE) {
+		status = i40e_aq_get_phy_register(hw,
+						I40E_AQ_PHY_REG_ACCESS_EXTERNAL,
+						I40E_PHY_COM_REG_PAGE,
+						I40E_PHY_LED_PROV_REG_1,
+						reg_val, NULL);
+	} else {
+		phy_addr = i40e_get_phy_address(hw, hw->port);
+		status = i40e_read_phy_register_clause45(hw,
+							 I40E_PHY_COM_REG_PAGE,
+							 led_addr, phy_addr,
+							 (u16 *)reg_val);
+	}
+	return status;
+}
+
+/**
+ * i40e_led_set_reg - write LED register
+ * @hw: pointer to the HW structure
+ * @led_addr: LED register address
+ * @reg_val: register value to write
+ **/
+static i40e_status i40e_led_set_reg(struct i40e_hw *hw, u16 led_addr,
+					      u32 reg_val)
+{
+	i40e_status status;
+	u8 phy_addr = 0;
+
+	if (hw->flags & I40E_HW_FLAG_AQ_PHY_ACCESS_CAPABLE) {
+		status = i40e_aq_set_phy_register(hw,
+						I40E_AQ_PHY_REG_ACCESS_EXTERNAL,
+						I40E_PHY_COM_REG_PAGE,
+						I40E_PHY_LED_PROV_REG_1,
+						reg_val, NULL);
+	} else {
+		phy_addr = i40e_get_phy_address(hw, hw->port);
+		status = i40e_write_phy_register_clause45(hw,
+							  I40E_PHY_COM_REG_PAGE,
+							  led_addr, phy_addr,
+							  (u16)reg_val);
+	}
+
+	return status;
+}
+
+/**
  * i40e_led_get_phy - return current on/off mode
  * @hw: pointer to the hw struct
  * @led_addr: address of led register to use
@@ -5440,43 +5577,35 @@ i40e_status i40e_led_get_phy(struct i40e_hw *hw, u16 *led_addr,
 {
 	i40e_status status = I40E_SUCCESS;
 	u16 gpio_led_port;
+	u32 reg_val_aq;
+	u16 temp_addr;
 	u8 phy_addr = 0;
 	u16 reg_val;
-	u16 temp_addr;
-	u8 port_num;
-	u32 i;
-	u32 reg_val_aq;
 
 	if (hw->flags & I40E_HW_FLAG_AQ_PHY_ACCESS_CAPABLE) {
-		status =
-		      i40e_aq_get_phy_register(hw,
-					       I40E_AQ_PHY_REG_ACCESS_EXTERNAL,
-					       I40E_PHY_COM_REG_PAGE,
-					       I40E_PHY_LED_PROV_REG_1,
-					       &reg_val_aq, NULL);
-		if (status)
-			return status;
-		*val = (u16)reg_val_aq;
-	} else {
-		temp_addr = I40E_PHY_LED_PROV_REG_1;
-		i = rd32(hw, I40E_PFGEN_PORTNUM);
-		port_num = (u8)(i & I40E_PFGEN_PORTNUM_PORT_NUM_MASK);
-		phy_addr = i40e_get_phy_address(hw, port_num);
-
-		for (gpio_led_port = 0; gpio_led_port < 3; gpio_led_port++,
-		     temp_addr++) {
-			status =
-			 i40e_read_phy_register_clause45(hw,
+		status = i40e_aq_get_phy_register(hw,
+						I40E_AQ_PHY_REG_ACCESS_EXTERNAL,
+						I40E_PHY_COM_REG_PAGE,
+						I40E_PHY_LED_PROV_REG_1,
+						&reg_val_aq, NULL);
+		if (status == I40E_SUCCESS)
+			*val = (u16)reg_val_aq;
+		return status;
+	}
+	temp_addr = I40E_PHY_LED_PROV_REG_1;
+	phy_addr = i40e_get_phy_address(hw, hw->port);
+	for (gpio_led_port = 0; gpio_led_port < 3; gpio_led_port++,
+	     temp_addr++) {
+		status = i40e_read_phy_register_clause45(hw,
 							 I40E_PHY_COM_REG_PAGE,
 							 temp_addr, phy_addr,
 							 &reg_val);
-			if (status)
-				return status;
-			*val = reg_val;
-			if (reg_val & I40E_PHY_LED_LINK_MODE_MASK) {
-				*led_addr = temp_addr;
-				break;
-			}
+		if (status)
+			return status;
+		*val = reg_val;
+		if (reg_val & I40E_PHY_LED_LINK_MODE_MASK) {
+			*led_addr = temp_addr;
+			break;
 		}
 	}
 	return status;
@@ -5496,113 +5625,35 @@ i40e_status i40e_led_set_phy(struct i40e_hw *hw, bool on,
 	i40e_status status = I40E_SUCCESS;
 	u32 led_ctl = 0;
 	u32 led_reg = 0;
-	u8 phy_addr = 0;
-	u8 port_num;
-	u32 i;
 
-	if (hw->flags & I40E_HW_FLAG_AQ_PHY_ACCESS_CAPABLE) {
-		status =
-		      i40e_aq_get_phy_register(hw,
-					       I40E_AQ_PHY_REG_ACCESS_EXTERNAL,
-					       I40E_PHY_COM_REG_PAGE,
-					       I40E_PHY_LED_PROV_REG_1,
-					       &led_reg, NULL);
-	} else {
-		i = rd32(hw, I40E_PFGEN_PORTNUM);
-		port_num = (u8)(i & I40E_PFGEN_PORTNUM_PORT_NUM_MASK);
-		phy_addr = i40e_get_phy_address(hw, port_num);
-		status = i40e_read_phy_register_clause45(hw,
-							 I40E_PHY_COM_REG_PAGE,
-							 led_addr, phy_addr,
-							 (u16 *)&led_reg);
-	}
+	status = i40e_led_get_reg(hw, led_addr, &led_reg);
 	if (status)
 		return status;
 	led_ctl = led_reg;
 	if (led_reg & I40E_PHY_LED_LINK_MODE_MASK) {
 		led_reg = 0;
-		if (hw->aq.api_maj_ver == I40E_FW_API_VERSION_MAJOR &&
-		    hw->aq.api_min_ver >= I40E_MINOR_VER_GET_LINK_INFO_XL710) {
-			status = i40e_aq_set_phy_register(hw,
-					I40E_AQ_PHY_REG_ACCESS_EXTERNAL,
-					I40E_PHY_COM_REG_PAGE,
-					I40E_PHY_LED_PROV_REG_1,
-					led_reg, NULL);
-		} else {
-			status = i40e_write_phy_register_clause45(hw,
-							I40E_PHY_COM_REG_PAGE,
-							led_addr, phy_addr,
-							(u16)led_reg);
-		}
+		status = i40e_led_set_reg(hw, led_addr, led_reg);
 		if (status)
 			return status;
 	}
-	if (hw->flags & I40E_HW_FLAG_AQ_PHY_ACCESS_CAPABLE) {
-		status =
-		      i40e_aq_get_phy_register(hw,
-					       I40E_AQ_PHY_REG_ACCESS_EXTERNAL,
-					       I40E_PHY_COM_REG_PAGE,
-					       I40E_PHY_LED_PROV_REG_1,
-					       &led_reg, NULL);
-	} else {
-		status = i40e_read_phy_register_clause45(hw,
-							 I40E_PHY_COM_REG_PAGE,
-							 led_addr, phy_addr,
-							 (u16 *)&led_reg);
-	}
+	status = i40e_led_get_reg(hw, led_addr, &led_reg);
 	if (status)
 		goto restore_config;
 	if (on)
 		led_reg = I40E_PHY_LED_MANUAL_ON;
 	else
 		led_reg = 0;
-
-	if (hw->flags & I40E_HW_FLAG_AQ_PHY_ACCESS_CAPABLE) {
-		status =
-		      i40e_aq_set_phy_register(hw,
-					       I40E_AQ_PHY_REG_ACCESS_EXTERNAL,
-					       I40E_PHY_COM_REG_PAGE,
-					       I40E_PHY_LED_PROV_REG_1,
-					       led_reg, NULL);
-	} else {
-		status =
-		    i40e_write_phy_register_clause45(hw, I40E_PHY_COM_REG_PAGE,
-						     led_addr, phy_addr,
-						     (u16)led_reg);
-	}
+	status = i40e_led_set_reg(hw, led_addr, led_reg);
 	if (status)
 		goto restore_config;
 	if (mode & I40E_PHY_LED_MODE_ORIG) {
 		led_ctl = (mode & I40E_PHY_LED_MODE_MASK);
-		if (hw->flags & I40E_HW_FLAG_AQ_PHY_ACCESS_CAPABLE) {
-			status = i40e_aq_set_phy_register(hw,
-					I40E_AQ_PHY_REG_ACCESS_EXTERNAL,
-					I40E_PHY_COM_REG_PAGE,
-					I40E_PHY_LED_PROV_REG_1,
-					led_ctl, NULL);
-		} else {
-			status = i40e_write_phy_register_clause45(hw,
-							 I40E_PHY_COM_REG_PAGE,
-							 led_addr, phy_addr,
-							 (u16)led_ctl);
-		}
+		status = i40e_led_set_reg(hw, led_addr, led_ctl);
 	}
 	return status;
+
 restore_config:
-	if (hw->flags & I40E_HW_FLAG_AQ_PHY_ACCESS_CAPABLE) {
-		status =
-		      i40e_aq_set_phy_register(hw,
-					       I40E_AQ_PHY_REG_ACCESS_EXTERNAL,
-					       I40E_PHY_COM_REG_PAGE,
-					       I40E_PHY_LED_PROV_REG_1,
-					       led_ctl, NULL);
-	} else {
-		status =
-			i40e_write_phy_register_clause45(hw,
-							 I40E_PHY_COM_REG_PAGE,
-							 led_addr, phy_addr,
-							 (u16)led_ctl);
-	}
+	status = i40e_led_set_reg(hw, led_addr, led_ctl);
 	return status;
 }
 
@@ -5758,8 +5809,8 @@ i40e_status i40e_aq_set_phy_register(struct i40e_hw *hw,
 
 	cmd->phy_interface = phy_select;
 	cmd->dev_addres = dev_addr;
-	cmd->reg_address = reg_addr;
-	cmd->reg_value = reg_val;
+	cmd->reg_address = CPU_TO_LE32(reg_addr);
+	cmd->reg_value = CPU_TO_LE32(reg_val);
 
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 
@@ -5792,11 +5843,11 @@ i40e_status i40e_aq_get_phy_register(struct i40e_hw *hw,
 
 	cmd->phy_interface = phy_select;
 	cmd->dev_addres = dev_addr;
-	cmd->reg_address = reg_addr;
+	cmd->reg_address = CPU_TO_LE32(reg_addr);
 
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 	if (!status)
-		*reg_val = cmd->reg_value;
+		*reg_val = LE32_TO_CPU(cmd->reg_value);
 
 	return status;
 }

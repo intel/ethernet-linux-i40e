@@ -584,6 +584,15 @@ static void i40e_dbg_dump_aq_desc(struct i40e_pf *pf)
 	}
 }
 
+/* Helper macros for printing upper half of the 32byte descriptor. */
+#ifdef I40E_32BYTE_RX
+#define RXD_RSVD1(_rxd) ((_rxd)->read.rsvd1)
+#define RXD_RSVD2(_rxd) ((_rxd)->read.rsvd2)
+#else
+#define RXD_RSVD1(_rxd) 0ULL
+#define RXD_RSVD2(_rxd) 0ULL
+#endif
+
 /**
  * i40e_dbg_dump_desc - handles dump desc write into command datum
  * @cnt: number of arguments that the user supplied
@@ -644,7 +653,7 @@ static void i40e_dbg_dump_desc(int cnt, int vsi_seid, int ring_id, int desc_n,
 					 "   d[%03x] = 0x%016llx 0x%016llx 0x%016llx 0x%016llx\n",
 					 i, rxd->read.pkt_addr,
 					 rxd->read.hdr_addr,
-					 rxd->read.rsvd1, rxd->read.rsvd2);
+					 RXD_RSVD1(rxd), RXD_RSVD2(rxd));
 			}
 		}
 	} else if (cnt == 3) {
@@ -665,7 +674,7 @@ static void i40e_dbg_dump_desc(int cnt, int vsi_seid, int ring_id, int desc_n,
 				 "vsi = %02i rx ring = %02i d[%03x] = 0x%016llx 0x%016llx 0x%016llx 0x%016llx\n",
 				 vsi_seid, ring_id, desc_n,
 				 rxd->read.pkt_addr, rxd->read.hdr_addr,
-				 rxd->read.rsvd1, rxd->read.rsvd2);
+				 RXD_RSVD1(rxd), RXD_RSVD2(rxd));
 		}
 	} else {
 		dev_info(&pf->pdev->dev, "dump desc rx/tx <vsi_seid> <ring_id> [<desc_n>]\n");
@@ -2069,7 +2078,7 @@ static ssize_t i40e_dbg_command_write(struct file *filp,
 		aq_status = i40e_aq_update_nvm(&pf->hw,
 					       I40E_SR_NVM_CONTROL_WORD,
 					       0x10, sizeof(nvm_word),
-					       &nvm_word, true, NULL);
+					       &nvm_word, true, 0, NULL);
 		/* Save off last admin queue command status before releasing
 		 * the NVM
 		 */

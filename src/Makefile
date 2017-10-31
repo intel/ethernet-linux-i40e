@@ -54,14 +54,16 @@ else	# ifneq($(KERNELRELEASE),)
 
 DRIVER := i40e
 
-ifeq (,$(wildcard common.mk))
-  $(error Cannot find common.mk build rules)
-else
-  include common.mk
-endif
+# If the user just wants to print the help output, don't include common.mk or
+# perform any other checks. This ensures that running "make help" will always
+# work even if kernel-devel is not installed, or if the common.mk fails under
+# any other error condition.
+ifneq ($(MAKECMDGOALS),help)
+include common.mk
 
 # i40e does not support building on kernels older than 2.6.32
 $(call minimum_kver_check,2,6,32)
+endif
 
 ###############
 # Build rules #

@@ -134,6 +134,10 @@ static const struct i40e_stats i40e_gstrings_stats[] = {
 	I40E_PF_STAT("link_xoff_rx", stats.link_xoff_rx),
 	I40E_PF_STAT("link_xon_tx", stats.link_xon_tx),
 	I40E_PF_STAT("link_xoff_tx", stats.link_xoff_tx),
+	I40E_PF_STAT("priority_xon_rx", stats.priority_xon_rx),
+	I40E_PF_STAT("priority_xoff_rx", stats.priority_xoff_rx),
+	I40E_PF_STAT("priority_xon_tx", stats.priority_xon_tx),
+	I40E_PF_STAT("priority_xoff_tx", stats.priority_xoff_tx),
 	I40E_PF_STAT("rx_size_64", stats.rx_size_64),
 	I40E_PF_STAT("rx_size_127", stats.rx_size_127),
 	I40E_PF_STAT("rx_size_255", stats.rx_size_255),
@@ -175,8 +179,6 @@ static const struct i40e_stats i40e_gstrings_stats[] = {
 	I40E_PF_STAT("rx_udp_cso", rx_udp_cso),
 	I40E_PF_STAT("rx_sctp_cso", rx_sctp_cso),
 	I40E_PF_STAT("rx_ip4_cso", rx_ip4_cso),
-	I40E_PF_STAT("rx_csum_offload_vxlan", hw_csum_rx_vxlan),
-	I40E_PF_STAT("rx_csum_offload_geneve", hw_csum_rx_geneve),
 	I40E_PF_STAT("rx_csum_offload_outer", hw_csum_rx_outer),
 	I40E_PF_STAT("rx_tcp_cso_error", rx_tcp_cso_err),
 	I40E_PF_STAT("rx_udp_cso_error", rx_udp_cso_err),
@@ -267,6 +269,7 @@ static const struct i40e_priv_flags i40e_gstrings_priv_flags[] = {
 #endif
 	I40E_PRIV_FLAG("disable-source-pruning",
 		       I40E_FLAG_SOURCE_PRUNING_DISABLED, 0),
+	I40E_PRIV_FLAG("disable-fw-lldp", I40E_FLAG_DISABLE_FW_LLDP, 0),
 };
 
 #define I40E_PRIV_FLAGS_STR_LEN ARRAY_SIZE(i40e_gstrings_priv_flags)
@@ -280,6 +283,111 @@ static const struct i40e_priv_flags i40e_gl_gstrings_priv_flags[] = {
 #define I40E_GL_PRIV_FLAGS_STR_LEN ARRAY_SIZE(i40e_gl_gstrings_priv_flags)
 
 #endif /* HAVE_ETHTOOL_GET_SSET_COUNT */
+#ifdef ETHTOOL_GLINKSETTINGS
+#define I40E_ETHTOOL_LINK_MASK_SIZE \
+	BITS_TO_LONGS(__ETHTOOL_LINK_MODE_MASK_NBITS)
+
+#else /* ETHTOOL_GLINKSETTINGS */
+#define I40E_ETHTOOL_LINK_MASK_SIZE 1
+/**
+ * struct ethtool_link_ksettings
+ * @link_modes: supported and advertising, single item arrays
+ *
+ * This struct and the following macros provide a way to support the old
+ * ethtool get/set_settings API on older kernels, but in the style of the new
+ * GLINKSETTINGS API.  In this way, the same code can be used to support both
+ * APIs as seemlessly as possible.
+ *
+ * It should be noted the old API only has support up to the first 32 bits.
+ */
+struct ethtool_link_ksettings {
+	struct {
+		unsigned long supported[I40E_ETHTOOL_LINK_MASK_SIZE];
+		unsigned long advertising[I40E_ETHTOOL_LINK_MASK_SIZE];
+	} link_modes;
+};
+
+#define ETHTOOL_LINK_NAME_advertising(mode) ADVERTISED_ ## mode
+#define ETHTOOL_LINK_NAME_supported(mode) SUPPORTED_ ## mode
+#define ETHTOOL_LINK_NAME(name) ETHTOOL_LINK_NAME_ ## name
+#define ETHTOOL_LINK_CONVERT(name, mode)				\
+	ETHTOOL_LINK_NAME(name)(mode)
+
+/**
+ * ethtool_link_ksettings_zero_link_mode
+ * @ptr: ptr to ksettings struct
+ * @name: supported or advertising
+ */
+#define ethtool_link_ksettings_zero_link_mode(ptr, name)		\
+	(*((ptr)->link_modes.name) = 0x0)
+
+/**
+ * ethtool_link_ksettings_add_link_mode
+ * @ptr: ptr to ksettings struct
+ * @name: supported or advertising
+ * @mode: link mode to add
+ */
+#define ethtool_link_ksettings_add_link_mode(ptr, name, mode)		\
+	(*((ptr)->link_modes.name) |= ETHTOOL_LINK_CONVERT(name, mode))
+
+/**
+ * ethtool_link_ksettings_test_link_mode
+ * @ptr: ptr to ksettings struct
+ * @name: supported or advertising
+ * @mode: link mode to add
+ */
+#define ethtool_link_ksettings_test_link_mode(ptr, name, mode)		\
+	(!!(*((ptr)->link_modes.name) & ETHTOOL_LINK_CONVERT(name, mode)))
+
+/**
+ * i40e_ethtool_cmd_to_ksettings
+ * @cmd: ethtool_cmd struct
+ * @ks: ethtool_link_ksettings struct
+ *
+ * Convert ethtool_cmd to ethtool_link_ksettings
+ */
+static void i40e_ethtool_cmd_to_ksettings(struct ethtool_cmd *cmd,
+					  struct ethtool_link_ksettings *ks)
+{
+	ks->link_modes.supported[0] = cmd->supported;
+	ks->link_modes.advertising[0] = cmd->advertising;
+}
+
+/**
+ * i40e_ethtool_ksettings_to_cmd
+ * @ks: ethtool_link_ksettings struct
+ * @cmd: ethtool_cmd struct
+ *
+ * Convert a ethtool_link_ksettings to a ethtool_cmd
+ */
+static void i40e_ethtool_ksettings_to_cmd(struct ethtool_link_ksettings *ks,
+					  struct ethtool_cmd *cmd)
+{
+	cmd->supported = (u32)ks->link_modes.supported[0];
+	cmd->advertising = (u32)ks->link_modes.advertising[0];
+}
+
+#endif /* ETHTOOL_GLINKSETTINGS */
+/**
+ * i40e_intersect_link_mode_masks
+ * @dst: resulting intersection and first mask
+ * @src: mask to AND with
+ *
+ * Given two link mode masks, AND them together and save the result in dst.
+ */
+static void i40e_intersect_link_masks(struct ethtool_link_ksettings *dst,
+				      struct ethtool_link_ksettings *src)
+{
+	int idx = 0;
+
+	for (; idx < I40E_ETHTOOL_LINK_MASK_SIZE; idx++) {
+		dst->link_modes.supported[idx] &=
+			src->link_modes.supported[idx];
+		dst->link_modes.advertising[idx] &=
+			src->link_modes.advertising[idx];
+	}
+}
+
 /**
  * i40e_partition_setting_complaint - generic complaint for MFP restriction
  * @pf: the PF struct
@@ -292,29 +400,30 @@ static void i40e_partition_setting_complaint(struct i40e_pf *pf)
 
 /**
  * i40e_phy_type_to_ethtool - convert the phy_types to ethtool link modes
- * @phy_types: phy types to convert
- * @supported: pointer to the ethtool supported variable to fill in
- * @advertising: pointer to the ethtool advertising variable to fill in
+ * @pf: PF struct with phy_types
+ * @ks: ethtool link ksettings struct to fill out
  *
  **/
-static void i40e_phy_type_to_ethtool(struct i40e_pf *pf, u32 *supported,
-				     u32 *advertising)
+static void i40e_phy_type_to_ethtool(struct i40e_pf *pf,
+				     struct ethtool_link_ksettings *ks)
 {
 	struct i40e_link_status *hw_link_info = &pf->hw.phy.link_info;
 	u64 phy_types = pf->hw.phy.phy_types;
 
-	*supported = 0x0;
-	*advertising = 0x0;
+	ethtool_link_ksettings_zero_link_mode(ks, supported);
+	ethtool_link_ksettings_zero_link_mode(ks, advertising);
 
 	if (phy_types & I40E_CAP_PHY_TYPE_SGMII) {
-		*supported |= SUPPORTED_Autoneg |
-			     SUPPORTED_1000baseT_Full;
-		*advertising |= ADVERTISED_Autoneg;
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     1000baseT_Full);
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
-			*advertising |= ADVERTISED_1000baseT_Full;
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     1000baseT_Full);
 		if (pf->hw_features & I40E_HW_100M_SGMII_CAPABLE) {
-			*supported |= SUPPORTED_100baseT_Full;
-			*advertising |= ADVERTISED_100baseT_Full;
+			ethtool_link_ksettings_add_link_mode(ks, supported,
+							     100baseT_Full);
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     100baseT_Full);
 		}
 	}
 	if (phy_types & I40E_CAP_PHY_TYPE_XAUI ||
@@ -322,122 +431,224 @@ static void i40e_phy_type_to_ethtool(struct i40e_pf *pf, u32 *supported,
 	    phy_types & I40E_CAP_PHY_TYPE_SFI ||
 	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_SFPP_CU ||
 	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_AOC) {
-		*supported |= SUPPORTED_10000baseT_Full;
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB) {
-			*advertising |= ADVERTISED_10000baseT_Full;
-		}
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     10000baseT_Full);
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     10000baseT_Full);
 	}
 	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_T) {
-		*supported |= SUPPORTED_Autoneg |
-			     SUPPORTED_10000baseT_Full;
-		*advertising |= ADVERTISED_Autoneg;
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     10000baseT_Full);
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
-			*advertising |= ADVERTISED_10000baseT_Full;
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     10000baseT_Full);
 	}
 	if (phy_types & I40E_CAP_PHY_TYPE_XLAUI ||
 	    phy_types & I40E_CAP_PHY_TYPE_XLPPI ||
 	    phy_types & I40E_CAP_PHY_TYPE_40GBASE_AOC)
-		*supported |= SUPPORTED_40000baseCR4_Full;
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     40000baseCR4_Full);
 	if (phy_types & I40E_CAP_PHY_TYPE_40GBASE_CR4_CU ||
 	    phy_types & I40E_CAP_PHY_TYPE_40GBASE_CR4) {
-		*supported |= SUPPORTED_Autoneg |
-			     SUPPORTED_40000baseCR4_Full;
-		*advertising |= ADVERTISED_Autoneg;
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     40000baseCR4_Full);
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_40GB)
-			*advertising |= ADVERTISED_40000baseCR4_Full;
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     40000baseCR4_Full);
 	}
 	if (phy_types & I40E_CAP_PHY_TYPE_100BASE_TX) {
-		*supported |= SUPPORTED_Autoneg |
-			     SUPPORTED_100baseT_Full;
-		*advertising |= ADVERTISED_Autoneg;
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     100baseT_Full);
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_100MB)
-			*advertising |= ADVERTISED_100baseT_Full;
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     100baseT_Full);
 	}
 	if (phy_types & I40E_CAP_PHY_TYPE_1000BASE_T) {
-		*supported |= SUPPORTED_Autoneg |
-			     SUPPORTED_1000baseT_Full;
-		*advertising |= ADVERTISED_Autoneg;
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     1000baseT_Full);
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
-			*advertising |= ADVERTISED_1000baseT_Full;
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     1000baseT_Full);
 	}
 	if (phy_types & I40E_CAP_PHY_TYPE_40GBASE_SR4)
-		*supported |= SUPPORTED_40000baseSR4_Full;
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     40000baseSR4_Full);
 	if (phy_types & I40E_CAP_PHY_TYPE_40GBASE_LR4)
-		*supported |= SUPPORTED_40000baseLR4_Full;
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     40000baseLR4_Full);
 	if (phy_types & I40E_CAP_PHY_TYPE_40GBASE_KR4) {
-		*supported |= SUPPORTED_40000baseKR4_Full |
-			     SUPPORTED_Autoneg;
-		*advertising |= ADVERTISED_40000baseKR4_Full |
-			       ADVERTISED_Autoneg;
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     40000baseLR4_Full);
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     40000baseLR4_Full);
 	}
 	if (phy_types & I40E_CAP_PHY_TYPE_20GBASE_KR2) {
-		*supported |= SUPPORTED_20000baseKR2_Full |
-			     SUPPORTED_Autoneg;
-		*advertising |= ADVERTISED_Autoneg;
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     20000baseKR2_Full);
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_20GB)
-			*advertising |= ADVERTISED_20000baseKR2_Full;
-	}
-	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_KR) {
-		if (!(pf->hw_features & I40E_HW_HAVE_CRT_RETIMER))
-			*supported |= SUPPORTED_10000baseKR_Full |
-				      SUPPORTED_Autoneg;
-		*advertising |= ADVERTISED_Autoneg;
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
-			if (!(pf->hw_features & I40E_HW_HAVE_CRT_RETIMER))
-				*advertising |= ADVERTISED_10000baseKR_Full;
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     20000baseKR2_Full);
 	}
 	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_KX4) {
-		*supported |= SUPPORTED_10000baseKX4_Full |
-			     SUPPORTED_Autoneg;
-		*advertising |= ADVERTISED_Autoneg;
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     10000baseKX4_Full);
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
-			*advertising |= ADVERTISED_10000baseKX4_Full;
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     10000baseKX4_Full);
 	}
-	if (phy_types & I40E_CAP_PHY_TYPE_1000BASE_KX) {
-		if (!(pf->hw_features & I40E_HW_HAVE_CRT_RETIMER))
-			*supported |= SUPPORTED_1000baseKX_Full |
-				      SUPPORTED_Autoneg;
-		*advertising |= ADVERTISED_Autoneg;
+	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_KR &&
+	    !(pf->hw_features & I40E_HW_HAVE_CRT_RETIMER)) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     10000baseKR_Full);
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     10000baseKR_Full);
+	}
+	if (phy_types & I40E_CAP_PHY_TYPE_1000BASE_KX &&
+	    !(pf->hw_features & I40E_HW_HAVE_CRT_RETIMER)) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     1000baseKX_Full);
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
-			if (!(pf->hw_features & I40E_HW_HAVE_CRT_RETIMER))
-				*advertising |= ADVERTISED_1000baseKX_Full;
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     1000baseKX_Full);
 	}
-	/* Older kernels, that do not use ETHTOOL_GLINKSETTINGS should at least
-	 * report Autoneg capability
-	 */
-	if (phy_types & I40E_CAP_PHY_TYPE_25GBASE_KR ||
-	    phy_types & I40E_CAP_PHY_TYPE_25GBASE_CR ||
-	    phy_types & I40E_CAP_PHY_TYPE_25GBASE_SR ||
-	    phy_types & I40E_CAP_PHY_TYPE_25GBASE_LR ||
-	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_SR ||
-	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_LR ||
-	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1 ||
-	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1_CU ||
-	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_SX ||
+#ifdef HAVE_ETHTOOL_25G_BITS
+	/* need to add 25G PHY types */
+	if (phy_types & I40E_CAP_PHY_TYPE_25GBASE_KR) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     25000baseKR_Full);
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_25GB)
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     25000baseKR_Full);
+	}
+	if (phy_types & I40E_CAP_PHY_TYPE_25GBASE_CR) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     25000baseCR_Full);
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_25GB)
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     25000baseCR_Full);
+	}
+	if (phy_types & I40E_CAP_PHY_TYPE_25GBASE_SR ||
+	    phy_types & I40E_CAP_PHY_TYPE_25GBASE_LR) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     25000baseSR_Full);
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_25GB)
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     25000baseSR_Full);
+	}
+	if (phy_types & I40E_CAP_PHY_TYPE_25GBASE_AOC ||
+	    phy_types & I40E_CAP_PHY_TYPE_25GBASE_ACC) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     25000baseCR_Full);
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_25GB)
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     25000baseCR_Full);
+	}
+#endif /* HAVE_ETHTOOL_25G_BITS */
+#ifdef HAVE_ETHTOOL_NEW_10G_BITS
+	/* need to add new 10G PHY types */
+	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1 ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1_CU) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     10000baseCR_Full);
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     10000baseCR_Full);
+	}
+	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_SR) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     10000baseSR_Full);
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     10000baseSR_Full);
+	}
+	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_LR) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     10000baseLR_Full);
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     10000baseLR_Full);
+	}
+	if (phy_types & I40E_CAP_PHY_TYPE_1000BASE_SX ||
 	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_LX ||
 	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_T_OPTICAL) {
-		*supported |= SUPPORTED_Autoneg;
-		*advertising |= ADVERTISED_Autoneg;
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     1000baseX_Full);
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     1000baseX_Full);
+	}
+#else
+	/* need to keep backward compatibility with older kernels */
+	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1 ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1_CU ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_SR ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_LR) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     10000baseT_Full);
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     10000baseT_Full);
+	}
+	if (phy_types & I40E_CAP_PHY_TYPE_1000BASE_SX ||
+	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_LX ||
+	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_T_OPTICAL) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     1000baseT_Full);
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     1000baseT_Full);
+	}
+#endif /* HAVE_ETHTOOL_NEW_10G_BITS */
+	/* Autoneg PHY types */
+	if (phy_types & I40E_CAP_PHY_TYPE_SGMII ||
+	    phy_types & I40E_CAP_PHY_TYPE_40GBASE_KR4 ||
+	    phy_types & I40E_CAP_PHY_TYPE_40GBASE_CR4_CU ||
+	    phy_types & I40E_CAP_PHY_TYPE_40GBASE_CR4 ||
+	    phy_types & I40E_CAP_PHY_TYPE_25GBASE_SR ||
+	    phy_types & I40E_CAP_PHY_TYPE_25GBASE_LR ||
+	    phy_types & I40E_CAP_PHY_TYPE_25GBASE_KR ||
+	    phy_types & I40E_CAP_PHY_TYPE_25GBASE_CR ||
+	    phy_types & I40E_CAP_PHY_TYPE_20GBASE_KR2 ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_T ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_SR ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_LR ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_KX4 ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_KR ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1_CU ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1 ||
+	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_T_OPTICAL ||
+	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_T ||
+	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_SX ||
+	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_LX ||
+	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_KX ||
+	    phy_types & I40E_CAP_PHY_TYPE_100BASE_TX) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     Autoneg);
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     Autoneg);
 	}
 }
 
+#ifndef ETHTOOL_GLINKSETTINGS
 /**
- * i40e_get_settings_link_up - Get the Link settings for when link is up
+ * i40e_get_legacy_settings_link_up - Get the Link settings for when link is up
  * @hw: hw structure
  * @ecmd: ethtool command to fill in
  * @netdev: network interface device structure
  *
  * Reports link settings that can be determined when link is up
  **/
-static void i40e_get_settings_link_up(struct i40e_hw *hw,
+static
+void i40e_get_legacy_settings_link_up(struct i40e_hw *hw,
 				      struct ethtool_cmd *ecmd,
 				      struct net_device *netdev,
 				      struct i40e_pf *pf)
 {
 	struct i40e_link_status *hw_link_info = &hw->phy.link_info;
 	u32 link_speed = hw_link_info->link_speed;
-	u32 e_advertising = 0x0;
-	u32 e_supported = 0x0;
+	struct ethtool_link_ksettings ks, cap_ks;
 
 	/* Initialize supported and advertised settings based on phy settings */
 	switch (hw_link_info->phy_type) {
@@ -555,12 +766,15 @@ static void i40e_get_settings_link_up(struct i40e_hw *hw,
 	/* Now that we've worked out everything that could be supported by the
 	 * current phy type, get what is supported by the NVM and and them to
 	 * get what is truly supported
+	 *
+	 * i40e_phy_type_to_ethtool uses the new API ethtool_link_ksettings
+	 * struct, so we need to convert ecmd to a ksettings to intersect them,
+	 * then convert back to legacy ethtool_cmd.
 	 */
-	i40e_phy_type_to_ethtool(pf, &e_supported,
-				 &e_advertising);
-
-	ecmd->supported = ecmd->supported & e_supported;
-	ecmd->advertising = ecmd->advertising & e_advertising;
+	i40e_ethtool_cmd_to_ksettings(ecmd, &ks);
+	i40e_phy_type_to_ethtool(pf, &cap_ks);
+	i40e_intersect_link_masks(&ks, &cap_ks);
+	i40e_ethtool_ksettings_to_cmd(&ks, ecmd);
 
 	/* Set speed and duplex */
 	switch (link_speed) {
@@ -594,21 +808,24 @@ static void i40e_get_settings_link_up(struct i40e_hw *hw,
 }
 
 /**
- * i40e_get_settings_link_down - Get the Link settings for when link is down
+ * i40e_get_legacy_settings_link_down - Get the Link settings when link is down
  * @hw: hw structure
  * @ecmd: ethtool command to fill in
  *
  * Reports link settings that can be determined when link is down
  **/
-static void i40e_get_settings_link_down(struct i40e_hw *hw,
+static
+void i40e_get_legacy_settings_link_down(struct i40e_hw *hw,
 					struct ethtool_cmd *ecmd,
 					struct i40e_pf *pf)
 {
+	struct ethtool_link_ksettings ks;
+
 	/* link is down and the driver needs to fall back on
 	 * supported phy types to figure out what info to display
 	 */
-	i40e_phy_type_to_ethtool(pf, &ecmd->supported,
-				 &ecmd->advertising);
+	i40e_phy_type_to_ethtool(pf, &ks);
+	i40e_ethtool_ksettings_to_cmd(&ks, ecmd);
 
 	/* With no link speed and duplex are unknown */
 	ethtool_cmd_speed_set(ecmd, SPEED_UNKNOWN);
@@ -632,9 +849,9 @@ static int i40e_get_settings(struct net_device *netdev,
 	bool link_up = hw_link_info->link_info & I40E_AQ_LINK_UP;
 
 	if (link_up)
-		i40e_get_settings_link_up(hw, ecmd, netdev, pf);
+		i40e_get_legacy_settings_link_up(hw, ecmd, netdev, pf);
 	else
-		i40e_get_settings_link_down(hw, ecmd, pf);
+		i40e_get_legacy_settings_link_down(hw, ecmd, pf);
 
 	/* Now set the settings that don't rely on link being up/down */
 	/* Set autoneg settings */
@@ -919,156 +1136,22 @@ done:
 	return err;
 }
 
-#ifdef ETHTOOL_GLINKSETTINGS
-#define ETHTOOL_LINK_MODE_MASK_U32  \
-	DIV_ROUND_UP(__ETHTOOL_LINK_MODE_MASK_NBITS, 32)
-
+#else /* ETHTOOL_GLINKSETTINGS */
 /**
- * ethtool_link_ksettings_clear_link_mode - unset a bit in link_ksettings
- * link mode mask
- *   @ptr : pointer to ethtool_link_ksettings
- *   @name : one of supported, advertising or lp_advertising
- *   @mode : one of ETHTOOL_LINK_MODE_*_BIT
- * (not atomic and no bounds checking)
- **/
-#define ethtool_link_ksettings_clear_link_mode(ptr, name, mode)           \
-	__clear_bit(ETHTOOL_LINK_MODE_ ## mode ## _BIT, (ptr)->link_modes.name)
-
-/**
- * i40e_get_link_settings_link_down - Get the Link settings when link is down
+ * i40e_get_settings_link_up - Get Link settings for when link is up
  * @hw: hw structure
- * @ksettings: ethtool command to fill in
- * @pf: pointer to physical function struct
- *
- * Reports link settings that can be determined when link is down
- **/
-static void i40e_get_link_settings_link_down(struct i40e_hw *hw,
-				       struct ethtool_link_ksettings *ksettings,
-				       struct i40e_pf *pf)
-{
-	struct i40e_link_status *hw_link_info = &pf->hw.phy.link_info;
-	u64 phy_types = pf->hw.phy.phy_types;
-
-	i40e_phy_type_to_ethtool(pf, (u32 *)&ksettings->link_modes.supported[0],
-				 (u32 *)&ksettings->link_modes.advertising[0]);
-#ifdef HAVE_ETHTOOL_25G_BITS
-	/* need to add 25G PHY types */
-	if (phy_types & I40E_CAP_PHY_TYPE_25GBASE_KR) {
-		ethtool_link_ksettings_add_link_mode(ksettings, supported,
-						     25000baseKR_Full);
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_25GB)
-			ethtool_link_ksettings_add_link_mode(ksettings,
-							     advertising,
-							     25000baseKR_Full);
-	}
-	if (phy_types & I40E_CAP_PHY_TYPE_25GBASE_CR) {
-		ethtool_link_ksettings_add_link_mode(ksettings, supported,
-						     25000baseCR_Full);
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_25GB)
-			ethtool_link_ksettings_add_link_mode(ksettings,
-							     advertising,
-							     25000baseCR_Full);
-	}
-	if (phy_types & I40E_CAP_PHY_TYPE_25GBASE_SR ||
-	    phy_types & I40E_CAP_PHY_TYPE_25GBASE_LR) {
-		ethtool_link_ksettings_add_link_mode(ksettings, supported,
-						     25000baseSR_Full);
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_25GB)
-			ethtool_link_ksettings_add_link_mode(ksettings,
-							     advertising,
-							     25000baseSR_Full);
-	}
-	if (phy_types & I40E_CAP_PHY_TYPE_25GBASE_AOC ||
-	    phy_types & I40E_CAP_PHY_TYPE_25GBASE_ACC) {
-		ethtool_link_ksettings_add_link_mode(ksettings, supported,
-						     25000baseCR_Full);
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_25GB)
-			ethtool_link_ksettings_add_link_mode(ksettings,
-							     advertising,
-							     25000baseCR_Full);
-	}
-#endif /* HAVE_ETHTOOL_25G_BITS */
-#ifdef HAVE_ETHTOOL_NEW_10G_BITS
-	/* need to add new 10G PHY types */
-	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1 ||
-	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1_CU) {
-		ethtool_link_ksettings_add_link_mode(ksettings, supported,
-						     10000baseCR_Full);
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
-			ethtool_link_ksettings_add_link_mode(ksettings,
-							     advertising,
-							     10000baseCR_Full);
-	}
-	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_SR) {
-		ethtool_link_ksettings_add_link_mode(ksettings, supported,
-						     10000baseSR_Full);
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
-			ethtool_link_ksettings_add_link_mode(ksettings,
-							     advertising,
-							     10000baseSR_Full);
-	}
-	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_LR) {
-		ethtool_link_ksettings_add_link_mode(ksettings, supported,
-						     10000baseLR_Full);
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
-			ethtool_link_ksettings_add_link_mode(ksettings,
-							     advertising,
-							     10000baseLR_Full);
-	}
-	if (phy_types & I40E_CAP_PHY_TYPE_1000BASE_SX ||
-	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_LX ||
-	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_T_OPTICAL) {
-		ethtool_link_ksettings_add_link_mode(ksettings, supported,
-						     1000baseX_Full);
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
-			ethtool_link_ksettings_add_link_mode(ksettings,
-							     advertising,
-							     1000baseX_Full);
-	}
-#else
-	/* need to keep backward compatibility with older kernels */
-	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1 ||
-	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1_CU ||
-	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_SR ||
-	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_LR) {
-		ethtool_link_ksettings_add_link_mode(ksettings, supported,
-						     10000baseT_Full);
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
-			ethtool_link_ksettings_add_link_mode(ksettings,
-							     advertising,
-							     10000baseT_Full);
-	}
-	if (phy_types & I40E_CAP_PHY_TYPE_1000BASE_SX ||
-	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_LX ||
-	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_T_OPTICAL) {
-		ethtool_link_ksettings_add_link_mode(ksettings, supported,
-						     1000baseT_Full);
-		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
-			ethtool_link_ksettings_add_link_mode(ksettings,
-							     advertising,
-							     1000baseT_Full);
-	}
-#endif /* HAVE_ETHTOOL_NEW_10G_BITS */
-	ksettings->base.speed = SPEED_UNKNOWN;
-	ksettings->base.duplex = DUPLEX_UNKNOWN;
-}
-
-/**
- * i40e_get_link_settings_link_up - Get Link info and duplex settings
- * @hw: hw structure
- * @ksettings: ethtool structure to fill in
+ * @ks: ethtool ksettings to fill in
  * @netdev: network interface device structure
  * @pf: pointer to physical function struct
  **/
-static void i40e_get_link_settings_link_up(struct i40e_hw *hw,
-					   struct ethtool_link_ksettings *ks,
-					   struct net_device *netdev,
-					   struct i40e_pf *pf)
+static void i40e_get_settings_link_up(struct i40e_hw *hw,
+				      struct ethtool_link_ksettings *ks,
+				      struct net_device *netdev,
+				      struct i40e_pf *pf)
 {
 	struct i40e_link_status *hw_link_info = &hw->phy.link_info;
-	u32 link_speed = hw_link_info->link_speed;
 	struct ethtool_link_ksettings cap_ksettings;
-	int idx;
+	u32 link_speed = hw_link_info->link_speed;
 
 	/* Initialize supported and advertised settings based on phy settings */
 	switch (hw_link_info->phy_type) {
@@ -1133,9 +1216,8 @@ static void i40e_get_link_settings_link_up(struct i40e_hw *hw,
 							     1000baseT_Full);
 			if (hw_link_info->requested_speeds &
 			    I40E_LINK_SPEED_1GB)
-				ethtool_link_ksettings_add_link_mode(ks,
-								advertising,
-								1000baseT_Full);
+				ethtool_link_ksettings_add_link_mode(
+				     ks, advertising, 1000baseT_Full);
 		}
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
 			ethtool_link_ksettings_add_link_mode(ks, advertising,
@@ -1202,9 +1284,8 @@ static void i40e_get_link_settings_link_up(struct i40e_hw *hw,
 							     100baseT_Full);
 			if (hw_link_info->requested_speeds &
 			    I40E_LINK_SPEED_100MB)
-				ethtool_link_ksettings_add_link_mode(ks,
-								 advertising,
-								 100baseT_Full);
+				ethtool_link_ksettings_add_link_mode(
+				      ks, advertising, 100baseT_Full);
 		}
 		break;
 	case I40E_PHY_TYPE_40GBASE_KR4:
@@ -1215,6 +1296,10 @@ static void i40e_get_link_settings_link_up(struct i40e_hw *hw,
 	case I40E_PHY_TYPE_1000BASE_KX:
 		ethtool_link_ksettings_add_link_mode(ks, supported,
 						     40000baseKR4_Full);
+#ifdef HAVE_ETHTOOL_25G_BITS
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     25000baseKR_Full);
+#endif
 		ethtool_link_ksettings_add_link_mode(ks, supported,
 						     20000baseKR2_Full);
 		ethtool_link_ksettings_add_link_mode(ks, supported,
@@ -1226,6 +1311,10 @@ static void i40e_get_link_settings_link_up(struct i40e_hw *hw,
 		ethtool_link_ksettings_add_link_mode(ks, supported, Autoneg);
 		ethtool_link_ksettings_add_link_mode(ks, advertising,
 						     40000baseKR4_Full);
+#ifdef HAVE_ETHTOOL_25G_BITS
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     25000baseKR_Full);
+#endif
 		ethtool_link_ksettings_add_link_mode(ks, advertising,
 						     20000baseKR2_Full);
 		ethtool_link_ksettings_add_link_mode(ks, advertising,
@@ -1235,12 +1324,6 @@ static void i40e_get_link_settings_link_up(struct i40e_hw *hw,
 		ethtool_link_ksettings_add_link_mode(ks, advertising,
 						     1000baseKX_Full);
 		ethtool_link_ksettings_add_link_mode(ks, advertising, Autoneg);
-#ifdef HAVE_ETHTOOL_25G_BITS
-		ethtool_link_ksettings_add_link_mode(ks, supported,
-						     25000baseKR_Full);
-		ethtool_link_ksettings_add_link_mode(ks, advertising,
-						     25000baseKR_Full);
-#endif /* HAVE_ETHTOOL_25G_BITS */
 		break;
 	case I40E_PHY_TYPE_25GBASE_CR:
 		ethtool_link_ksettings_add_link_mode(ks, supported, Autoneg);
@@ -1278,22 +1361,12 @@ static void i40e_get_link_settings_link_up(struct i40e_hw *hw,
 	}
 
 	/* Now that we've worked out everything that could be supported by the
-	 * current phy type, get what is supported by the NVM and and them to
-	 * get what is truly supported
+	 * current PHY type, get what is supported by the NVM and intersect
+	 * them to get what is truly supported
 	 */
 	memset(&cap_ksettings, 0, sizeof(struct ethtool_link_ksettings));
-	cap_ksettings.base.cmd = ks->base.cmd;
-	cap_ksettings.base.link_mode_masks_nwords =
-					   ks->base.link_mode_masks_nwords;
-	i40e_get_link_settings_link_down(hw, &cap_ksettings, pf);
-
-	for (idx = 0; idx < ETHTOOL_LINK_MODE_MASK_U32; idx++) {
-		ks->base.link_mode_masks[idx] &=
-					cap_ksettings.base.link_mode_masks[idx];
-		ks->base.link_mode_masks[idx + ETHTOOL_LINK_MODE_MASK_U32] &=
-					cap_ksettings.base.link_mode_masks[idx +
-					ETHTOOL_LINK_MODE_MASK_U32];
-	}
+	i40e_phy_type_to_ethtool(pf, &cap_ksettings);
+	i40e_intersect_link_masks(ks, &cap_ksettings);
 
 	/* Set speed and duplex */
 	switch (link_speed) {
@@ -1322,34 +1395,54 @@ static void i40e_get_link_settings_link_up(struct i40e_hw *hw,
 }
 
 /**
- * i40e_get_link_settings - Get Link Speed and Duplex settings
+ * i40e_get_settings_link_down - Get the Link settings when link is down
+ * @hw: hw structure
+ * @ks: ethtool ksettings to fill in
+ * @pf: pointer to physical function struct
+ *
+ * Reports link settings that can be determined when link is down
+ **/
+static void i40e_get_settings_link_down(struct i40e_hw *hw,
+					struct ethtool_link_ksettings *ks,
+					struct i40e_pf *pf)
+{
+	/* link is down and the driver needs to fall back on
+	 * supported phy types to figure out what info to display
+	 */
+	i40e_phy_type_to_ethtool(pf, ks);
+	/* With no link speed and duplex are unknown */
+	ks->base.speed = SPEED_UNKNOWN;
+	ks->base.duplex = DUPLEX_UNKNOWN;
+}
+
+/**
+ * i40e_get_link_ksettings - Get Link Speed and Duplex settings
  * @netdev: network interface device structure
- * @ksettings: ethtool command
+ * @ks: ethtool ksettings
  *
  * Reports speed/duplex settings based on media_type
  **/
-static int i40e_get_link_settings(struct net_device *netdev,
-				  struct ethtool_link_ksettings *ks)
+static int i40e_get_link_ksettings(struct net_device *netdev,
+				   struct ethtool_link_ksettings *ks)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_pf *pf = np->vsi->back;
 	struct i40e_hw *hw = &pf->hw;
 	struct i40e_link_status *hw_link_info = &hw->phy.link_info;
 	bool link_up = hw_link_info->link_info & I40E_AQ_LINK_UP;
-	struct ethtool_link_settings *settings = &ks->base;
 
 	ethtool_link_ksettings_zero_link_mode(ks, supported);
 	ethtool_link_ksettings_zero_link_mode(ks, advertising);
 
 	if (link_up)
-		i40e_get_link_settings_link_up(hw, ks, netdev, pf);
+		i40e_get_settings_link_up(hw, ks, netdev, pf);
 	else
-		i40e_get_link_settings_link_down(hw, ks, pf);
+		i40e_get_settings_link_down(hw, ks, pf);
 
 	/* Now set the settings that don't rely on link being up/down */
 	/* Set autoneg settings */
-	settings->autoneg = (hw_link_info->an_info & I40E_AQ_AN_COMPLETED ?
-			  AUTONEG_ENABLE : AUTONEG_DISABLE);
+	ks->base.autoneg = (hw_link_info->an_info & I40E_AQ_AN_COMPLETED ?
+			    AUTONEG_ENABLE : AUTONEG_DISABLE);
 
 	/* Set media type settings */
 	switch (hw->phy.media_type) {
@@ -1359,26 +1452,26 @@ static int i40e_get_link_settings(struct net_device *netdev,
 		ethtool_link_ksettings_add_link_mode(ks, advertising, Autoneg);
 		ethtool_link_ksettings_add_link_mode(ks, advertising,
 						     Backplane);
-		settings->port = PORT_NONE;
+		ks->base.port = PORT_NONE;
 		break;
 	case I40E_MEDIA_TYPE_BASET:
 		ethtool_link_ksettings_add_link_mode(ks, supported, TP);
 		ethtool_link_ksettings_add_link_mode(ks, advertising, TP);
-		settings->port = PORT_TP;
+		ks->base.port = PORT_TP;
 		break;
 	case I40E_MEDIA_TYPE_DA:
 	case I40E_MEDIA_TYPE_CX4:
 		ethtool_link_ksettings_add_link_mode(ks, supported, FIBRE);
 		ethtool_link_ksettings_add_link_mode(ks, advertising, FIBRE);
-		settings->port = PORT_DA;
+		ks->base.port = PORT_DA;
 		break;
 	case I40E_MEDIA_TYPE_FIBER:
 		ethtool_link_ksettings_add_link_mode(ks, supported, FIBRE);
-		settings->port = PORT_FIBRE;
+		ks->base.port = PORT_FIBRE;
 		break;
 	case I40E_MEDIA_TYPE_UNKNOWN:
 	default:
-		settings->port = PORT_OTHER;
+		ks->base.port = PORT_OTHER;
 		break;
 	}
 
@@ -1399,43 +1492,37 @@ static int i40e_get_link_settings(struct net_device *netdev,
 						     Asym_Pause);
 		break;
 	default:
-		ethtool_link_ksettings_clear_link_mode(ks, advertising, Pause);
-		ethtool_link_ksettings_clear_link_mode(ks, advertising,
-						       Asym_Pause);
+		ethtool_link_ksettings_del_link_mode(ks, advertising, Pause);
+		ethtool_link_ksettings_del_link_mode(ks, advertising,
+						     Asym_Pause);
 		break;
 	}
 	return 0;
 }
 
 /**
- * i40e_set_link_settings - Set Speed and Duplex
+ * i40e_set_link_ksettings - Set Speed and Duplex
  * @netdev: network interface device structure
- * @ksettings_passed: ethtool command
+ * @ks: ethtool ksettings
  *
  * Set speed/duplex per media_types advertised/forced
  **/
-static int i40e_set_link_settings(struct net_device *netdev,
-			  const struct ethtool_link_ksettings *ksettings_passed)
+static int i40e_set_link_ksettings(struct net_device *netdev,
+				   const struct ethtool_link_ksettings *ks)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_aq_get_phy_abilities_resp abilities;
+	struct ethtool_link_ksettings safe_ks;
+	struct ethtool_link_ksettings copy_ks;
 	struct i40e_aq_set_phy_config config;
 	struct i40e_pf *pf = np->vsi->back;
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_hw *hw = &pf->hw;
-	struct ethtool_link_ksettings safe_ksettings;
-	i40e_status status = 0;
 	bool autoneg_changed = false;
+	i40e_status status = 0;
 	int timeout = 50;
 	int err = 0;
 	u8 autoneg;
-	struct ethtool_link_ksettings ksettings_real, *ksettings;
-	u32 advertise[ETHTOOL_LINK_MODE_MASK_U32];
-
-	ksettings = &ksettings_real;
-	memcpy(ksettings,
-	       ksettings_passed,
-	       sizeof(struct ethtool_link_ksettings));
 
 	/* Changing port settings is not supported if this isn't the
 	 * port's controlling PF
@@ -1456,34 +1543,40 @@ static int i40e_set_link_settings(struct net_device *netdev,
 	    hw->device_id == I40E_DEV_ID_KX_C ||
 	    hw->device_id == I40E_DEV_ID_20G_KR2 ||
 	    hw->device_id == I40E_DEV_ID_20G_KR2_A) {
-		netdev_info(netdev,
-			    "Changing settings is not supported on backplane.\n");
+		netdev_info(netdev, "Changing settings is not supported on backplane.\n");
 		return -EOPNOTSUPP;
 	}
 
-	/* get our own copy of the bits to check against */
-	memset(&safe_ksettings, 0, sizeof(struct ethtool_link_ksettings));
-	safe_ksettings.base.cmd                    = ksettings->base.cmd;
-	safe_ksettings.base.link_mode_masks_nwords =
-		ksettings->base.link_mode_masks_nwords;
-	i40e_get_link_settings(netdev, &safe_ksettings);
+	/* copy the ksettings to copy_ks to avoid modifying the origin */
+	memcpy(&copy_ks, ks, sizeof(struct ethtool_link_ksettings));
 
-	/* save autoneg and speed out of ksettings */
-	autoneg = ksettings->base.autoneg;
-	memcpy((void *)advertise,
-	       &ksettings->base.link_mode_masks[ETHTOOL_LINK_MODE_MASK_U32],
-	       sizeof(advertise));
+	/* save autoneg out of ksettings */
+	autoneg = copy_ks.base.autoneg;
 
-	/* set autoneg and speed back to what they currently are */
-	ksettings->base.autoneg = safe_ksettings.base.autoneg;
-	memcpy((void *)ksettings->link_modes.advertising,
-	       safe_ksettings.link_modes.advertising,
-	       sizeof(advertise));
-
-	/* If ksettings and safe_ksettings are not the same now, then they are
-	 * trying to set something that we do not support
+	memset(&safe_ks, 0, sizeof(safe_ks));
+	/* Get link modes supported by hardware and check against modes
+	 * requested by user.  Return an error if unsupported mode was set.
 	 */
-	if (memcmp(ksettings, &safe_ksettings,
+	i40e_phy_type_to_ethtool(pf, &safe_ks);
+	if (!bitmap_subset(copy_ks.link_modes.advertising,
+			   safe_ks.link_modes.supported,
+			   __ETHTOOL_LINK_MODE_MASK_NBITS))
+		return -EINVAL;
+
+	/* get our own copy of the bits to check against */
+	memset(&safe_ks, 0, sizeof(struct ethtool_link_ksettings));
+	safe_ks.base.cmd = copy_ks.base.cmd;
+	safe_ks.base.link_mode_masks_nwords =
+		copy_ks.base.link_mode_masks_nwords;
+	i40e_get_link_ksettings(netdev, &safe_ks);
+
+	/* set autoneg back to what it currently is */
+	copy_ks.base.autoneg = safe_ks.base.autoneg;
+
+	/* If copy_ks.base and safe_ks.base are not the same now, then they are
+	 * trying to set something that we do not support.
+	 */
+	if (memcmp(&copy_ks.base, &safe_ks.base,
 		   sizeof(struct ethtool_link_settings)))
 		return -EOPNOTSUPP;
 
@@ -1513,10 +1606,9 @@ static int i40e_set_link_settings(struct net_device *netdev,
 		/* If autoneg was not already enabled */
 		if (!(hw->phy.link_info.an_info & I40E_AQ_AN_COMPLETED)) {
 			/* If autoneg is not supported, return error */
-			if (!(safe_ksettings.link_modes.supported[0] &
-			      SUPPORTED_Autoneg)) {
-				netdev_info(netdev,
-					    "Autoneg not supported on this phy\n");
+			if (!ethtool_link_ksettings_test_link_mode(
+				      &safe_ks, supported, Autoneg)) {
+				netdev_info(netdev, "Autoneg not supported on this phy\n");
 				err = -EINVAL;
 				goto done;
 			}
@@ -1528,15 +1620,14 @@ static int i40e_set_link_settings(struct net_device *netdev,
 	} else {
 		/* If autoneg is currently enabled */
 		if (hw->phy.link_info.an_info & I40E_AQ_AN_COMPLETED) {
-			/* If autoneg is supported 10GBASE_T is the only phy
+			/* If autoneg is supported 10GBASE_T is the only PHY
 			 * that can disable it, so otherwise return error
 			 */
-			if (safe_ksettings.link_modes.supported[0] &
-			    SUPPORTED_Autoneg &&
+			if (ethtool_link_ksettings_test_link_mode(
+				     &safe_ks, supported, Autoneg) &&
 			    hw->phy.link_info.phy_type !=
 			    I40E_PHY_TYPE_10GBASE_T) {
-				netdev_info(netdev,
-					    "Autoneg cannot be disabled on this phy\n");
+				netdev_info(netdev, "Autoneg cannot be disabled on this phy\n");
 				err = -EINVAL;
 				goto done;
 			}
@@ -1546,43 +1637,54 @@ static int i40e_set_link_settings(struct net_device *netdev,
 			autoneg_changed = true;
 		}
 	}
-	if (advertise[0] & ADVERTISED_100baseT_Full)
-		config.link_speed |= I40E_LINK_SPEED_100MB;
-	if (advertise[0] & ADVERTISED_1000baseT_Full ||
-	    advertise[0] & ADVERTISED_1000baseKX_Full)
-		config.link_speed |= I40E_LINK_SPEED_1GB;
-	if (advertise[0] & ADVERTISED_10000baseT_Full ||
-	    advertise[0] & ADVERTISED_10000baseKX4_Full ||
-	    advertise[0] & ADVERTISED_10000baseKR_Full)
-		config.link_speed |= I40E_LINK_SPEED_10GB;
-#ifdef HAVE_ETHTOOL_NEW_10G_BITS
-	if (ethtool_link_ksettings_test_link_mode(ksettings_passed, advertising,
-						  1000baseX_Full))
-		config.link_speed |= I40E_LINK_SPEED_1GB;
 
-	if (ethtool_link_ksettings_test_link_mode(ksettings_passed, advertising,
-						  10000baseCR_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ksettings_passed, advertising,
+	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  100baseT_Full))
+		config.link_speed |= I40E_LINK_SPEED_100MB;
+	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  1000baseT_Full) ||
+#ifdef HAVE_ETHTOOL_NEW_10G_BITS
+	    ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  1000baseX_Full) ||
+#endif
+	    ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  1000baseKX_Full))
+		config.link_speed |= I40E_LINK_SPEED_1GB;
+	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  10000baseT_Full) ||
+	    ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  10000baseKX4_Full) ||
+	    ethtool_link_ksettings_test_link_mode(ks, advertising,
 						  10000baseKR_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ksettings_passed, advertising,
+#ifdef HAVE_ETHTOOL_NEW_10G_BITS
+	    ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  10000baseCR_Full) ||
+	    ethtool_link_ksettings_test_link_mode(ks, advertising,
 						  10000baseSR_Full))
-		config.link_speed |= I40E_LINK_SPEED_10GB;
+#else
+	    0)
 #endif /* HAVE_ETHTOOL_NEW_10G_BITS */
-	if (advertise[0] & ADVERTISED_20000baseKR2_Full)
+		config.link_speed |= I40E_LINK_SPEED_10GB;
+	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  20000baseKR2_Full))
 		config.link_speed |= I40E_LINK_SPEED_20GB;
 #ifdef HAVE_ETHTOOL_25G_BITS
-	if (ethtool_link_ksettings_test_link_mode(ksettings_passed, advertising,
+	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
 						  25000baseCR_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ksettings_passed, advertising,
+	    ethtool_link_ksettings_test_link_mode(ks, advertising,
 						  25000baseKR_Full) ||
-	    ethtool_link_ksettings_test_link_mode(ksettings_passed, advertising,
+	    ethtool_link_ksettings_test_link_mode(ks, advertising,
 						  25000baseSR_Full))
 		config.link_speed |= I40E_LINK_SPEED_25GB;
 #endif /* HAVE_ETHTOOL_25G_BITS */
-	if (advertise[0] & ADVERTISED_40000baseKR4_Full ||
-	    advertise[0] & ADVERTISED_40000baseCR4_Full ||
-	    advertise[0] & ADVERTISED_40000baseSR4_Full ||
-	    advertise[0] & ADVERTISED_40000baseLR4_Full)
+	if (ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  40000baseKR4_Full) ||
+	    ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  40000baseCR4_Full) ||
+	    ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  40000baseSR4_Full) ||
+	    ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  40000baseLR4_Full))
 		config.link_speed |= I40E_LINK_SPEED_40GB;
 
 	/* If speed didn't get set, set it to what it currently is.
@@ -1625,15 +1727,16 @@ static int i40e_set_link_settings(struct net_device *netdev,
 			err = -EAGAIN;
 			goto done;
 		}
+
 		status = i40e_update_link_info(hw);
 		if (status)
 			netdev_dbg(netdev,
 				   "Updating link info failed with err %s aq_err %s\n",
 				   i40e_stat_str(hw, status),
 				   i40e_aq_str(hw, hw->aq.asq_last_status));
+
 	} else {
-		netdev_info(netdev,
-			    "Nothing changed, exiting without setting anything.\n");
+		netdev_info(netdev, "Nothing changed, exiting without setting anything.\n");
 	}
 
 done:
@@ -2283,7 +2386,7 @@ static int i40e_set_ringparam(struct net_device *netdev,
 			if (err)
 				goto rx_unwind;
 
-			/* now allocate the rx buffers to make sure the OS
+			/* now allocate the Rx buffers to make sure the OS
 			 * has enough memory, any failure here means abort
 			 */
 			ring = &rx_rings[i];
@@ -3333,13 +3436,14 @@ static int i40e_get_rss_hash_opts(struct i40e_pf *pf, struct ethtool_rxnfc *cmd)
 	return 0;
 }
 
-/* i40e_check_mask - Check whether a mask field is set
+/**
+ * i40e_check_mask - Check whether a mask field is set
  * @mask: the full mask value
  * @field; mask of the field to check
  *
  * If the given mask is fully set, return positive value. If the mask for the
  * field is fully unset, return zero. Otherwise return a negative error code.
- */
+ **/
 static int i40e_check_mask(u64 mask, u64 field)
 {
 	u64 value = mask & field;
@@ -3352,7 +3456,8 @@ static int i40e_check_mask(u64 mask, u64 field)
 		return -1;
 }
 
-/* i40e_parse_rx_flow_user_data - Deconstruct user-defined data
+/**
+ * i40e_parse_rx_flow_user_data - Deconstruct user-defined data
  * @fsp: pointer to rx flow specification
  * @data: pointer to userdef data structure for storage
  *
@@ -3368,9 +3473,8 @@ static int i40e_check_mask(u64 mask, u64 field)
  * Returns 0 if the data is valid, and non-zero if the userdef data is invalid
  * and the filter should be rejected. The data structure will always be
  * modified even if FLOW_EXT is not set.
-
  *
- */
+ **/
 static int i40e_parse_rx_flow_user_data(struct ethtool_rx_flow_spec *fsp,
 					struct i40e_rx_flow_userdef *data)
 {
@@ -3432,12 +3536,13 @@ static int i40e_parse_rx_flow_user_data(struct ethtool_rx_flow_spec *fsp,
 	return 0;
 }
 
-/* i40e_fill_rx_flow_user_data - Fill in user-defined data field
+/**
+ * i40e_fill_rx_flow_user_data - Fill in user-defined data field
  * @fsp: pointer to rx_flow specification
  *
  * Reads the userdef data structure and properly fills in the user defined
  * fields of the rx_flow_spec.
- */
+ **/
 static void i40e_fill_rx_flow_user_data(struct ethtool_rx_flow_spec *fsp,
 					struct i40e_rx_flow_userdef *data)
 {
@@ -3979,6 +4084,10 @@ static int i40e_cloud_filter_mask2flags(struct i40e_pf *pf,
 		break;
 
 	case IP_USER_FLOW:
+		if (pf->hw.mac.type == I40E_MAC_X722) {
+			dev_info(&pf->pdev->dev, "Failed to set filter. Destination IP filters are not supported for this device.\n");
+			return I40E_ERR_CONFIG;
+		}
 		if (fsp->m_u.usr_ip4_spec.ip4dst == cpu_to_be32(0xffffffff)) {
 			i |= I40E_CLOUD_FIELD_IIP;
 		} else if (!fsp->m_u.usr_ip4_spec.ip4dst) {
@@ -4077,7 +4186,7 @@ static int i40e_add_cloud_filter_ethtool(struct i40e_vsi *vsi,
 	if (!vf) {
 		if (ring >= vsi->num_queue_pairs)
 			return -EINVAL;
-		dest_seid = vsi->id;
+		dest_seid = vsi->seid;
 	} else {
 		/* VFs are zero-indexed, so we subtract one here */
 		vf--;
@@ -4298,13 +4407,14 @@ static int i40e_update_ethtool_fdir_entry(struct i40e_vsi *vsi,
 	return 0;
 }
 
-/** i40e_prune_flex_pit_list - Cleanup unused entries in FLX_PIT table
+/**
+ * i40e_prune_flex_pit_list - Cleanup unused entries in FLX_PIT table
  * @pf: pointer to PF structure
  *
  * This function searches the list of filters and determines which FLX_PIT
  * entries are still required. It will prune any entries which are no longer
  * in use after the deletion.
- */
+ **/
 static void i40e_prune_flex_pit_list(struct i40e_pf *pf)
 {
 	struct i40e_flex_pit *entry, *tmp;
@@ -4393,14 +4503,15 @@ static int i40e_del_fdir_entry(struct i40e_vsi *vsi,
 	return ret;
 }
 
-/* i40e_unused_pit_index - Find an unused PIT index for given list
+/**
+ * i40e_unused_pit_index - Find an unused PIT index for given list
  * @pf: the PF data structure
  *
  * Find the first unused flexible PIT index entry. We search both the L3 and
  * L4 flexible PIT lists so that the returned index is unique and unused by
  * either currently programmed L3 or L4 filters. We use a bit field as storage
  * to track which indexes are already used.
- */
+ **/
 static u8 i40e_unused_pit_index(struct i40e_pf *pf)
 {
 	unsigned long available_index = 0xFF;
@@ -4420,14 +4531,15 @@ static u8 i40e_unused_pit_index(struct i40e_pf *pf)
 	return find_first_bit(&available_index, 8);
 }
 
-/* i40e_find_flex_offset - Find an existing flex src_offset
+/**
+ * i40e_find_flex_offset - Find an existing flex src_offset
  * @flex_pit_list: L3 or L4 flex PIT list
  * @src_offset: new src_offset to find
  *
  * Searches the flex_pit_list for an existing offset. If no offset is
  * currently programmed, then this will return an ERR_PTR if there is no space
  * to add a new offset, otherwise it returns NULL.
- */
+ **/
 static
 struct i40e_flex_pit *i40e_find_flex_offset(struct list_head *flex_pit_list,
 					    u16 src_offset)
@@ -4455,7 +4567,8 @@ struct i40e_flex_pit *i40e_find_flex_offset(struct list_head *flex_pit_list,
 	return NULL;
 }
 
-/* i40e_add_flex_offset - Add src_offset to flex PIT table list
+/**
+ * i40e_add_flex_offset - Add src_offset to flex PIT table list
  * @flex_pit_list: L3 or L4 flex PIT list
  * @src_offset: new src_offset to add
  * @pit_index: the PIT index to program
@@ -4466,7 +4579,7 @@ struct i40e_flex_pit *i40e_find_flex_offset(struct list_head *flex_pit_list,
  * store another offset.
  *
  * Returns 0 on success, and negative value on error.
- */
+ **/
 static int i40e_add_flex_offset(struct list_head *flex_pit_list,
 				u16 src_offset,
 				u8 pit_index)
@@ -4609,7 +4722,7 @@ static void __i40e_reprogram_flex_pit(struct i40e_pf *pf,
  *
  * This function reprograms both the L3 and L4 FLX_PIT tables. See the
  * internal helper function for implementation details.
- */
+ **/
 static void i40e_reprogram_flex_pit(struct i40e_pf *pf)
 {
 	__i40e_reprogram_flex_pit(pf, &pf->l3_flex_pit_list,
@@ -4653,12 +4766,13 @@ static const char *i40e_flow_str(struct ethtool_rx_flow_spec *fsp)
 	}
 }
 
-/* i40e_pit_index_to_mask - Return the FLEX mask for a given PIT index
+/**
+ * i40e_pit_index_to_mask - Return the FLEX mask for a given PIT index
  * @pit_index: PIT index to convert
  *
  * Returns the mask for a given PIT index. Will return 0 if the pit_index is
  * of range.
- */
+ **/
 static u64 i40e_pit_index_to_mask(int pit_index)
 {
 	switch (pit_index) {
@@ -5179,20 +5293,23 @@ static int i40e_add_fdir_ethtool(struct i40e_vsi *vsi,
 		input->flex_offset = userdef.flex_offset;
 	}
 
-	ret = i40e_add_del_fdir(vsi, input, true);
-	if (ret)
-		goto free_input;
-
 	/* Add the input filter to the fdir_filter_list, possibly replacing
 	 * a previous filter. Do not free the input structure after adding it
 	 * to the list as this would cause a use after free bug.
 	 */
-	(void)i40e_del_cloud_filter_ethtool(pf, cmd);
 	i40e_update_ethtool_fdir_entry(vsi, input, fsp->location);
+
+	(void)i40e_del_cloud_filter_ethtool(pf, cmd);
+	ret = i40e_add_del_fdir(vsi, input, true);
+
+	if (ret)
+		goto remove_sw_rule;
 
 	return 0;
 
-free_input:
+remove_sw_rule:
+	hlist_del(&input->fdir_node);
+	pf->fdir_pf_active_filters--;
 	kfree(input);
 	return ret;
 }
@@ -5373,8 +5490,10 @@ static u32 i40e_get_rxfh_indir_size(struct net_device *netdev)
  * @netdev: network interface device structure
  * @indir: indirection table
  * @key: hash key
+ * @hfunc: hash function
  *
- * Reads the indirection table directly from the hardware. Always returns 0.
+ * Reads the indirection table directly from the hardware. Returns 0 on
+ * success.
  **/
 #ifdef HAVE_RXFH_HASHFUNC
 static int i40e_get_rxfh(struct net_device *netdev, u32 *indir, u8 *key,
@@ -5398,15 +5517,12 @@ static int i40e_get_rxfh(struct net_device *netdev, u32 *indir, u8 *key)
 		return 0;
 
 	seed = key;
-
 	lut = kzalloc(I40E_HLUT_ARRAY_SIZE, GFP_KERNEL);
 	if (!lut)
 		return -ENOMEM;
-
 	ret = i40e_get_rss(vsi, seed, lut, I40E_HLUT_ARRAY_SIZE);
 	if (ret)
 		goto out;
-
 	for (i = 0; i < I40E_HLUT_ARRAY_SIZE; i++)
 		indir[i] = (u32)(lut[i]);
 
@@ -5466,7 +5582,6 @@ static int i40e_set_rxfh(struct net_device *netdev, const u32 *indir,
 		memcpy(vsi->rss_hkey_user, key, I40E_HKEY_ARRAY_SIZE);
 		seed = vsi->rss_hkey_user;
 	}
-
 	if (!vsi->rss_lut_user) {
 		vsi->rss_lut_user = kzalloc(I40E_HLUT_ARRAY_SIZE, GFP_KERNEL);
 		if (!vsi->rss_lut_user)
@@ -5589,8 +5704,27 @@ flags_complete:
 	    !(pf->hw_features & I40E_HW_ATR_EVICT_CAPABLE))
 		return -EOPNOTSUPP;
 
+	/* Disable FW LLDP not supported if NPAR active or if FW
+	 * API version < 1.7
+	 */
+	if (new_flags & I40E_FLAG_DISABLE_FW_LLDP) {
+		if (pf->hw.func_caps.npar_enable) {
+			dev_warn(&pf->pdev->dev,
+				 "Unable to stop FW LLDP if NPAR active\n");
+			return -EOPNOTSUPP;
+		}
+
+		if (pf->hw.aq.api_maj_ver < 1 ||
+		    (pf->hw.aq.api_maj_ver == 1 &&
+		     pf->hw.aq.api_min_ver < 7)) {
+			dev_warn(&pf->pdev->dev,
+				 "FW ver does not support stopping FW LLDP\n");
+			return -EOPNOTSUPP;
+		}
+	}
+
 	/* Compare and exchange the new flags into place. If we failed, that
-	 * is if cmpxchg64 returns anything but the old value, this means that
+	 * is if cmpxchg returns anything but the old value, this means that
 	 * something else has modified the flags variable since we copied it
 	 * originally. We'll just punt with an error and log something in the
 	 * message buffer.
@@ -5634,12 +5768,37 @@ flags_complete:
 		}
 	}
 
+	if (changed_flags & I40E_FLAG_DISABLE_FW_LLDP) {
+		if (pf->flags & I40E_FLAG_DISABLE_FW_LLDP) {
+			struct i40e_dcbx_config *dcbcfg;
+			int i;
+
+			i40e_aq_stop_lldp(&pf->hw, true, NULL);
+			i40e_aq_set_dcb_parameters(&pf->hw, true, NULL);
+			/* reset local_dcbx_config to default */
+			dcbcfg = &pf->hw.local_dcbx_config;
+			dcbcfg->etscfg.willing = 1;
+			dcbcfg->etscfg.maxtcs = 0;
+			dcbcfg->etscfg.tcbwtable[0] = 100;
+			for (i = 1; i < I40E_MAX_TRAFFIC_CLASS; i++)
+				dcbcfg->etscfg.tcbwtable[i] = 0;
+			for (i = 0; i < I40E_MAX_USER_PRIORITY; i++)
+				dcbcfg->etscfg.prioritytable[i] = 0;
+			dcbcfg->etscfg.tsatable[0] = I40E_IEEE_TSA_ETS;
+			dcbcfg->pfc.willing = 1;
+			dcbcfg->pfc.pfccap = I40E_MAX_TRAFFIC_CLASS;
+		} else {
+			i40e_aq_start_lldp(&pf->hw, NULL);
+		}
+	}
+
 	/* Issue reset to cause things to take effect, as additional bits
 	 * are added we will need to create a mask of bits requiring reset
 	 */
 	if (changed_flags & (I40E_FLAG_VEB_STATS_ENABLED |
 			     I40E_FLAG_LEGACY_RX |
-			     I40E_FLAG_SOURCE_PRUNING_DISABLED))
+			     I40E_FLAG_SOURCE_PRUNING_DISABLED |
+			     I40E_FLAG_DISABLE_FW_LLDP))
 		i40e_do_reset(pf, BIT(__I40E_PF_RESET_REQUESTED), true);
 
 	return 0;
@@ -5708,13 +5867,14 @@ static int i40e_get_module_info(struct net_device *netdev,
 			netdev_warn(vsi->netdev, "Module address swap to access page 0xA2 is not supported.\n");
 			modinfo->type = ETH_MODULE_SFF_8079;
 			modinfo->eeprom_len = ETH_MODULE_SFF_8079_LEN;
-		} else if (sff8472_comp == 0x00) {
+		} else if (sff8472_comp &&
+			   (sff8472_swap & I40E_MODULE_SFF_DIAG_CAPAB)) {
+			modinfo->type = ETH_MODULE_SFF_8472;
+			modinfo->eeprom_len = ETH_MODULE_SFF_8472_LEN;
+		} else {
 			/* Module is not SFF-8472 compliant */
 			modinfo->type = ETH_MODULE_SFF_8079;
 			modinfo->eeprom_len = ETH_MODULE_SFF_8079_LEN;
-		} else {
-			modinfo->type = ETH_MODULE_SFF_8472;
-			modinfo->eeprom_len = ETH_MODULE_SFF_8472_LEN;
 		}
 		break;
 	case I40E_MODULE_TYPE_QSFP_PLUS:
@@ -5802,8 +5962,10 @@ static int i40e_get_module_eeprom(struct net_device *netdev,
 #endif /* ETHTOOL_GMODULEINFO */
 
 static const struct ethtool_ops i40e_ethtool_ops = {
+#ifndef ETHTOOL_GLINKSETTINGS
 	.get_settings		= i40e_get_settings,
 	.set_settings		= i40e_set_settings,
+#endif
 	.get_drvinfo		= i40e_get_drvinfo,
 	.get_regs_len		= i40e_get_regs_len,
 	.get_regs		= i40e_get_regs,
@@ -5890,8 +6052,8 @@ static const struct ethtool_ops i40e_ethtool_ops = {
 #endif /* ETHTOOL_PERQUEUE */
 #endif /* HAVE_RHEL6_ETHTOOL_OPS_EXT_STRUCT */
 #ifdef ETHTOOL_GLINKSETTINGS
-	.get_link_ksettings = i40e_get_link_settings,
-	.set_link_ksettings = i40e_set_link_settings,
+	.get_link_ksettings = i40e_get_link_ksettings,
+	.set_link_ksettings = i40e_set_link_ksettings,
 #endif /* ETHTOOL_GLINKSETTINGS */
 };
 

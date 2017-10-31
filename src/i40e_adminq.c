@@ -610,17 +610,17 @@ i40e_status i40e_init_adminq(struct i40e_hw *hw)
 		goto init_adminq_free_arq;
 
 	/* get the NVM version info */
-	i40e_read_nvm_word(hw, I40E_SR_NVM_DEV_STARTER_VERSION,
-			   &hw->nvm.version);
-	i40e_read_nvm_word(hw, I40E_SR_NVM_EETRACK_LO, &eetrack_lo);
-	i40e_read_nvm_word(hw, I40E_SR_NVM_EETRACK_HI, &eetrack_hi);
-	hw->nvm.eetrack = (eetrack_hi << 16) | eetrack_lo;
-	i40e_read_nvm_word(hw, I40E_SR_BOOT_CONFIG_PTR, &cfg_ptr);
-	i40e_read_nvm_word(hw, (cfg_ptr + I40E_NVM_OEM_VER_OFF),
-			   &oem_hi);
-	i40e_read_nvm_word(hw, (cfg_ptr + (I40E_NVM_OEM_VER_OFF + 1)),
-			   &oem_lo);
-	hw->nvm.oem_ver = ((u32)oem_hi << 16) | oem_lo;
+		i40e_read_nvm_word(hw, I40E_SR_NVM_DEV_STARTER_VERSION,
+				   &hw->nvm.version);
+		i40e_read_nvm_word(hw, I40E_SR_NVM_EETRACK_LO, &eetrack_lo);
+		i40e_read_nvm_word(hw, I40E_SR_NVM_EETRACK_HI, &eetrack_hi);
+		hw->nvm.eetrack = (eetrack_hi << 16) | eetrack_lo;
+		i40e_read_nvm_word(hw, I40E_SR_BOOT_CONFIG_PTR, &cfg_ptr);
+		i40e_read_nvm_word(hw, (cfg_ptr + I40E_NVM_OEM_VER_OFF),
+				   &oem_hi);
+		i40e_read_nvm_word(hw, (cfg_ptr + (I40E_NVM_OEM_VER_OFF + 1)),
+				   &oem_lo);
+		hw->nvm.oem_ver = ((u32)oem_hi << 16) | oem_lo;
 
 	/* The ability to RX (not drop) 802.1ad frames was added in API 1.7 */
 	if ((hw->aq.api_maj_ver > 1) ||
@@ -628,11 +628,17 @@ i40e_status i40e_init_adminq(struct i40e_hw *hw)
 	     (hw->aq.api_min_ver >= 7)))
 		hw->flags |= I40E_HW_FLAG_802_1AD_CAPABLE;
 
-	if (hw->mac.type ==  I40E_MAC_XL710 &&
+	if (hw->mac.type == I40E_MAC_XL710 &&
 	    hw->aq.api_maj_ver == I40E_FW_API_VERSION_MAJOR &&
 	    hw->aq.api_min_ver >= I40E_MINOR_VER_GET_LINK_INFO_XL710) {
 		hw->flags |= I40E_HW_FLAG_AQ_PHY_ACCESS_CAPABLE;
 	}
+
+	/* Newer versions of firmware require lock when reading the NVM */
+	if ((hw->aq.api_maj_ver > 1) ||
+	    ((hw->aq.api_maj_ver == 1) &&
+	     (hw->aq.api_min_ver >= 5)))
+		hw->flags |= I40E_HW_FLAG_NVM_READ_REQUIRES_LOCK;
 
 	if (hw->aq.api_maj_ver > I40E_FW_API_VERSION_MAJOR) {
 		ret_code = I40E_ERR_FIRMWARE_API_VERSION;
@@ -931,10 +937,15 @@ i40e_status i40e_asq_send_command(struct i40e_hw *hw,
 	/* update the error if time out occurred */
 	if ((!cmd_completed) &&
 	    (!details->async && !details->postpone)) {
-		i40e_debug(hw,
-			   I40E_DEBUG_AQ_MESSAGE,
-			   "AQTX: Writeback timeout.\n");
-		status = I40E_ERR_ADMIN_QUEUE_TIMEOUT;
+		if (rd32(hw, hw->aq.asq.len) & I40E_GL_ATQLEN_ATQCRIT_MASK) {
+			i40e_debug(hw, I40E_DEBUG_AQ_MESSAGE,
+				   "AQTX: AQ Critical error.\n");
+			status = I40E_ERR_ADMIN_QUEUE_CRITICAL_ERROR;
+		} else {
+			i40e_debug(hw, I40E_DEBUG_AQ_MESSAGE,
+				   "AQTX: Writeback timeout.\n");
+			status = I40E_ERR_ADMIN_QUEUE_TIMEOUT;
+		}
 	}
 
 asq_send_command_error:
@@ -996,7 +1007,7 @@ i40e_status i40e_clean_arq_element(struct i40e_hw *hw,
 	}
 
 	/* set next_to_use to head */
-	ntu = (rd32(hw, hw->aq.arq.head) & I40E_PF_ARQH_ARQH_MASK);
+	ntu = rd32(hw, hw->aq.arq.head) & I40E_PF_ARQH_ARQH_MASK;
 	if (ntu == ntc) {
 		/* nothing to do - shouldn't need to update ring's values */
 		ret_code = I40E_ERR_ADMIN_QUEUE_NO_WORK;
@@ -1054,7 +1065,7 @@ i40e_status i40e_clean_arq_element(struct i40e_hw *hw,
 	hw->aq.arq.next_to_clean = ntc;
 	hw->aq.arq.next_to_use = ntu;
 
-	i40e_nvmupd_check_wait_event(hw, LE16_TO_CPU(e->desc.opcode));
+	i40e_nvmupd_check_wait_event(hw, LE16_TO_CPU(e->desc.opcode), &e->desc);
 clean_arq_element_out:
 	/* Set pending if needed, unlock and return */
 	if (pending != NULL)

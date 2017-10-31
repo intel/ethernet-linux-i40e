@@ -115,6 +115,8 @@
 		8086 0002  Ethernet Network Adapter XXV710-2
 		8086 0003  Ethernet Network Adapter XXV710-1
 		8086 0004  Ethernet Network Adapter XXV710-1
+		8086 0005  Ethernet Network Adapter OCP XXV710-2
+		8086 0006  Ethernet Network Adapter OCP XXV710-2
 		8086 0007  Ethernet Network Adapter OCP XXV710-1
 		8086 0008  Ethernet Network Adapter OCP XXV710-1
 		8086 0009  Ethernet 25G 2P XXV710 Adapter
@@ -131,10 +133,12 @@
 		17aa 4020  Ethernet Connection X722 for 1GbE
 		17aa 4021  Ethernet Connection X722 for 1GbE
 		17aa 4022  Ethernet Connection X722 for 1GbE
+		17aa 4024  Ethernet Connection X722 for 1GbE
 	37d2  Ethernet Connection X722 for 10GBASE-T
 		1590 0218  Ethernet 10Gb 2-port 568FLR-MMT Adapter
 		17aa 4020  Ethernet Connection X722 for 10GBASE-T
 		17aa 4021  Ethernet Connection X722 for 10GBASE-T
+		17aa 4024  Ethernet Connection X722 for 10GBASE-T
 	37d3  Ethernet Connection X722 for 10GbE SFP+
 		1590 0219  Ethernet 10Gb 2-port 568FLR-MMSFP+ Adapter
 		17aa 4020  Ethernet Connection X722 for 10GbE SFP+
