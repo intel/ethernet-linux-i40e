@@ -866,9 +866,13 @@ struct _kc_ethtool_pauseparam {
 #elif (LINUX_VERSION_CODE == KERNEL_VERSION(4,4,21))
 /* SLES12 SP2 GA is 4.4.21-69 */
 #define SLE_VERSION_CODE SLE_VERSION(12,2,0)
-/* SLES12 SP3 Beta3 is 4.4.68-2 */
-#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4,4,68))
+/* SLES12 SP3 GM is 4.4.73-5 and update kernel is 4.4.82-6.3 */
+#elif ((LINUX_VERSION_CODE == KERNEL_VERSION(4,4,73)) || \
+       (LINUX_VERSION_CODE == KERNEL_VERSION(4,4,82)))
 #define SLE_VERSION_CODE SLE_VERSION(12,3,0)
+/* SLES15 Beta1 is 4.12.14-2 */
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4,12,14))
+#define SLE_VERSION_CODE SLE_VERSION(15,0,0)
 /* new SLES kernels must be added here with >= based on kernel
  * the idea is to order from newest to oldest and just catch all
  * of them using the >=
@@ -4479,9 +4483,6 @@ static inline bool __kc_is_link_local_ether_addr(const u8 *addr)
 }
 #define is_link_local_ether_addr(addr) __kc_is_link_local_ether_addr(addr)
 #endif /* is_link_local_ether_addr */
-int __kc_ipv6_find_hdr(const struct sk_buff *skb, unsigned int *offset,
-		       int target, unsigned short *fragoff, int *flags);
-#define ipv6_find_hdr(a, b, c, d, e) __kc_ipv6_find_hdr((a), (b), (c), (d), (e))
 
 #ifndef FLOW_MAC_EXT
 #define FLOW_MAC_EXT	0x40000000
@@ -4933,7 +4934,9 @@ static inline void __kc_ether_addr_copy(u8 *dst, const u8 *src)
 #endif
 }
 #endif /* ether_addr_copy */
-
+int __kc_ipv6_find_hdr(const struct sk_buff *skb, unsigned int *offset,
+		       int target, unsigned short *fragoff, int *flags);
+#define ipv6_find_hdr(a, b, c, d, e) __kc_ipv6_find_hdr((a), (b), (c), (d), (e))
 #else /* >= 3.14.0 */
 
 /* for ndo_dfwd_ ops add_station, del_station and _start_xmit */
@@ -5065,6 +5068,10 @@ extern void *__kc_devm_kmemdup(struct device *dev, const void *src, size_t len,
 #else
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(4,13,0) )
 #define HAVE_PCI_ERROR_HANDLER_RESET_NOTIFY
+#if (SLE_VERSION_CODE && (SLE_VERSION_CODE >= SLE_VERSION(15,0,0)))
+#undef HAVE_PCI_ERROR_HANDLER_RESET_NOTIFY
+#define HAVE_PCI_ERROR_HANDLER_RESET_PREPARE
+#endif /* SLES15 */
 #endif /* >= 3.16.0 && < 4.13.0 */
 #define HAVE_NDO_SET_VF_MIN_MAX_TX_RATE
 #endif /* 3.16.0 */
@@ -5659,12 +5666,16 @@ static inline void __page_frag_cache_drain(struct page *page,
 #define ethtool_link_ksettings_del_link_mode(ptr, name, mode)		\
 	__clear_bit(ETHTOOL_LINK_MODE_ ## mode ## _BIT, (ptr)->link_modes.name)
 #endif
+#if (SLE_VERSION_CODE && (SLE_VERSION_CODE >= SLE_VERSION(15,0,0)))
+#define HAVE_NDO_SETUP_TC_REMOVE_TC_TO_NETDEV
+#endif
 #else /* > 4.14 */
 #define HAVE_NDO_SETUP_TC_REMOVE_TC_TO_NETDEV
 #endif /* 4.14.0 */
 
 /*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4,15,0))
+#define TC_SETUP_QDISC_MQPRIO TC_SETUP_MQPRIO
 #ifdef ETHTOOL_GLINKSETTINGS
 void _kc_ethtool_intersect_link_masks(struct ethtool_link_ksettings *dst,
 				      struct ethtool_link_ksettings *src);

@@ -2,7 +2,7 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet Controller 700 Series
 ===============================================================================
 
-October 13, 2017
+October 30, 2017
 
 ===============================================================================
 
@@ -670,8 +670,8 @@ diagnostics, as well as displaying statistical information. The latest ethtool
 version is required for this functionality. Download it at:
 http://ftp.kernel.org/pub/software/network/ethtool/
 
-Supported ethtool Commands and Options
---------------------------------------
+Supported ethtool Commands and Options for Filtering
+----------------------------------------------------
 -n --show-nfc
   Retrieves the receive network flow classification configurations.
 
@@ -862,6 +862,11 @@ of a port's bandwidth (should it be available). The sum of all the values for
 Maximum Bandwidth is not restricted, because no more than 100% of a port's 
 bandwidth can ever be used.
 
+NOTE: X710/XXV710 devices fail to enable Max VFs (64) when Multiple Functions 
+per Port (MFP) and SR-IOV are enabled. An error from i40e is logged that says 
+"add vsi failed for VF N, aq_err 16". To workaround the issue, enable less than 
+64 virtual functions (VFs).
+
 
 Data Center Bridging (DCB)
 --------------------------
@@ -885,8 +890,7 @@ and 802.1Qaz respectively. The firmware based DCBX agent runs in willing
 mode only and can accept settings from a DCBX capable peer. Software
 configuration of DCBX parameters via dcbtool/lldptool are not supported.
 
-NOTE: Firmware LLDP can be disabled by setting the private flag
-disable-fw-lldp on.
+NOTE: Firmware LLDP can be disabled by setting the private flag disable-fw-lldp.
 
 The i40e driver implements the DCB netlink interface layer to allow
 user-space to communicate with the driver and query DCB configuration for
@@ -997,6 +1001,15 @@ using ethtool.
 
 Known Issues/Troubleshooting
 ----------------------------
+
+
+Failure to enable MAX VFs when MFP and SR-IOV enabled
+-----------------------------------------------------
+
+X710/XXV710 devices fail to enable Max VFs (64) when Multiple Functions per 
+Port (MFP) and SR-IOV are enabled. An error from i40e is logged that says "add 
+vsi failed for VF N, aq_err 16". To workaround the issue, enable less than 64 
+virtual functions (VFs).
 
 
 ip link show command shows incorrect VF MAC if VF MAC was set from VF side

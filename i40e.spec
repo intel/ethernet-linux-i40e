@@ -1,6 +1,6 @@
 Name: i40e
 Summary: Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
-Version: 2.3.6
+Version: 2.4.3
 Release: 1
 Source: %{name}-%{version}.tar.gz
 Vendor: Intel Corporation

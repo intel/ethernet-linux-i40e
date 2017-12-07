@@ -814,6 +814,7 @@ struct i40e_q_vector {
 	struct i40e_ring_container rx;
 	struct i40e_ring_container tx;
 
+	u8 itr_countdown;	/* when 0 should adjust adaptive ITR */
 	u8 num_ringpairs;	/* total number of ring pairs in vector */
 
 #ifdef HAVE_IRQ_AFFINITY_NOTIFY
@@ -824,8 +825,6 @@ struct i40e_q_vector {
 	struct rcu_head rcu;	/* to avoid race with update stats on free */
 	char name[I40E_INT_NAME_STR_LEN];
 	bool arm_wb_state;
-#define ITR_COUNTDOWN_START 100
-	u8 itr_countdown;	/* when 0 should adjust ITR */
 } ____cacheline_internodealigned_in_smp;
 
 /* lan device */
@@ -1028,6 +1027,7 @@ void i40e_veb_release(struct i40e_veb *veb);
 int i40e_veb_config_tc(struct i40e_veb *veb, u8 enabled_tc);
 int i40e_vsi_add_pvid(struct i40e_vsi *vsi, u16 vid);
 void i40e_vsi_remove_pvid(struct i40e_vsi *vsi);
+int i40e_get_cloud_filter_type(u8 flags, u16 *type);
 int i40e_add_del_cloud_filter(struct i40e_pf *pf,
 			      struct i40e_cloud_filter *filter,
 			      bool add);
