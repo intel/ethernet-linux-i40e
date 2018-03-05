@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2017 Intel Corporation.
+ * Copyright(c) 2013 - 2018 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -60,13 +60,13 @@ static const char i40e_driver_string[] =
 
 #define DRV_VERSION_MAJOR 2
 #define DRV_VERSION_MINOR 4
-#define DRV_VERSION_BUILD 3
+#define DRV_VERSION_BUILD 6
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
 	__stringify(DRV_VERSION_BUILD) \
 	DRV_VERSION_DESC __stringify(DRV_VERSION_LOCAL)
 const char i40e_driver_version_str[] = DRV_VERSION;
-static const char i40e_copyright[] = "Copyright(c) 2013 - 2017 Intel Corporation.";
+static const char i40e_copyright[] = "Copyright(c) 2013 - 2018 Intel Corporation.";
 
 /* a bit of forward declarations */
 static void i40e_vsi_reinit_locked(struct i40e_vsi *vsi);
@@ -445,7 +445,7 @@ static struct rtnl_link_stats64 *i40e_get_netdev_stats_struct(
 		u64 bytes, packets;
 		unsigned int start;
 
-		tx_ring = ACCESS_ONCE(vsi->tx_rings[i]);
+		tx_ring = READ_ONCE(vsi->tx_rings[i]);
 		if (!tx_ring)
 			continue;
 
@@ -839,7 +839,7 @@ static void i40e_update_vsi_stats(struct i40e_vsi *vsi)
 	rcu_read_lock();
 	for (q = 0; q < vsi->num_queue_pairs; q++) {
 		/* locate Tx ring */
-		p = ACCESS_ONCE(vsi->tx_rings[q]);
+		p = READ_ONCE(vsi->tx_rings[q]);
 
 #ifdef HAVE_NDO_GET_STATS64
 		do {
@@ -5924,7 +5924,7 @@ static int __i40e_setup_tc(struct net_device *netdev, u32 handle, __be16 proto,
 	unsigned int type = tc->type;
 #endif /* HAVE_NDO_SETUP_TC_REMOVE_TC_TO_NETDEV */
 
-	if (type != TC_SETUP_MQPRIO)
+	if (type != TC_SETUP_QDISC_MQPRIO)
 		return -EINVAL;
 
 #ifdef TC_MQPRIO_HW_OFFLOAD_MAX
@@ -7990,11 +7990,11 @@ static void i40e_service_task(struct work_struct *work)
 
 /**
  * i40e_service_timer - timer callback
- * @data: pointer to PF struct
+ * @t: pointer to timer_list struct
  **/
-static void i40e_service_timer(unsigned long data)
+static void i40e_service_timer(struct timer_list *t)
 {
-	struct i40e_pf *pf = (struct i40e_pf *)data;
+	struct i40e_pf *pf = from_timer(pf, t, service_timer);
 
 	mod_timer(&pf->service_timer,
 		  round_jiffies(jiffies + pf->service_timer_period));
@@ -10182,7 +10182,11 @@ static const struct net_device_ops i40e_netdev_ops = {
 	.ndo_set_rx_mode	= i40e_set_rx_mode,
 	.ndo_validate_addr	= eth_validate_addr,
 	.ndo_set_mac_address	= i40e_set_mac,
+#ifdef HAVE_RHEL7_EXTENDED_MIN_MAX_MTU
+	.extended.ndo_change_mtu = i40e_change_mtu,
+#else
 	.ndo_change_mtu		= i40e_change_mtu,
+#endif /* HAVE_RHEL7_EXTENDED_MIN_MAX_MTU */
 #if defined(HAVE_PTP_1588_CLOCK) || defined(HAVE_I40E_INTELCIM_IOCTL)
 	.ndo_do_ioctl		= i40e_ioctl,
 #endif
@@ -10196,11 +10200,15 @@ static const struct net_device_ops i40e_netdev_ops = {
 	.ndo_poll_controller	= i40e_netpoll,
 #endif
 #ifdef HAVE_SETUP_TC
+#ifdef HAVE_RHEL7_NETDEV_OPS_EXT_NDO_SETUP_TC
+	.extended.ndo_setup_tc_rh = __i40e_setup_tc,
+#else
 #ifdef NETIF_F_HW_TC
 	.ndo_setup_tc		= __i40e_setup_tc,
 #else
 	.ndo_setup_tc		= i40e_setup_tc,
-#endif
+#endif /* NETIF_F_HW_TC */
+#endif /* HAVE_RHEL7_NETDEV_OPS_EXT_NDO_SETUP_TC */
 #endif /* HAVE_SETUP_TC */
 #ifdef HAVE_RHEL7_NET_DEVICE_OPS_EXT
 /* RHEL7 requires this to be defined to enable extended ops.  RHEL7 uses the
@@ -10559,9 +10567,14 @@ static int i40e_config_netdev(struct i40e_vsi *vsi)
 #endif
 #ifdef HAVE_NETDEVICE_MIN_MAX_MTU
 	/* MTU range: 68 - 9706 */
+#ifdef HAVE_RHEL7_EXTENDED_MIN_MAX_MTU
+	netdev->extended->min_mtu = ETH_MIN_MTU;
+	netdev->extended->max_mtu = I40E_MAX_RXBUFFER - I40E_PACKET_HDR_PAD;
+#else
 	netdev->min_mtu = ETH_MIN_MTU;
 	netdev->max_mtu = I40E_MAX_RXBUFFER - I40E_PACKET_HDR_PAD;
-#endif
+#endif /* HAVE_RHEL7_EXTENDED_MIN_MAX_MTU */
+#endif /* HAVE_NETDEVICE_MIN_MAX_NTU */
 
 	return 0;
 }
@@ -12326,7 +12339,7 @@ static int i40e_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 #endif /* CONFIG_DCB */
 
 	/* set up periodic task facility */
-	setup_timer(&pf->service_timer, i40e_service_timer, (unsigned long)pf);
+	timer_setup(&pf->service_timer, i40e_service_timer, 0);
 	pf->service_timer_period = HZ;
 
 	INIT_WORK(&pf->service_task, i40e_service_task);
@@ -12671,7 +12684,7 @@ static void i40e_remove(struct pci_dev *pdev)
 	/* no more scheduling of any task */
 	set_bit(__I40E_SUSPENDED, pf->state);
 	set_bit(__I40E_DOWN, pf->state);
-	if (pf->service_timer.data)
+	if (pf->service_timer.function)
 		del_timer_sync(&pf->service_timer);
 	if (pf->service_task.func)
 		cancel_work_sync(&pf->service_task);

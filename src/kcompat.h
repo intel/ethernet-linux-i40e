@@ -1,7 +1,7 @@
 /*******************************************************************************
  *
  * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2017 Intel Corporation.
+ * Copyright(c) 2013 - 2018 Intel Corporation.
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,
@@ -4443,6 +4443,12 @@ static inline void hash_del(struct hlist_node *node)
 }
 #endif /* RHEL >= 6.6 */
 
+/* We don't have @flags support prior to 3.7, so we'll simply ignore the flags
+ * parameter on these older kernels.
+ */
+#define __setup_timer(_timer, _fn, _data, _flags)	\
+	setup_timer((_timer), (_fn), (_data))		\
+
 #else /* >= 3.7.0 */
 #include <linux/hashtable.h>
 #define HAVE_CONST_STRUCT_PCI_ERROR_HANDLERS
@@ -5160,6 +5166,13 @@ extern unsigned int __kc_eth_get_headlen(unsigned char *data, unsigned int max_l
 #endif /* 3.18.4 */
 
 /*****************************************************************************/
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,18,13) )
+#ifndef WRITE_ONCE
+#define WRITE_ONCE(x, val) ({ ACCESS_ONCE(x) = (val); })
+#endif
+#endif /* 3.18.13 */
+
+/*****************************************************************************/
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(3,19,0) )
 /* netdev_phys_port_id renamed to netdev_phys_item_id */
 #define netdev_phys_item_id netdev_phys_port_id
@@ -5495,6 +5508,13 @@ static inline void page_ref_inc(struct page *page)
 #endif
 
 #else /* 4.6.0 */
+#if (UBUNTU_VERSION_CODE && \
+     UBUNTU_VERSION_CODE >= UBUNTU_VERSION(4,4,0,21)) || \
+     (RHEL_RELEASE_CODE && \
+      RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,3)) || \
+     (SLE_VERSION_CODE && SLE_VERSION_CODE >= SLE_VERSION(12,3,0))
+#define HAVE_DEVLINK_SUPPORT
+#endif /* UBUNTU 4,4,0,21, RHEL 7.3, SLES12 SP3 */
 #define HAVE_PAGE_COUNT_BULK_UPDATE
 #endif /* 4.6.0 */
 
@@ -5587,7 +5607,13 @@ pci_release_mem_regions(struct pci_dev *pdev)
 #define HAVE_NETDEVICE_MIN_MAX_MTU
 #endif
 
-#if !(SLE_VERSION_CODE && (SLE_VERSION_CODE >= SLE_VERSION(12,3,0)))
+#if (RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,5)))
+#define HAVE_RHEL7_EXTENDED_MIN_MAX_MTU
+#define HAVE_NETDEVICE_MIN_MAX_MTU
+#endif
+
+#if (!(SLE_VERSION_CODE && (SLE_VERSION_CODE >= SLE_VERSION(12,3,0))) && \
+     !(RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,5))))
 #ifndef dma_map_page_attrs
 #define dma_map_page_attrs __kc_dma_map_page_attrs
 static inline dma_addr_t __kc_dma_map_page_attrs(struct device *dev,
@@ -5626,7 +5652,10 @@ static inline void __page_frag_cache_drain(struct page *page,
 #endif
 	__free_pages(page, compound_order(page));
 }
-#endif /* !SLE_VERSION(12,3,0) */
+#endif /* !SLE_VERSION(12,3,0) && !RHEL_VERSION(7,5) */
+#ifndef page_frag_free
+#define page_frag_free __free_page_frag
+#endif
 #ifndef ETH_MIN_MTU
 #define ETH_MIN_MTU 68
 #endif /* ETH_MIN_MTU */
@@ -5642,7 +5671,8 @@ static inline void __page_frag_cache_drain(struct page *page,
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4,11,0))
 #ifdef CONFIG_NET_RX_BUSY_POLL
 #define HAVE_NDO_BUSY_POLL
-#if (SLE_VERSION_CODE && (SLE_VERSION_CODE >= SLE_VERSION(12,3,0)))
+#if ((SLE_VERSION_CODE && (SLE_VERSION_CODE >= SLE_VERSION(12,3,0))) || \
+     (RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,5))))
 #define HAVE_VOID_NDO_GET_STATS64
 #endif
 #endif
@@ -5669,6 +5699,22 @@ static inline void __page_frag_cache_drain(struct page *page,
 #if (SLE_VERSION_CODE && (SLE_VERSION_CODE >= SLE_VERSION(15,0,0)))
 #define HAVE_NDO_SETUP_TC_REMOVE_TC_TO_NETDEV
 #endif
+
+#if (RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,5)))
+#define HAVE_NDO_SETUP_TC_REMOVE_TC_TO_NETDEV
+#define HAVE_RHEL7_NETDEV_OPS_EXT_NDO_SETUP_TC
+#endif
+
+#define TIMER_DATA_TYPE		unsigned long
+#define TIMER_FUNC_TYPE		void (*)(TIMER_DATA_TYPE)
+
+#define timer_setup(timer, callback, flags)				\
+	__setup_timer((timer), (TIMER_FUNC_TYPE)(callback),		\
+		      (TIMER_DATA_TYPE)(timer), (flags))
+
+#define from_timer(var, callback_timer, timer_fieldname) \
+	container_of(callback_timer, typeof(*var), timer_fieldname)
+
 #else /* > 4.14 */
 #define HAVE_NDO_SETUP_TC_REMOVE_TC_TO_NETDEV
 #endif /* 4.14.0 */

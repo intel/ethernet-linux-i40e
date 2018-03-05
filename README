@@ -2,7 +2,7 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet Controller 700 Series
 ===============================================================================
 
-October 30, 2017
+December 4, 2017
 
 ===============================================================================
 
@@ -14,7 +14,7 @@ Contents
 - Identifying Your Adapter
 - Building and Installation
 - Command Line Parameters
-- Intel(R) Ethernet Flow Director for i40e
+- Intel(R) Ethernet Flow Director
 - Additional Features & Configurations
 - Known Issues
 
@@ -64,7 +64,6 @@ malicious, frames to be dropped.
 
 Overview
 --------
-
 This driver supports kernel versions 2.6.32 and newer.
 
 Driver information can be obtained using ethtool, lspci, and ifconfig. 
@@ -357,17 +356,17 @@ The Intel Ethernet Flow Director performs the following tasks:
 NOTE: An included script (set_irq_affinity) automates setting the IRQ to CPU 
 affinity.
 
-NOTE: The Linux i40e driver supports the following flow types: IPv4, TCPv4, and 
+NOTE: The Linux i40edriver supports the following flow types: IPv4, TCPv4, and 
 UDPv4. For a given flow type, it supports valid combinations of IP addresses 
 (source or destination) and UDP/TCP ports (source and destination). For 
 example, you can supply only a source IP address, a source IP address and a 
 destination port, or any combination of one or more of these four parameters.
 
-NOTE: The Linux i40e driver allows you to filter traffic based on a 
-user-defined flexible two-byte pattern and offset by using the ethtool user-def 
-and mask fields. Only L3 and L4 flow types are supported for user-defined 
-flexible filters. For a given flow type, you must clear all Intel Ethernet Flow 
-Director filters before changing the input set (for that flow type).
+NOTE: The Linux i40edriver allows you to filter traffic based on a user-defined 
+flexible two-byte pattern and offset by using the ethtool user-def and mask 
+fields. Only L3 and L4 flow types are supported for user-defined flexible 
+filters. For a given flow type, you must clear all Intel Ethernet Flow Director 
+filters before changing the input set (for that flow type).
 
 ethtool commands:
 
@@ -455,7 +454,7 @@ The second command will fail with an error. You may program multiple filters
 with the same fields, using different values, but, on one device, you may not 
 program two tcp4 filters with different matching fields.
 
-Matching on a sub-portion of a field is not supported by the i40e driver, thus 
+Matching on a sub-portion of a field is not supported by the i40edriver, thus 
 partial mask fields are not supported.
 
 The driver also supports matching user-defined data within the packet payload. 
@@ -589,13 +588,12 @@ For cloud filters (tunneled packets):
 
   Example:
 
-    ethtool -U enp130s0 flow-type ip4 src-ip 192.168.42.13 dst-ip 192.168.42.33 
-/
-    src-port 12344 dst-port 12344 user-def 0x8000000000000022 loc 38 action /
-    0x200000000
+    ethtool –U enp130s0 flow-type ether dst 8b:9d:ed:6a:ce:43 \
+    src 1d:44:9d:54:da:de user-def 0x8000000000000022 loc 38 \
+    action 0x200000000
       Redirect traffic on VXLAN using tunnel id 34 (hex 0x22) coming from
-      192.168.42.13 port 12344 with destination 192.168.42.33 port 12344 into
-      VF id 1, and call this "rule 38"
+      outer MAC address 8b:9d:ed:6a:ce:43 and inner MAC address
+      1d:44:9d:54:da:de into VF id 1 and call this “rule 38”.
 
 
 ================================================================================
@@ -765,7 +763,7 @@ on your device, you may not be able to change the auto-negotiation setting.
 RSS Hash Flow
 -------------
 
-Allows you to set the hash bytes per flow type and any combination of one or
+Allows you to set the hash bytes per flow type and any combination of one or 
 more options for Receive Side Scaling (RSS) hash byte configuration.
 
 #ethtool -N <dev> rx-flow-hash <type> <option>
@@ -785,18 +783,18 @@ And <option> is one or more of:
 MAC and VLAN anti-spoofing feature
 ----------------------------------
 
-When a malicious driver attempts to send a spoofed packet, it is dropped by
-the hardware and not transmitted.
-NOTE: This feature can be disabled for a specific Virtual Function (VF).
+When a malicious driver attempts to send a spoofed packet, it is dropped by the 
+hardware and not transmitted.
+NOTE: This feature can be disabled for a specific Virtual Function (VF):
 ip link set <pf dev> vf <vf id> spoofchk {off|on}
 
 
 IEEE 1588 Precision Time Protocol (PTP) Hardware Clock (PHC)
 ------------------------------------------------------------
 
-Precision Time Protocol (PTP) is used to synchronize clocks in a computer
-network. PTP support varies among Intel devices that support this driver.
-Use "ethtool -T <netdev name>" to get a definitive list of PTP capabilities
+Precision Time Protocol (PTP) is used to synchronize clocks in a computer 
+network. PTP support varies among Intel devices that support this driver. Use 
+"ethtool -T <netdev name>" to get a definitive list of PTP capabilities 
 supported by the device.
 
 
@@ -877,31 +875,29 @@ Control (PFC) on the device if TC0 is not available. To fix this, ensure TC0 is
 enabled when setting up DCB on your switch.
 
 
-DCB is a configuration Quality of Service implementation in hardware.
-It uses the VLAN priority tag (802.1p) to filter traffic. That means
-that there are 8 different priorities that traffic can be filtered into.
-It also enables priority flow control (802.1Qbb) which can limit or
-eliminate the number of dropped packets during network stress. Bandwidth
-can be allocated to each of these priorities, which is enforced at the
-hardware level (802.1Qaz).
+DCB is a configuration Quality of Service implementation in hardware. It uses 
+the VLAN priority tag (802.1p) to filter traffic. That means that there are 8 
+different priorities that traffic can be filtered into. It also enables 
+priority flow control (802.1Qbb) which can limit or eliminate the number of 
+dropped packets during network stress. Bandwidth can be allocated to each of 
+these priorities, which is enforced at the hardware level (802.1Qaz).
 
-Adapter firmware implements LLDP and DCBX protocol agents as per 802.1AB
-and 802.1Qaz respectively. The firmware based DCBX agent runs in willing
-mode only and can accept settings from a DCBX capable peer. Software
-configuration of DCBX parameters via dcbtool/lldptool are not supported.
+Adapter firmware implements LLDP and DCBX protocol agents as per 802.1AB and 
+802.1Qaz respectively. The firmware based DCBX agent runs in willing mode only 
+and can accept settings from a DCBX capable peer. Software configuration of 
+DCBX parameters via dcbtool/lldptool are not supported.
 
 NOTE: Firmware LLDP can be disabled by setting the private flag disable-fw-lldp.
 
-The i40e driver implements the DCB netlink interface layer to allow
-user-space to communicate with the driver and query DCB configuration for
-the port.
+The i40e driver implements the DCB netlink interface layer to allow user-space 
+to communicate with the driver and query DCB configuration for the port.
 
 
 Interrupt Rate Limiting
 -----------------------
 
-The Intel(R) Ethernet Controller XL710 family supports an interrupt rate
-limiting mechanism. The user can control, via ethtool, the number of
+The Intel(R) Ethernet Controller XL710 family supports an interrupt rate 
+limiting mechanism. The user can control, via ethtool, the number of 
 microseconds between interrupts.
 
 Syntax:
@@ -909,34 +905,33 @@ Syntax:
 
 Valid Range: 0-235 (0=no limit)
 
-The range of 0-235 microseconds provides an effective range of 4,310 to
-250,000 interrupts per second. The value of rx-usecs-high can be set
-independently of rx-usecs and tx-usecs in the same ethtool command, and
-is also independent of the adaptive interrupt moderation algorithm. The
-underlying hardware supports granularity in 4-microsecond intervals, so
-adjacent values may result in the same interrupt rate.
+The range of 0-235 microseconds provides an effective range of 4,310 to 250,000 
+interrupts per second. The value of rx-usecs-high can be set independently of 
+rx-usecs and tx-usecs in the same ethtool command, and is also independent of 
+the adaptive interrupt moderation algorithm. The underlying hardware supports 
+granularity in 4-microsecond intervals, so adjacent values may result in the 
+same interrupt rate.
 
 One possible use case is the following:
 # ethtool -C ethX adaptive-rx off adaptive-tx off rx-usecs-high 20 rx-usecs 5
 tx-usecs 5
 
-The above command would disable adaptive interrupt moderation, and allow a
-maximum of 5 microseconds before indicating a receive or transmit was complete.
- However, instead of resulting in as many as 200,000 interrupts per second, it
+The above command would disable adaptive interrupt moderation, and allow a 
+maximum of 5 microseconds before indicating a receive or transmit was complete. 
+However, instead of resulting in as many as 200,000 interrupts per second, it 
 limits total interrupts per second to 50,000 via the rx-usecs-high parameter.
 
 
 Performance Optimization:
 -------------------------
 
-Driver defaults are meant to fit a wide variety of workloads, but if further
-optimization is required we recommend experimenting with the following
-settings.
+Driver defaults are meant to fit a wide variety of workloads, but if further 
+optimization is required we recommend experimenting with the following settings.
 
-NOTE: For better performance when processing small (64B) frame sizes,
-try enabling Hyper threading in the BIOS in order to increase the number
-of logical cores in the system and subsequently increase the number of
-queues available to the adapter.
+NOTE: For better performance when processing small (64B) frame sizes, try 
+enabling Hyper threading in the BIOS in order to increase the number of logical 
+cores in the system and subsequently increase the number of queues available to 
+the adapter.
 
 Virtualized Environments:
 
@@ -955,8 +950,8 @@ Virtualized Environments:
 
 Non-virtualized Environments
 
-Pin the adapter's IRQs to specific cores by disabling the irqbalance service
-and using the included set_irq_affinity script. Please see the script's help
+Pin the adapter's IRQs to specific cores by disabling the irqbalance service 
+and using the included set_irq_affinity script. Please see the script's help 
 text for further options.
 
   - The following settings will distribute the IRQs across all the cores
@@ -971,7 +966,7 @@ text for further options.
 
 For very CPU intensive workloads, we recommend pinning the IRQs to all cores.
 
-For IP Forwarding: Disable Adaptive ITR and lower rx and tx interrupts per
+For IP Forwarding: Disable Adaptive ITR and lower rx and tx interrupts per 
 queue using ethtool.
 
   - Setting rx-usecs and tx-usecs to 125 will limit interrupts to about 8000
@@ -980,7 +975,7 @@ queue using ethtool.
     # ethtool -C <interface> adaptive-rx off adaptive-tx off rx-usecs 125 
     tx-usecs 125
 
-For lower CPU utilization: Disable Adaptive ITR and lower rx and tx interrupts
+For lower CPU utilization: Disable Adaptive ITR and lower rx and tx interrupts 
 per queue using ethtool.
 
   - Setting rx-usecs and tx-usecs to 250 will limit interrupts to about 4000
@@ -989,8 +984,8 @@ per queue using ethtool.
     # ethtool -C <interface> adaptive-rx off adaptive-tx off rx-usecs 250 
     tx-usecs 250
 
-For lower latency: Disable Adaptive ITR and ITR by setting rx and tx to 0
-using ethtool.
+For lower latency: Disable Adaptive ITR and ITR by setting rx and tx to 0 using 
+ethtool.
 
     # ethtool -C <interface> adaptive-rx off adaptive-tx off rx-usecs 0 
     tx-usecs 0
@@ -1301,19 +1296,19 @@ to e1000-devel@lists.sf.net.
 
 License
 -------
-This program is free software; you can redistribute it and/or modify it under
-the terms and conditions of the GNU General Public License, version 2, as
+This program is free software; you can redistribute it and/or modify it under 
+the terms and conditions of the GNU General Public License, version 2, as 
 published by the Free Software Foundation.
 
-This program is distributed in the hope it will be useful, but WITHOUT ANY
-WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR
-A PARTICULAR PURPOSE. See the GNU General Public License for more details.
+This program is distributed in the hope it will be useful, but WITHOUT ANY 
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A 
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
 
-You should have received a copy of the GNU General Public License along with
-this program; if not, write to the Free Software Foundation, Inc., 51 Franklin
+You should have received a copy of the GNU General Public License along with 
+this program; if not, write to the Free Software Foundation, Inc., 51 Franklin 
 St - Fifth Floor, Boston, MA 02110-1301 USA.
 
-The full GNU General Public License is included in this distribution in the
+The full GNU General Public License is included in this distribution in the 
 file called "COPYING".
 
 Copyright(c) 2014-2017 Intel Corporation.
