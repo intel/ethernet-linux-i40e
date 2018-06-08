@@ -1979,6 +1979,50 @@ error_param:
 }
 
 /**
+ * i40e_ctrl_vf_tx_rings
+ * @vsi: the SRIOV VSI being configured
+ * @q_map: bit map of the queues to be enabled
+ * @enable: start or stop the queue
+ **/
+static int i40e_ctrl_vf_tx_rings(struct i40e_vsi *vsi, unsigned long q_map,
+				 bool enable)
+{
+	struct i40e_pf *pf = vsi->back;
+	int ret = 0;
+	u16 q_id;
+
+	for_each_set_bit(q_id, &q_map, I40E_MAX_VF_QUEUES) {
+		ret = i40e_control_wait_tx_q(pf, vsi->base_queue + q_id,
+					     enable);
+		if (ret)
+			break;
+	}
+	return ret;
+}
+
+/**
+ * i40e_ctrl_vf_rx_rings
+ * @vsi: the SRIOV VSI being configured
+ * @q_map: bit map of the queues to be enabled
+ * @enable: start or stop the queue
+ **/
+static int i40e_ctrl_vf_rx_rings(struct i40e_vsi *vsi, unsigned long q_map,
+				 bool enable)
+{
+	struct i40e_pf *pf = vsi->back;
+	int ret = 0;
+	u16 q_id;
+
+	for_each_set_bit(q_id, &q_map, I40E_MAX_VF_QUEUES) {
+		ret = i40e_control_wait_rx_q(pf, vsi->base_queue + q_id,
+					     enable);
+		if (ret)
+			break;
+	}
+	return ret;
+}
+
+/**
  * i40e_vc_enable_queues_msg
  * @vf: pointer to the VF info
  * @msg: pointer to the msg buffer
@@ -2009,8 +2053,17 @@ static int i40e_vc_enable_queues_msg(struct i40e_vf *vf, u8 *msg, u16 msglen)
 		goto error_param;
 	}
 
-	if (i40e_vsi_start_rings(pf->vsi[vf->lan_vsi_idx]))
+	/* Use the queue bit map sent by the VF */
+	if (i40e_ctrl_vf_rx_rings(pf->vsi[vf->lan_vsi_idx], vqs->rx_queues,
+				  true)) {
 		aq_ret = I40E_ERR_TIMEOUT;
+		goto error_param;
+	}
+	if (i40e_ctrl_vf_tx_rings(pf->vsi[vf->lan_vsi_idx], vqs->tx_queues,
+				  true)) {
+		aq_ret = I40E_ERR_TIMEOUT;
+		goto error_param;
+	}
 error_param:
 	/* send the response to the VF */
 	return i40e_vc_send_resp_to_vf(vf, VIRTCHNL_OP_ENABLE_QUEUES,
@@ -2048,8 +2101,17 @@ static int i40e_vc_disable_queues_msg(struct i40e_vf *vf, u8 *msg, u16 msglen)
 		goto error_param;
 	}
 
-	i40e_vsi_stop_rings(pf->vsi[vf->lan_vsi_idx]);
-
+	/* Use the queue bit map sent by the VF */
+	if (i40e_ctrl_vf_tx_rings(pf->vsi[vf->lan_vsi_idx], vqs->tx_queues,
+				  false)) {
+		aq_ret = I40E_ERR_TIMEOUT;
+		goto error_param;
+	}
+	if (i40e_ctrl_vf_rx_rings(pf->vsi[vf->lan_vsi_idx], vqs->rx_queues,
+				  false)) {
+		aq_ret = I40E_ERR_TIMEOUT;
+		goto error_param;
+	}
 error_param:
 	/* send the response to the VF */
 	return i40e_vc_send_resp_to_vf(vf, VIRTCHNL_OP_DISABLE_QUEUES,
@@ -2239,18 +2301,18 @@ static int i40e_vc_add_mac_addr_msg(struct i40e_vf *vf, u8 *msg, u16 msglen)
 		struct i40e_mac_filter *f;
 
 		f = i40e_find_mac(vsi, al->list[i].addr);
-		if (!f)
-			f = i40e_add_mac_filter(vsi, al->list[i].addr);
-
 		if (!f) {
-			dev_err(&pf->pdev->dev,
-				"Unable to add MAC filter %pM for VF %d\n",
-				 al->list[i].addr, vf->vf_id);
-			ret = I40E_ERR_PARAM;
-			spin_unlock_bh(&vsi->mac_filter_hash_lock);
-			goto error_param;
-		} else {
-			vf->num_mac++;
+			f = i40e_add_mac_filter(vsi, al->list[i].addr);
+			if (!f) {
+				dev_err(&pf->pdev->dev,
+					"Unable to add MAC filter %pM for VF %d\n",
+					al->list[i].addr, vf->vf_id);
+				ret = I40E_ERR_PARAM;
+				spin_unlock_bh(&vsi->mac_filter_hash_lock);
+				goto error_param;
+			} else {
+				vf->num_mac++;
+			}
 		}
 	}
 	spin_unlock_bh(&vsi->mac_filter_hash_lock);
@@ -2914,6 +2976,7 @@ int i40e_ndo_set_vf_mac(struct net_device *netdev, int vf_id, u8 *mac)
 	int ret = 0;
 	struct hlist_node *h;
 	int bkt;
+	u8 i;
 
 	/* validate the request */
 	if (vf_id >= pf->num_alloc_vfs) {
@@ -2925,6 +2988,16 @@ int i40e_ndo_set_vf_mac(struct net_device *netdev, int vf_id, u8 *mac)
 
 	vf = &(pf->vf[vf_id]);
 	vsi = pf->vsi[vf->lan_vsi_idx];
+
+	/* When the VF is resetting wait until it is done.
+	 * It can take up to 200 milliseconds,
+	 * but wait for up to 300 milliseconds to be safe.
+	 */
+	for (i = 0; i < 15; i++) {
+		if (test_bit(I40E_VF_STATE_INIT, &vf->vf_states))
+			break;
+		msleep(20);
+	}
 	if (!test_bit(I40E_VF_STATE_INIT, &vf->vf_states)) {
 		dev_err(&pf->pdev->dev, "VF %d still in reset. Try again.\n",
 			vf_id);

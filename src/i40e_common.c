@@ -1204,6 +1204,29 @@ static enum i40e_media_type i40e_get_media_type(struct i40e_hw *hw)
 	return media;
 }
 
+/**
+ * i40e_poll_globr - Poll for Global Reset completion
+ * @hw: pointer to the hardware structure
+ * @retry_limit: how many times to retry before failure
+ **/
+static i40e_status i40e_poll_globr(struct i40e_hw *hw,
+					     u32 retry_limit)
+{
+	u32 cnt, reg = 0;
+
+	for (cnt = 0; cnt < retry_limit; cnt++) {
+		reg = rd32(hw, I40E_GLGEN_RSTAT);
+		if (!(reg & I40E_GLGEN_RSTAT_DEVSTATE_MASK))
+			return I40E_SUCCESS;
+		msleep(100);
+	}
+
+	hw_dbg(hw, "Global reset failed.\n");
+	hw_dbg(hw, "I40E_GLGEN_RSTAT = 0x%x\n", reg);
+
+	return I40E_ERR_RESET_FAILED;
+}
+
 #define I40E_PF_RESET_WAIT_COUNT	200
 /**
  * i40e_pf_reset - Reset the PF
@@ -1273,14 +1296,14 @@ i40e_status i40e_pf_reset(struct i40e_hw *hw)
 			if (!(reg & I40E_PFGEN_CTRL_PFSWR_MASK))
 				break;
 			reg2 = rd32(hw, I40E_GLGEN_RSTAT);
-			if (reg2 & I40E_GLGEN_RSTAT_DEVSTATE_MASK) {
-				hw_dbg(hw, "Core reset upcoming.\n");
-				hw_dbg(hw, "I40E_GLGEN_RSTAT = 0x%x\n", reg2);
-				return I40E_ERR_NOT_READY;
-			}
+			if (reg2 & I40E_GLGEN_RSTAT_DEVSTATE_MASK)
+				break;
 			usleep_range(1000, 2000);
 		}
-		if (reg & I40E_PFGEN_CTRL_PFSWR_MASK) {
+		if (reg2 & I40E_GLGEN_RSTAT_DEVSTATE_MASK) {
+			if (i40e_poll_globr(hw, grst_del) != I40E_SUCCESS)
+				return I40E_ERR_RESET_FAILED;
+		} else if (reg & I40E_PFGEN_CTRL_PFSWR_MASK) {
 			hw_dbg(hw, "PF reset polling failed to complete.\n");
 			return I40E_ERR_RESET_FAILED;
 		}
@@ -1648,6 +1671,8 @@ i40e_status i40e_aq_set_phy_config(struct i40e_hw *hw,
 /**
  * i40e_set_fc
  * @hw: pointer to the hw struct
+ * @aq_failures: buffer to return AdminQ failure information
+ * @atomic_restart: whether to enable atomic link restart
  *
  * Set the requested flow control mode using set_phy_config.
  **/
@@ -2429,13 +2454,14 @@ i40e_status i40e_aq_get_switch_config(struct i40e_hw *hw,
  * i40e_aq_set_switch_config
  * @hw: pointer to the hardware structure
  * @flags: bit flag values to set
+ * @mode: cloud filter mode
  * @valid_flags: which bit flags to set
  * @cmd_details: pointer to command details structure or NULL
  *
  * Set switch configuration bits
  **/
 i40e_status i40e_aq_set_switch_config(struct i40e_hw *hw,
-				u16 flags, u16 valid_flags,
+				u16 flags, u16 valid_flags, u8 mode,
 				struct i40e_asq_cmd_details *cmd_details)
 {
 	struct i40e_aq_desc desc;
@@ -2447,6 +2473,7 @@ i40e_status i40e_aq_set_switch_config(struct i40e_hw *hw,
 					  i40e_aqc_opc_set_switch_config);
 	scfg->flags = CPU_TO_LE16(flags);
 	scfg->valid_flags = CPU_TO_LE16(valid_flags);
+	scfg->mode = mode;
 	if (hw->flags & I40E_HW_FLAG_802_1AD_CAPABLE) {
 		scfg->switch_tag = CPU_TO_LE16(hw->switch_tag);
 		scfg->first_tag = CPU_TO_LE16(hw->first_tag);
@@ -2816,8 +2843,8 @@ i40e_status i40e_aq_remove_macvlan(struct i40e_hw *hw, u16 seid,
  * @mr_list: list of mirrored VSI SEIDs or VLAN IDs
  * @cmd_details: pointer to command details structure or NULL
  * @rule_id: Rule ID returned from FW
- * @rule_used: Number of rules used in internal switch
- * @rule_free: Number of rules free in internal switch
+ * @rules_used: Number of rules used in internal switch
+ * @rules_free: Number of rules free in internal switch
  *
  * Add/Delete a mirror rule to a specific switch. Mirror rules are supported for
  * VEBs/VEPA elements only
@@ -2877,8 +2904,8 @@ static i40e_status i40e_mirrorrule_op(struct i40e_hw *hw,
  * @mr_list: list of mirrored VSI SEIDs or VLAN IDs
  * @cmd_details: pointer to command details structure or NULL
  * @rule_id: Rule ID returned from FW
- * @rule_used: Number of rules used in internal switch
- * @rule_free: Number of rules free in internal switch
+ * @rules_used: Number of rules used in internal switch
+ * @rules_free: Number of rules free in internal switch
  *
  * Add mirror rule. Mirror rules are supported for VEBs or VEPA elements only
  **/
@@ -2908,8 +2935,8 @@ i40e_status i40e_aq_add_mirrorrule(struct i40e_hw *hw, u16 sw_seid,
  *		add_mirrorrule.
  * @mr_list: list of mirrored VLAN IDs to be removed
  * @cmd_details: pointer to command details structure or NULL
- * @rule_used: Number of rules used in internal switch
- * @rule_free: Number of rules free in internal switch
+ * @rules_used: Number of rules used in internal switch
+ * @rules_free: Number of rules free in internal switch
  *
  * Delete a mirror rule. Mirror rules are supported for VEBs/VEPA elements only
  **/
@@ -3226,6 +3253,8 @@ i40e_status i40e_aq_write_nvm_config(struct i40e_hw *hw,
 /**
  * i40e_aq_oem_post_update - triggers an OEM specific flow after update
  * @hw: pointer to the hw struct
+ * @buff: buffer for result
+ * @buff_size: buffer size
  * @cmd_details: pointer to command details structure or NULL
  **/
 i40e_status i40e_aq_oem_post_update(struct i40e_hw *hw,
@@ -3302,9 +3331,10 @@ static void i40e_parse_discover_capabilities(struct i40e_hw *hw, void *buff,
 	u32 valid_functions, num_functions;
 	u32 number, logical_id, phys_id;
 	struct i40e_hw_capabilities *p;
+	i40e_status status;
+	u16 id, ocp_cfg_word0;
 	u8 major_rev;
 	u32 i = 0;
-	u16 id;
 
 	cap = (struct i40e_aqc_list_capabilities_element_resp *) buff;
 
@@ -3596,6 +3626,26 @@ static void i40e_parse_discover_capabilities(struct i40e_hw *hw, void *buff,
 			hw->num_ports++;
 	}
 
+	/* OCP cards case: if a mezz is removed the ethernet port is at
+	 * disabled state in PRTGEN_CNF register. Additional NVM read is
+	 * needed in order to check if we are dealing with OCP card.
+	 * Those cards have 4 PFs at minimum, so using PRTGEN_CNF for counting
+	 * physical ports results in wrong partition id calculation and thus
+	 * not supporting WoL.
+	 */
+	if (hw->mac.type == I40E_MAC_X722) {
+		if (i40e_acquire_nvm(hw, I40E_RESOURCE_READ) == I40E_SUCCESS) {
+			status = i40e_aq_read_nvm(hw, I40E_SR_EMP_MODULE_PTR,
+						  2 * I40E_SR_OCP_CFG_WORD0,
+						  sizeof(ocp_cfg_word0),
+						  &ocp_cfg_word0, true, NULL);
+			if (status == I40E_SUCCESS &&
+			    (ocp_cfg_word0 & I40E_SR_OCP_ENABLED))
+				hw->num_ports = 4;
+			i40e_release_nvm(hw);
+		}
+	}
+
 	valid_functions = p->valid_functions;
 	num_functions = 0;
 	while (valid_functions) {
@@ -3727,6 +3777,7 @@ i40e_aq_update_nvm_exit:
  * i40e_aq_nvm_progress
  * @hw: pointer to the hw struct
  * @progress: pointer to progress returned from AQ
+ * @cmd_details: pointer to command details structure or NULL
  *
  * Gets progress of flash rearrangement process
  **/
@@ -3927,6 +3978,11 @@ i40e_aq_set_dcb_parameters(struct i40e_hw *hw, bool dcb_enable,
 		(struct i40e_aqc_set_dcb_parameters *)&desc.params.raw;
 	i40e_status status;
 
+	if (hw->mac.type != I40E_MAC_XL710 ||
+	    (hw->aq.api_maj_ver < 1 ||
+	     (hw->aq.api_maj_ver == 1 && hw->aq.api_min_ver < 6)))
+		return I40E_ERR_DEVICE_NOT_SUPPORTED;
+
 	i40e_fill_default_direct_cmd_desc(&desc,
 					  i40e_aqc_opc_set_dcb_parameters);
 
@@ -4001,7 +4057,6 @@ i40e_status i40e_aq_start_stop_dcbx(struct i40e_hw *hw,
  * i40e_aq_add_udp_tunnel
  * @hw: pointer to the hw struct
  * @udp_port: the UDP port to add in Host byte order
- * @header_len: length of the tunneling header length in DWords
  * @protocol_index: protocol index type
  * @filter_index: pointer to filter index
  * @cmd_details: pointer to command details structure or NULL
@@ -4267,6 +4322,7 @@ i40e_status i40e_aq_config_vsi_tc_bw(struct i40e_hw *hw,
  * @hw: pointer to the hw struct
  * @seid: seid of the switching component connected to Physical Port
  * @ets_data: Buffer holding ETS parameters
+ * @opcode: Tx scheduler AQ command opcode
  * @cmd_details: pointer to command details structure or NULL
  **/
 i40e_status i40e_aq_config_switch_comp_ets(struct i40e_hw *hw,
@@ -4611,10 +4667,10 @@ i40e_status i40e_aq_add_rem_control_packet_filter(struct i40e_hw *hw,
  * @hw: pointer to the hw struct
  * @seid: VSI seid to add ethertype filter from
  **/
-#define I40E_FLOW_CONTROL_ETHTYPE 0x8808
 void i40e_add_filter_to_drop_tx_flow_control_frames(struct i40e_hw *hw,
 						    u16 seid)
 {
+#define I40E_FLOW_CONTROL_ETHTYPE 0x8808
 	u16 flag = I40E_AQC_ADD_CONTROL_PACKET_FLAGS_IGNORE_MAC |
 		   I40E_AQC_ADD_CONTROL_PACKET_FLAGS_DROP |
 		   I40E_AQC_ADD_CONTROL_PACKET_FLAGS_TX;
@@ -4637,10 +4693,10 @@ void i40e_add_filter_to_drop_tx_flow_control_frames(struct i40e_hw *hw,
  * to be shifted 1 byte over from the VxLAN VNI
  **/
 static void i40e_fix_up_geneve_vni(
-	struct i40e_aqc_add_remove_cloud_filters_element_data *filters,
+	struct i40e_aqc_cloud_filters_element_data *filters,
 	u8 filter_count)
 {
-	struct i40e_aqc_add_remove_cloud_filters_element_data *f = filters;
+	struct i40e_aqc_cloud_filters_element_data *f = filters;
 	int i;
 
 	for (i = 0; i < filter_count; i++) {
@@ -4665,13 +4721,13 @@ static void i40e_fix_up_geneve_vni(
  * @filter_count: number of filters contained in the buffer
  *
  * Set the cloud filters for a given VSI.  The contents of the
- * i40e_aqc_add_remove_cloud_filters_element_data are filled
+ * i40e_aqc_cloud_filters_element_data are filled
  * in by the caller of the function.
  *
  **/
 i40e_status i40e_aq_add_cloud_filters(struct i40e_hw *hw,
 	u16 seid,
-	struct i40e_aqc_add_remove_cloud_filters_element_data *filters,
+	struct i40e_aqc_cloud_filters_element_data *filters,
 	u8 filter_count)
 {
 	struct i40e_aq_desc desc;
@@ -4697,21 +4753,21 @@ i40e_status i40e_aq_add_cloud_filters(struct i40e_hw *hw,
 }
 
 /**
- * i40e_aq_add_cloud_filters_big_buffer
+ * i40e_aq_add_cloud_filters_bb
  * @hw: pointer to the hardware structure
  * @seid: VSI seid to add cloud filters from
  * @filters: Buffer which contains the filters in big buffer to be added
  * @filter_count: number of filters contained in the buffer
  *
  * Set the cloud filters for a given VSI.  The contents of the
- * i40e_aqc_add_rm_cloud_filt_elem_ext are filled in by the caller of
+ * i40e_aqc_cloud_filters_element_bb are filled in by the caller of the
  * the function.
  *
  **/
-i40e_status i40e_aq_add_cloud_filters_big_buffer(struct i40e_hw *hw,
-	u16 seid,
-	struct i40e_aqc_add_rm_cloud_filt_elem_ext *filters,
-	u8 filter_count)
+enum i40e_status_code
+i40e_aq_add_cloud_filters_bb(struct i40e_hw *hw, u16 seid,
+			     struct i40e_aqc_cloud_filters_element_bb *filters,
+			     u8 filter_count)
 {
 	struct i40e_aq_desc desc;
 	struct i40e_aqc_add_remove_cloud_filters *cmd =
@@ -4728,9 +4784,8 @@ i40e_status i40e_aq_add_cloud_filters_big_buffer(struct i40e_hw *hw,
 	desc.flags |= CPU_TO_LE16((u16)(I40E_AQ_FLAG_BUF | I40E_AQ_FLAG_RD));
 	cmd->num_filters = filter_count;
 	cmd->seid = CPU_TO_LE16(seid);
-	cmd->big_buffer_flag = I40E_AQC_ADD_REM_CLOUD_CMD_BIG_BUFFER;
+	cmd->big_buffer_flag = I40E_AQC_ADD_CLOUD_CMD_BB;
 
-	/* adjust Geneve VNI for HW issue */
 	for (i = 0; i < filter_count; i++) {
 		u16 tnl_type;
 		u32 ti;
@@ -4738,6 +4793,11 @@ i40e_status i40e_aq_add_cloud_filters_big_buffer(struct i40e_hw *hw,
 		tnl_type = (LE16_TO_CPU(filters[i].element.flags) &
 			   I40E_AQC_ADD_CLOUD_TNL_TYPE_MASK) >>
 			   I40E_AQC_ADD_CLOUD_TNL_TYPE_SHIFT;
+
+		/* Due to hardware eccentricities, the VNI for Geneve is shifted
+		 * one more byte further than normally used for Tenant ID in
+		 * other tunnel types.
+		 */
 		if (tnl_type == I40E_AQC_ADD_CLOUD_TNL_TYPE_GENEVE) {
 			ti = LE32_TO_CPU(filters[i].element.tenant_id);
 			filters[i].element.tenant_id = CPU_TO_LE32(ti << 8);
@@ -4750,21 +4810,21 @@ i40e_status i40e_aq_add_cloud_filters_big_buffer(struct i40e_hw *hw,
 }
 
 /**
- * i40e_aq_remove_cloud_filters
+ * i40e_aq_rem_cloud_filters
  * @hw: pointer to the hardware structure
  * @seid: VSI seid to remove cloud filters from
  * @filters: Buffer which contains the filters to be removed
  * @filter_count: number of filters contained in the buffer
  *
  * Remove the cloud filters for a given VSI.  The contents of the
- * i40e_aqc_add_remove_cloud_filters_element_data are filled
- * in by the caller of the function.
+ * i40e_aqc_cloud_filters_element_data are filled in by the caller
+ * of the function.
  *
  **/
-i40e_status i40e_aq_remove_cloud_filters(struct i40e_hw *hw,
-	u16 seid,
-	struct i40e_aqc_add_remove_cloud_filters_element_data *filters,
-	u8 filter_count)
+enum i40e_status_code
+i40e_aq_rem_cloud_filters(struct i40e_hw *hw, u16 seid,
+			  struct i40e_aqc_cloud_filters_element_data *filters,
+			  u8 filter_count)
 {
 	struct i40e_aq_desc desc;
 	struct i40e_aqc_add_remove_cloud_filters *cmd =
@@ -4789,22 +4849,21 @@ i40e_status i40e_aq_remove_cloud_filters(struct i40e_hw *hw,
 }
 
 /**
- * i40e_aq_remove_cloud_filters_big_buffer
+ * i40e_aq_rem_cloud_filters_bb
  * @hw: pointer to the hardware structure
  * @seid: VSI seid to remove cloud filters from
  * @filters: Buffer which contains the filters in big buffer to be removed
  * @filter_count: number of filters contained in the buffer
  *
- * Remove the cloud filters for a given VSI.  The contents of the
- * i40e_aqc_add_rm_cloud_filt_elem_ext are filled in by the caller of
- * the function.
+ * Remove the big buffer cloud filters for a given VSI.  The contents of the
+ * i40e_aqc_cloud_filters_element_bb are filled in by the caller of the
+ * function.
  *
  **/
-i40e_status i40e_aq_remove_cloud_filters_big_buffer(
-	struct i40e_hw *hw,
-	u16 seid,
-	struct i40e_aqc_add_rm_cloud_filt_elem_ext *filters,
-	u8 filter_count)
+enum i40e_status_code
+i40e_aq_rem_cloud_filters_bb(struct i40e_hw *hw, u16 seid,
+			     struct i40e_aqc_cloud_filters_element_bb *filters,
+			     u8 filter_count)
 {
 	struct i40e_aq_desc desc;
 	struct i40e_aqc_add_remove_cloud_filters *cmd =
@@ -4821,9 +4880,8 @@ i40e_status i40e_aq_remove_cloud_filters_big_buffer(
 	desc.flags |= CPU_TO_LE16((u16)(I40E_AQ_FLAG_BUF | I40E_AQ_FLAG_RD));
 	cmd->num_filters = filter_count;
 	cmd->seid = CPU_TO_LE16(seid);
-	cmd->big_buffer_flag = I40E_AQC_ADD_REM_CLOUD_CMD_BIG_BUFFER;
+	cmd->big_buffer_flag = I40E_AQC_ADD_CLOUD_CMD_BB;
 
-	/* adjust Geneve VNI for HW issue */
 	for (i = 0; i < filter_count; i++) {
 		u16 tnl_type;
 		u32 ti;
@@ -4831,6 +4889,11 @@ i40e_status i40e_aq_remove_cloud_filters_big_buffer(
 		tnl_type = (LE16_TO_CPU(filters[i].element.flags) &
 			   I40E_AQC_ADD_CLOUD_TNL_TYPE_MASK) >>
 			   I40E_AQC_ADD_CLOUD_TNL_TYPE_SHIFT;
+
+		/* Due to hardware eccentricities, the VNI for Geneve is shifted
+		 * one more byte further than normally used for Tenant ID in
+		 * other tunnel types.
+		 */
 		if (tnl_type == I40E_AQC_ADD_CLOUD_TNL_TYPE_GENEVE) {
 			ti = LE32_TO_CPU(filters[i].element.tenant_id);
 			filters[i].element.tenant_id = CPU_TO_LE32(ti << 8);
@@ -5001,6 +5064,7 @@ void i40e_set_pci_config_data(struct i40e_hw *hw, u16 link_status)
  * @ret_buff_size: actual buffer size returned
  * @ret_next_table: next block to read
  * @ret_next_index: next index to read
+ * @cmd_details: pointer to command details structure or NULL
  *
  * Dump internal FW/HW data for debug purposes.
  *
@@ -5123,7 +5187,7 @@ i40e_status i40e_aq_configure_partition_bw(struct i40e_hw *hw,
  * i40e_read_phy_register_clause22
  * @hw: pointer to the HW structure
  * @reg: register address in the page
- * @phy_adr: PHY address on MDIO interface
+ * @phy_addr: PHY address on MDIO interface
  * @value: PHY register value
  *
  * Reads specified PHY register value
@@ -5168,7 +5232,7 @@ i40e_status i40e_read_phy_register_clause22(struct i40e_hw *hw,
  * i40e_write_phy_register_clause22
  * @hw: pointer to the HW structure
  * @reg: register address in the page
- * @phy_adr: PHY address on MDIO interface
+ * @phy_addr: PHY address on MDIO interface
  * @value: PHY register value
  *
  * Writes specified PHY register value
@@ -5209,7 +5273,7 @@ i40e_status i40e_write_phy_register_clause22(struct i40e_hw *hw,
  * @hw: pointer to the HW structure
  * @page: registers page number
  * @reg: register address in the page
- * @phy_adr: PHY address on MDIO interface
+ * @phy_addr: PHY address on MDIO interface
  * @value: PHY register value
  *
  * Reads specified PHY register value
@@ -5283,7 +5347,7 @@ phy_read_end:
  * @hw: pointer to the HW structure
  * @page: registers page number
  * @reg: register address in the page
- * @phy_adr: PHY address on MDIO interface
+ * @phy_addr: PHY address on MDIO interface
  * @value: PHY register value
  *
  * Writes value to specified PHY register
@@ -5350,7 +5414,7 @@ phy_write_end:
  * @hw: pointer to the HW structure
  * @page: registers page number
  * @reg: register address in the page
- * @phy_adr: PHY address on MDIO interface
+ * @phy_addr: PHY address on MDIO interface
  * @value: PHY register value
  *
  * Writes value to specified PHY register
@@ -5386,7 +5450,7 @@ i40e_status i40e_write_phy_register(struct i40e_hw *hw,
  * @hw: pointer to the HW structure
  * @page: registers page number
  * @reg: register address in the page
- * @phy_adr: PHY address on MDIO interface
+ * @phy_addr: PHY address on MDIO interface
  * @value: PHY register value
  *
  * Reads specified PHY register value
@@ -5421,7 +5485,6 @@ i40e_status i40e_read_phy_register(struct i40e_hw *hw,
  * i40e_get_phy_address
  * @hw: pointer to the HW structure
  * @dev_num: PHY port num that address we want
- * @phy_addr: Returned PHY address
  *
  * Gets PHY address for current port
  **/
@@ -5615,7 +5678,9 @@ i40e_status i40e_led_get_phy(struct i40e_hw *hw, u16 *led_addr,
  * i40e_led_set_phy
  * @hw: pointer to the HW structure
  * @on: true or false
+ * @led_addr: address of led register to use
  * @mode: original val plus bit for set or ignore
+ *
  * Set led's on or off when controlled by the PHY
  *
  **/
@@ -5855,7 +5920,7 @@ i40e_status i40e_aq_get_phy_register(struct i40e_hw *hw,
 /**
  * i40e_aq_set_arp_proxy_config
  * @hw: pointer to the HW structure
- * @proxy_config - pointer to proxy config command table struct
+ * @proxy_config: pointer to proxy config command table struct
  * @cmd_details: pointer to command details
  *
  * Set ARP offload parameters from pre-populated
@@ -6092,6 +6157,7 @@ i40e_status_code i40e_aq_write_ddp(struct i40e_hw *hw, void *buff,
  * @hw: pointer to the hw struct
  * @buff: command buffer (size in bytes = buff_size)
  * @buff_size: buffer size in bytes
+ * @flags: AdminQ command flags
  * @cmd_details: pointer to command details structure or NULL
  **/
 enum

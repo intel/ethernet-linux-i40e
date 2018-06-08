@@ -129,6 +129,10 @@
 		17aa 4023  Ethernet Connection X722 for 10GbE backplane
 	37cf  Ethernet Connection X722 for 10GbE QSFP+
 	37d0  Ethernet Connection X722 for 10GbE SFP+
+		8086 0001  Ethernet Network Adapter X722-2
+		8086 0002  Ethernet Network Adapter X722-2
+		8086 0003  Ethernet Network Adapter X722-4
+		8086 0004  Ethernet Network Adapter X722-4
 	37d1  Ethernet Connection X722 for 1GbE
 		1590 0216  Ethernet 1Gb 2-port 368i Adapter
 		1590 0217  Ethernet 1Gb 2-port 368FLR-MMT Adapter

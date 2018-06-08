@@ -288,6 +288,13 @@ static const struct i40e_priv_flags i40e_gl_gstrings_priv_flags[] = {
 /**
  * struct ethtool_link_ksettings
  * @link_modes: supported and advertising, single item arrays
+ * @link_modes.supported: bitmask of supported link speeds
+ * @link_modes.advertising: bitmask of currently advertised speeds
+ * @base: base link details
+ * @base.speed: current link speed
+ * @base.port: current port type
+ * @base.duplex: current duplex mode
+ * @base.autoneg: current autonegotiation settings
  *
  * This struct and the following macros provide a way to support the old
  * ethtool get/set_settings API on older kernels, but in the style of the new
@@ -1042,7 +1049,9 @@ static int i40e_set_link_ksettings(struct net_device *netdev,
 	if (hw->device_id == I40E_DEV_ID_KX_B ||
 	    hw->device_id == I40E_DEV_ID_KX_C ||
 	    hw->device_id == I40E_DEV_ID_20G_KR2 ||
-	    hw->device_id == I40E_DEV_ID_20G_KR2_A) {
+	    hw->device_id == I40E_DEV_ID_20G_KR2_A ||
+	    hw->device_id == I40E_DEV_ID_25G_B ||
+	    hw->device_id == I40E_DEV_ID_KX_X722) {
 		netdev_info(netdev, "Changing settings is not supported on backplane.\n");
 		return -EOPNOTSUPP;
 	}
@@ -4943,7 +4952,7 @@ static int i40e_check_fdir_input_set(struct i40e_vsi *vsi,
 static bool i40e_match_fdir_filter(struct i40e_fdir_filter *a,
 				   struct i40e_fdir_filter *b)
 {
-	/* The filters do not much if any of these criteria differ. */
+	/* The filters do not match if any of these criteria differ. */
 	if (a->dst_ip != b->dst_ip ||
 	    a->src_ip != b->src_ip ||
 	    a->dst_port != b->dst_port ||
@@ -5547,7 +5556,7 @@ flags_complete:
 	 * enabled or FW API version < 1.7.  There are situations where older
 	 * FW versions/NPAR enabled PFs could disable LLDP, however we _must_
 	 * not allow the user to enable/disable LLDP with this flag on
-	 * unsupported FW verions.
+	 * unsupported FW versions.
 	 */
 	if (changed_flags & I40E_FLAG_DISABLE_FW_LLDP) {
 		if (pf->hw.func_caps.npar_enable) {
@@ -5572,7 +5581,7 @@ flags_complete:
 	 * message buffer.
 	 *
 	 * This is the point of no return for this function.  We need to have
-	 * checked any discrepencies or misconfigurations and returned
+	 * checked any discrepancies or misconfigurations and returned
 	 * EOPNOTSUPP before updating pf->flags here.
 	 */
 	if (cmpxchg64(&pf->flags, orig_flags, new_flags) != orig_flags) {
@@ -5601,7 +5610,7 @@ flags_complete:
 			sw_flags = I40E_AQ_SET_SWITCH_CFG_PROMISC;
 		valid_flags = I40E_AQ_SET_SWITCH_CFG_PROMISC;
 		ret = i40e_aq_set_switch_config(&pf->hw, sw_flags, valid_flags,
-						NULL);
+						0, NULL);
 		if (ret && pf->hw.aq.asq_last_status != I40E_AQ_RC_ESRCH) {
 			dev_info(&pf->pdev->dev,
 				 "couldn't set switch config bits, err %s aq_err %s\n",
