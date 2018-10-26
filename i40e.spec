@@ -1,19 +1,16 @@
 Name: i40e
 Summary: Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
-Version: 2.4.10
+Version: 2.7.11
 Release: 1
 Source: %{name}-%{version}.tar.gz
 Vendor: Intel Corporation
-License: GPL
+License: GPL-2.0
 ExclusiveOS: linux
 Group: System Environment/Kernel
 Provides: %{name}
-URL: http://www.intel.com/network/connectivity/products/server_adapters.htm
+URL: http://support.intel.com
 BuildRoot: %{_tmppath}/%{name}-%{version}-root
-# do not generate debugging packages by default - newer versions of rpmbuild
-# may instead need:
-#%define debug_package %{nil}
-%debug_package %{nil}
+%global debug_package %{nil}
 # macros for finding system files to update at install time (pci.ids, pcitable)
 %define find() %(for f in %*; do if [ -e $f ]; then echo $f; break; fi; done)
 %define _pciids   /usr/share/pci.ids        /usr/share/hwdata/pci.ids
@@ -33,12 +30,12 @@ make -C src clean
 make -C src
 
 %install
-make -C src INSTALL_MOD_PATH=%{buildroot} MANDIR=%{_mandir} rpm
-# Append .new to driver name to avoid conflict with kernel RPM
+make -C src INSTALL_MOD_PATH=%{buildroot} MANDIR=%{_mandir} modules_install mandocs_install
+# Remove modules files that we do not want to include
+find %{buildroot}/lib/modules/ -name 'modules.*' -exec rm -f {} \;
 cd %{buildroot}
-find lib -name "i40e.*o" -exec mv {} {}.new \; \
-         -fprintf %{_builddir}/%{name}-%{version}/file.list "/%p.new\n"
-find lib/modules -name modules.* -exec rm -f {} \;
+find lib -name "i40e.ko" \
+	-fprintf %{_builddir}/%{name}-%{version}/file.list "/%p\n"
 
 
 %clean
@@ -53,60 +50,15 @@ rm -rf %{buildroot}
 %doc pci.updates
 
 %post
-FL="%{_docdir}/%{name}-%{version}/file.list
-    %{_docdir}/%{name}/file.list"
-FL=$(for d in $FL ; do if [ -e $d ]; then echo $d; break; fi;  done)
-
-if [ -d /usr/local/lib/%{name} ]; then
-	rm -rf /usr/local/lib/%{name}
-fi
 if [ -d /usr/local/share/%{name} ]; then
 	rm -rf /usr/local/share/%{name}
 fi
-
-# Save old drivers (aka .ko and .ko.gz)
+mkdir /usr/local/share/%{name}
+cp --parents %{pciids} /usr/local/share/%{name}/
 echo "original pci.ids saved in /usr/local/share/%{name}";
 if [ "%{pcitable}" != "/dev/null" ]; then
+	cp --parents %{pcitable} /usr/local/share/%{name}/
 	echo "original pcitable saved in /usr/local/share/%{name}";
-fi
-for k in $(sed 's#/lib/modules/\([0-9a-zA-Z.+_-]*\).*$#\1#' $FL) ;
-do
-	d_drivers=/lib/modules/$k
-	d_usr=/usr/local/share/%{name}/$k
-	mkdir -p $d_usr
-	cd $d_drivers; find . -name %{name}.*o -exec cp --parents {} $d_usr \; -exec rm -f {} \;
-	cd $d_drivers; find . -name %{name}_*.*o -exec cp --parents {} $d_usr \; -exec rm -f {} \;
-	cd $d_drivers; find . -name %{name}.*o.gz -exec cp --parents {} $d_usr \; -exec rm -f {} \;
-	cd $d_drivers; find . -name %{name}_*.*o.gz -exec cp --parents {} $d_usr \; -exec rm -f {} \;
-	cp --parents %{pciids} /usr/local/share/%{name}/
-	if [ "%{pcitable}" != "/dev/null" ]; then
-		cp --parents %{pcitable} /usr/local/share/%{name}/
-	fi
-done
-
-# Add driver link
-for f in $(sed 's/\.new$//' $FL) ; do
-	ln -f $f.new $f
-done
-
-# Check if kernel version rpm was built on IS the same as running kernel
-BK_LIST=$(sed 's#/lib/modules/\([0-9a-zA-Z.+_-]*\).*$#\1#' $FL) ;
-MATCH=no
-for i in $BK_LIST
-do
-	if [ $(uname -r) == $i ] ; then
-		MATCH=yes
-		break
-	fi
-done
-if [ $MATCH == no ] ; then
-	echo -n "WARNING: Running kernel is $(uname -r).  "
-	echo -n "RPM supports kernels (  "
-	for i in $BK_LIST
-	do
-		echo -n "$i  "
-	done
-	echo ")"
 fi
 
 LD="%{_docdir}/%{name}";
@@ -369,62 +321,62 @@ END
 
 mv -f $LD/pci.ids.new  %{pciids}
 if [ "%{pcitable}" != "/dev/null" ]; then
-mv -f $LD/pcitable.new %{pcitable}
+	mv -f $LD/pcitable.new %{pcitable}
 fi
 
 uname -r | grep BOOT || /sbin/depmod -a > /dev/null 2>&1 || true
 
-echo "Updating initrd..."
-# Decide which initrd update utility to use.
-# Default is dracut but we'll try mkinitrd if that's not found.
-which dracut >/dev/null 2>&1
-if [ $? -eq 0 ]; then
-	echo "Using dracut to update initrd..."
-	initrd_cmd="dracut --force"
-else
-	which mkinitrd >/dev/null 2>&1
-	if [ $? -eq 0 ]; then
-		echo "Using mkinitrd to update initrd..."
-		initrd_cmd="mkinitrd"
+if which dracut >/dev/null 2>&1; then
+	echo "Updating initramfs with dracut..."
+	if dracut --force ; then
+		echo "Successfully updated initramfs."
 	else
-		echo "Unable to find initrd update utility."
-		echo "You must update your initrd for changes to take place."
+		echo "Failed to update initramfs."
+		echo "You must update your initramfs image for changes to take place."
 		exit -1
 	fi
-fi
-
-# Do the initrd update and report success or failure.
-if [ "$initrd_cmd" != "" ]; then
-	eval "$initrd_cmd"
-	if [ $? -ne 0 ]; then
-		echo "Failed to update initrd."
-		echo "You must update your initrd for changes to take place."
-		exit -1
-	else
+elif which mkinitrd >/dev/null 2>&1; then
+	echo "Updating initrd with mkinitrd..."
+	if mkinitrd; then
 		echo "Successfully updated initrd."
+	else
+		echo "Failed to update initrd."
+		echo "You must update your initrd image for changes to take place."
+		exit -1
 	fi
+else
+	echo "Unable to determine utility to update initrd image."
+	echo "You must update your initrd manually for changes to take place."
+	exit -1
 fi
 
 %preun
-# If doing RPM un-install
-if [ $1 -eq 0 ] ; then
-	FL="%{_docdir}/%{name}-%{version}/file.list
-    		%{_docdir}/%{name}/file.list"
-	FL=$(for d in $FL ; do if [ -e $d ]; then echo $d; break; fi;  done)
-
-	# Remove driver link
-	for f in $(sed 's/\.new$//' $FL) ; do
-		rm -f $f
-	done
-
-	# Restore old drivers
-	if [ -d /usr/local/share/%{name} ]; then
-		cd /usr/local/share/%{name}; find . -name '%{name}.*o*' -exec cp --parents {} /lib/modules/ \;
-		cd /usr/local/share/%{name}; find . -name '%{name}_*.*o*' -exec cp --parents {} /lib/modules/ \;
-		rm -rf /usr/local/share/%{name}
-	fi
-fi
+rm -rf /usr/local/share/%{name}
 
 %postun
 uname -r | grep BOOT || /sbin/depmod -a > /dev/null 2>&1 || true
+
+if which dracut >/dev/null 2>&1; then
+	echo "Updating initramfs with dracut..."
+	if dracut --force ; then
+		echo "Successfully updated initramfs."
+	else
+		echo "Failed to update initramfs."
+		echo "You must update your initramfs image for changes to take place."
+		exit -1
+	fi
+elif which mkinitrd >/dev/null 2>&1; then
+	echo "Updating initrd with mkinitrd..."
+	if mkinitrd; then
+		echo "Successfully updated initrd."
+	else
+		echo "Failed to update initrd."
+		echo "You must update your initrd image for changes to take place."
+		exit -1
+	fi
+else
+	echo "Unable to determine utility to update initrd image."
+	echo "You must update your initrd manually for changes to take place."
+	exit -1
+fi
 

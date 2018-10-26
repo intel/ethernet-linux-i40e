@@ -2,7 +2,7 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet Controller 700 Series
 ===============================================================================
 
-December 4, 2017
+September 28, 2018
 Copyright(c) 2014-2018 Intel Corporation.
 
 Contents
@@ -169,6 +169,9 @@ _lbank_line_
 
    The install location listed above is the default location. This may differ
    for various Linux distributions.
+   NOTE: To compile the driver on some kernel/arch combinations, a
+   package with the development version of libelf (e.g. libelf-dev,
+   libelf-devel, elfutilsl-libelf-devel) may need to be installed.
 
   NOTE: To gather and display additional statistics, use the
   I40E_ADD_PROBES pre-processor macro:
@@ -447,7 +450,7 @@ may also have been specified using "loc <N>" when adding the filter.
 The following example matches TCP traffic sent from 192.168.0.1, port 5300,
 directed to 192.168.0.5, port 80, and sends it to queue 7:
   ethtool -U enp130s0 flow-type tcp4 src-ip 192.168.0.1 dst-ip 192.168.0.5
-  src-port 5300 dst-port 7 action 7
+  src-port 5300 dst-port 80 action 7
 
 For each flow-type, the programmed filters must all have the same matching
 input set. For example, issuing the following two commands is acceptable:
@@ -544,6 +547,10 @@ The following filters are supported:
     Inner MAC, Inner VLAN, Tenant ID (for NVGRE, VXLAN or GENEVE packets)
     Inner MAC, Tenant ID (NVGRE packet or VXLAN/GENEVE packets)
     Outer MAC L2 filter
+    Inner MAC filter
+    Outer MAC, Tenant ID, Inner MAC
+    Application Destination IP
+    Application Source-IP, Inner MAC
     ToQueue: Use MAC, VLAN to point to a queue
   L3 filters
     Application Destination IP
@@ -924,6 +931,248 @@ However, instead of resulting in as many as 200,000 interrupts per second, it
 limits total interrupts per second to 50,000 via the rx-usecs-high parameter.
 
 
+Application Device Queues (ADq)
+-------------------------------
+
+Application Device Queues (ADq) allows you to dedicate one or more queues to a
+specific application. This can reduce latency for the specified application,
+and allow Tx traffic to be rate limited per application. Follow the steps below
+to set ADq.
+
+NOTE: Run all tc commands from the iproute2 <pathtoiproute2>/tc/ directory.
+NOTE: ADq is not compatible with cloud filters.
+  1. Create traffic classes (TCs). Maximum of 8 TCs can be created per
+  interface. The shaper bw_rlimit parameter is optional.
+  Example:
+  Sets up two tcs, tc0 and tc1, with 16 queues each and max tx rate set
+  to 1Gbit for tc0 and 3Gbit for tc1.
+  # tc qdisc add dev <interface> root mqprio num_tc 2 map 0 0 0 0 1 1 1 1
+  queues 16@0 16@16 hw 1 mode channel shaper bw_rlimit min_rate 1Gbit 2Gbit
+  max_rate 1Gbit 3Gbit
+
+  map: priority mapping for up to 16 priorities to tcs
+  (e.g. map 0 0 0 0 1 1 1 1 sets priorities 0-3 to use tc0 and 4-7 to
+  use tc1)
+
+  queues: for each tc, <num queues>@<offset> (e.g. queues 16@0 16@16 assigns
+  16 queues to tc0 at offset 0 and 16 queues to tc1 at offset 16. Max total
+  number of queues for all tcs is 64 or number of cores, whichever is
+  lower.)
+
+  hw 1 mode channel: ‘channel’ with ‘hw’ set to 1 is a new new hardware
+  offload mode in mqprio that makes full use of the mqprio options, the
+  TCs, the queue configurations, and the QoS parameters.
+
+  shaper bw_rlimit: for each tc, sets minimum and maximum bandwidth rates.
+  Totals must be equal or less than port speed.
+  For example: min_rate 1Gbit 3Gbit:
+  Verify bandwidth limit using network monitoring tools such as ifstat
+  or sar –n DEV [interval] [number of samples]
+
+NOTE: Setting up channels via ethtool (ethtool -L) is not supported when the
+TCs are configured using mqprio.
+
+  2. Enable HW TC offload on interface:
+  # ethtool -K <interface> hw-tc-offload on
+  3. Apply TCs to ingress (RX) flow of interface:
+  # tc qdisc add dev <interface> ingress
+NOTES:
+- You must have kernel version 4.15 or later and the sch_mqprio, act_mirred
+  and cls_flower modules loaded to set ADq
+- You must have iproute2 latest version
+- NVM version 6.01 or later is required.
+- ADq cannot be enabled when any the following features are enabled: Data
+  Center Bridging (DCB), Multiple Functions per Port (MFP), or Sideband
+  Filters.
+- If another driver (for example, DPDK) has set cloud filters, you cannot
+  enable ADq.
+- Tunnel filters are not supported in ADq. If encapsulated packets do
+  arrive in non-tunnel mode, filtering will be done on the inner headers.
+  For example, for VXLAN traffic in non-tunnel mode, PCTYPE is identified
+  as a VXLAN encapsulated packet, outer headers are ignored. Therefore,
+  inner headers are matched.
+- If a TC filter on a PF matches traffic over a VF (on the PF), that
+  traffic will be routed to the appropriate queue of the PF, and will
+  not be passed on the VF. Such traffic will end up getting dropped higher
+  up in the TCP/IP stack as it does not match PF address data.
+- If traffic matches multiple TC filters that point to different TCs,
+  that traffic will be duplicated and sent to all matching TC queues.
+  The hardware switch mirrors the packet to a VSI list when multiple
+  filters are matched.
+
+
+Forward Error Correction (FEC)
+------------------------------
+Allows you to set the Forward Error Correction (FEC) mode. FEC improves link
+stability, but increases latency. Many high quality optics, direct attach
+cables, and backplane channels provide a stable link without FEC.
+
+NOTE: For devices to benefit from this feature, link partners must have FEC
+enabled.
+
+On kernels older than 4.14, use the following private flags to disable
+FEC modes:
+  rs-fec (0 to disable, 1 to enable)
+  base-r-fec (0 to disable, 1 to enable)
+On kernel 4.14 or later, use ethtool to get/set the following FEC modes:
+  No FEC
+  Auto FEC
+  BASE-R FEC
+  RS FEC
+
+
+SR-IOV Hypervisor Management Interface
+--------------------------------------
+The sysfs file structure below supports the SR-IOV hypervisor management
+interface.
+
+/sys/class/net/<interface-name>/device/sriov (see 1 below)
++-- [VF-id, 0 .. 127] (see 2 below)
+| +-- trunk
+| +-- vlan_mirror
+| +-- engress_mirror
+| +-- ingress_mirror
+| +-- mac_anti_spoof
+| +-- vlan_anti_spoof
+| +-- loopback
+| +-- mac
+| +-- mac_list
+| +-- promisc
+| +-- vlan_strip
+| +-- stats
+| +-- link_state
+| +-- max_tx_rate
+| +-- min_tx_rate
+| +-- spoofcheck
+| +-- trust
+| +-- vlan
+*1: kobject started from “sriov” is not available from existing kernel
+sysfs, and it requires device driver to implement this interface.
+*2: assume maximum # of VF supported by a PF is 128. To support a device
+that supports more than 128 SR-IOV instances, a “vfx” is added to 0..127.
+With “vfx” kboject, users need to add vf index as the first parameter and
+followed by “:”.
+
+SR-IOV hypervisor functions:
+
+- trunk
+  Supports two operations: add and rem.
+  - add: adds one or more VLAN id into VF VLAN filtering.
+  - rem: removes VLAN ids from the VF VLAN filtering list.
+  Example 1: add multiple VLAN tags, VLANs 2,4,5,10-20, by PF, p1p2, on
+  a selected VF, 1, for filtering, with the sysfs support:
+  #echo add 2,4,5,10-20 > /sys/class/net/p1p2/device/sriov/1/trunk
+  Example 2: remove VLANs 5, 11-13 from PF p1p2 VF 1 with sysfs:
+  #echo rem 5,11-13 > /sys/class/net/p1p2/device/sriov/1/trunk
+  Note: for rem, if VLAN id is not on the VLAN filtering list, the
+  VLAN id will be ignored.
+
+- vlan_mirror
+  Supports both ingress and egress traffic mirroring.
+  Example 1: mirror traffic based upon VLANs 2,4,6,18-22 to VF 3 of PF p1p1.
+  # echo add 2,4,6,18-22 > /sys/class/net/p1p1/device/sriov/3/vlan_mirror
+  Example 2: remove VLAN 4, 15-17 from traffic mirroring at destination VF 3.
+  # echo rem 15-17 > /sys/class/net/p1p1/device/sriov/3/vlan_mirror
+  Example 3: remove all VLANs from mirroring at VF 3.
+  # echo rem 0 - 4095> /sys/class/net/p1p1/device/sriov/3/vlan_mirror
+
+- egress_mirror
+  Supports egress traffic mirroring.
+  Example 1: add egress traffic mirroring on PF p1p2 VF 1 to VF 7.
+  #echo add 7 > /sys/class/net/p1p2/device/sriov/1/egress_mirror
+  Example 2: remove egress traffic mirroring on PF p1p2 VF 1 to VF 7.
+  #echo rem 7 > /sys/class/net/p1p2/device/sriov/1/egress_mirror
+
+- ingress_mirror
+  Supports ingress traffic mirroring.
+  Example 1: mirror ingress traffic on PF p1p2 VF 1 to VF 7.
+  #echo add 7 > /sys/class/net/p1p2/device/sriov/1/ingress_mirror
+  Example 2: show current ingress mirroring configuration.
+  #cat /sys/class/net/p1p2/device/sriov/1/ingress_mirror
+
+- mac_anti_spoof
+  Supports Enable/Disable MAC anti-spoof. Allows VFs to transmit packets with
+  any SRC MAC, which is needed for some L2 applications as well as vNIC bonding
+  within VMs if set to OFF.
+  Example 1: enable MAC anti-spoof for PF p2p1 VF 1.
+  #echo ON /sys/class/net/p1p2/device/sriov/1/mac_anti_spoof
+  Example 2: disable MAC anti-spoof for PF p2p1 VF 1.
+  #echo OFF /sys/class/net/p1p2/device/sriov/1/mac_anti_spoof
+
+- vlan_anti_spoof
+  Supports Enable/Disable VLAN anti-spoof. Allows VFs to transmit packets only
+  with VLAN tag specified in “trunk” settings, also will not allow to transmit
+  “untagged” packets if set to ON. Violation have to increment tx_spoof stats
+  counter.
+  Example 1: enable VLAN anti-spoof for PF p2p1 VF 1.
+  #echo ON /sys/class/net/p1p2/device/sriov/1/vlan_anti_spoof
+  Example 2: disable VLAN anti-spoof for PF p2p1 VF 1.
+  #echo OFF /sys/class/net/p1p2/device/sriov/1/vlan_anti_spoof
+
+- loopback
+  Supports Enable/Disable VEB/VEPA (Local loopback).
+  Example 1: allow traffic switching between VFs on the same PF.
+  #echo ON > /sys/class/net/p1p2/device/sriov/loopback
+  Example 2: send Hairpin traffic to the switch to which the PF is connected.
+  #echo OFF > /sys/class/net/p1p2/device/sriov/loopback
+  Example 3: show loopback configuration.
+  #cat /sys/class/net/p1p2/device/sriov/loopback
+
+- mac
+  Supports setting default MAC address. If MAC address is set by this
+  command, the PF will not allow VF to change it using an MBOX request.
+  Example 1: set default MAC address to VF 1.
+  #echo "00:11:22:33:44:55" > /sys/class/net/p1p2/device/sriov/1/mac
+  Example 2: show default MAC address.
+  #cat /sys/class/net/p1p2/device/sriov/1/mac
+
+- mac_list
+  Supports adding additional MACs to the VF. The default MAC is taken from
+  "ip link set p1p2 vf 1 mac 00:11:22:33:44:55" if configured. If not, a random
+  address is assigned to the VF by the NIC. If the MAC is configured using
+the IP LINK command, the VF cannot change it via MBOX/AdminQ requests.
+  Example 1: add mac 00:11:22:33:44:55 and 00:66:55:44:33:22 to PF p1p2 VF 1.
+  #echo add "00:11:22:33:44:55,00:66:55:44:33:22" >
+  /sys/class/net/p1p2/device/sriov/1/mac_list
+  Example 2: delete mac 00:11:22:33:44:55 from above VF device.
+  #echo rem 00:11:22:33:44:55 > /sys/class/net/p1p2/device/sriov/1/mac_list
+  Example 3: display a VF MAC address list.
+  #cat /sys/class/net/p1p2/device/sriov/1/mac_lis
+
+- promisc
+  Supports setting/unsetting VF device unicast promiscuous mode and multicast
+  promiscuous mode.
+  Example 1: set MCAST promiscuous on PF p1p2 VF 1.
+  #echo add mcast > /sys/class/net/p1p2/device/sriov/1/promisc
+  Example 2: set UCAST promiscuous on PF p1p2 VF 1.
+  #echo add ucast > /sys/class/net/p1p2/device/sriov/1/promisc
+  Example 3: unset MCAST promiscuous on PF p1p2 VF 1.
+  #echo rem mcast > /sys/class/net/p1p2/device/sriov/1/promisc
+  Example 4: show current promiscuous mode configuration.
+  #cat /sys/class/net/p1p2/device/sriov/1/promisc
+
+- vlan_strip
+  Supports enabling/disabling VF device outer VLAN stripping
+  Example 1: enable VLAN strip on VF 3.
+  # echo ON > /sys/class/net/p1p1/device/sriov/3/vlan_strip
+  Example 2: disable VLAN striping VF 3.
+  # echo OFF > /sys/class/net/p1p1/device/sriov/3/vlan_strip
+
+- stats
+  Supports getting VF statistics
+  Example 1: display anti-spoofing violations counter for VF 1.
+  #cat /sys/class/net/p1p2/device/sriov/1/stats/tx_spoofed
+
+- link_state
+  Sets/displays link status.
+  Example 1: display link status on link speed.
+  #cat /sys/class/net/p1p2/device/sriov/1/link_state
+  Example 2 set VF 1 to track status of PF link.
+  #echo auto > /sys/class/net/p1p2/device/sriov/1/link_state
+  Example 3: disable VF 1.
+  #echo disable > /sys/class/net/p1p2/device/sriov/1/link_state
+
+
 Performance Optimization:
 -------------------------
 
@@ -999,9 +1248,19 @@ ethtool.
 Known Issues/Troubleshooting
 ----------------------------
 
+LACP PDUs not being sent
+------------------------
+Configuring bonding interface of mode 4 (802.3ad) on Ubuntu 14.04.5 will
+require manually recompiling the kernel with additional patch applied:
+ https://lore.kernel.org/patchwork/patch/651248/
+
+The reason for that is because Ubuntu's kernel 4.4 backports new
+ethtool GKLINKSETTINGS API from kernel 4.6 without tuning bonding driver
+to actually use it.
+
+
 Failure to enable MAX VFs when MFP and SR-IOV enabled
 -----------------------------------------------------
-
 X710/XXV710 devices fail to enable Max VFs (64) when Multiple Functions per
 Port (MFP) and SR-IOV are enabled. An error from i40e is logged that says "add
 vsi failed for VF N, aq_err 16". To workaround the issue, enable less than 64
@@ -1275,6 +1534,17 @@ Loading i40e driver in 3.2.x and newer kernels displays kernel tainted message
 ------------------------------------------------------------------------------
 Due to recent kernel changes, loading an out of tree driver causes the kernel
 to be tainted.
+
+
+Unexpected Issues when the device driver and DPDK share a device
+-------------------------------------------------------------------------------
+Unexpected issues may result when an i40e device is in multi driver mode and
+the kernel driver and DPDK driver are sharing the device. This is because
+access to the global NIC resources is not synchronized between multiple
+drivers. Any change to the global NIC configuration (writing to a global
+register, setting global configuration by AQ, or changing switch modes) will
+affect all ports and drivers on the device. Loading DPDK with the
+"multi-driver" module parameter may mitigate some of the issues.
 
 
 ================================================================================

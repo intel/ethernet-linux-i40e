@@ -1,25 +1,5 @@
-/*******************************************************************************
- *
- * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2018 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- ******************************************************************************/
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 2013 - 2018 Intel Corporation. */
 
 #ifdef CONFIG_DEBUG_FS
 
@@ -32,8 +12,8 @@ static struct dentry *i40e_dbg_root;
 
 /**
  * i40e_dbg_find_vsi - searches for the vsi with the given seid
- * @pf - the PF structure to search for the vsi
- * @seid - seid of the vsi it is searching for
+ * @pf: the PF structure to search for the vsi
+ * @seid: seid of the vsi it is searching for
  **/
 static struct i40e_vsi *i40e_dbg_find_vsi(struct i40e_pf *pf, int seid)
 {
@@ -51,8 +31,8 @@ static struct i40e_vsi *i40e_dbg_find_vsi(struct i40e_pf *pf, int seid)
 
 /**
  * i40e_dbg_find_veb - searches for the veb with the given seid
- * @pf - the PF structure to search for the veb
- * @seid - seid of the veb it is searching for
+ * @pf: the PF structure to search for the veb
+ * @seid: seid of the veb it is searching for
  **/
 static struct i40e_veb *i40e_dbg_find_veb(struct i40e_pf *pf, int seid)
 {
@@ -1136,8 +1116,7 @@ static ssize_t i40e_dbg_command_write(struct file *filp,
 		 */
 		if (!(pf->flags & I40E_FLAG_VEB_MODE_ENABLED)) {
 			pf->flags |= I40E_FLAG_VEB_MODE_ENABLED;
-			i40e_do_reset_safe(pf,
-					   BIT_ULL(__I40E_PF_RESET_REQUESTED));
+			i40e_do_reset_safe(pf, I40E_PF_RESET_FLAG);
 		}
 
 		vsi = i40e_vsi_setup(pf, I40E_VSI_VMDQ2, vsi_seid, 0);
@@ -1724,6 +1703,12 @@ static ssize_t i40e_dbg_command_write(struct file *filp,
 		if (strncmp(&cmd_buf[5], "stop", 4) == 0) {
 			int ret;
 
+			if (pf->hw.flags & I40E_HW_FLAG_FW_LLDP_STOPPABLE) {
+				dev_info(&pf->pdev->dev,
+					 "Use ethtool to disable LLDP firmware agent:"\
+					 "\"ethtool --set-priv-flags <interface> disable-fw-lldp on\".\n");
+				goto command_write_done;
+			}
 			ret = i40e_aq_stop_lldp(&pf->hw, false, NULL);
 			if (ret) {
 				dev_info(&pf->pdev->dev,
@@ -1738,8 +1723,8 @@ static ssize_t i40e_dbg_command_write(struct file *filp,
 						0, true, NULL, NULL);
 			if (ret) {
 				dev_info(&pf->pdev->dev,
-					"%s: Add Control Packet Filter AQ command failed =0x%x\n",
-					__func__, pf->hw.aq.asq_last_status);
+					 "%s: Add Control Packet Filter AQ command failed =0x%x\n",
+					 __func__, pf->hw.aq.asq_last_status);
 				goto command_write_done;
 			}
 #ifdef CONFIG_DCB
@@ -1751,6 +1736,12 @@ static ssize_t i40e_dbg_command_write(struct file *filp,
 		} else if (strncmp(&cmd_buf[5], "start", 5) == 0) {
 			int ret;
 
+			if (pf->hw.flags & I40E_HW_FLAG_FW_LLDP_STOPPABLE) {
+				dev_info(&pf->pdev->dev,
+					 "Use ethtool to enable LLDP firmware agent:"\
+					 "\"ethtool --set-priv-flags <interface> disable-fw-lldp off\".\n");
+				goto command_write_done;
+			}
 			ret = i40e_aq_add_rem_control_packet_filter(&pf->hw,
 						pf->hw.mac.addr,
 						I40E_ETH_P_LLDP, 0,
@@ -1758,11 +1749,10 @@ static ssize_t i40e_dbg_command_write(struct file *filp,
 						0, false, NULL, NULL);
 			if (ret) {
 				dev_info(&pf->pdev->dev,
-					"%s: Remove Control Packet Filter AQ command failed =0x%x\n",
-					__func__, pf->hw.aq.asq_last_status);
+					 "%s: Remove Control Packet Filter AQ command failed =0x%x\n",
+					 __func__, pf->hw.aq.asq_last_status);
 				/* Continue and start FW LLDP anyways */
 			}
-
 			ret = i40e_aq_start_lldp(&pf->hw, NULL);
 			if (ret) {
 				dev_info(&pf->pdev->dev,

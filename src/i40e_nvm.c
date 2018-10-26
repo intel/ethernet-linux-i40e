@@ -1,25 +1,5 @@
-/*******************************************************************************
- *
- * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2018 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- ******************************************************************************/
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 2013 - 2018 Intel Corporation. */
 
 #include "i40e_prototype.h"
 
@@ -704,6 +684,7 @@ static const char *i40e_nvm_update_state_str[] = {
 	"I40E_NVMUPD_EXEC_AQ",
 	"I40E_NVMUPD_GET_AQ_RESULT",
 	"I40E_NVMUPD_GET_AQ_EVENT",
+	"I40E_NVMUPD_GET_FEATURES",
 };
 
 /**
@@ -760,6 +741,31 @@ i40e_status i40e_nvmupd_command(struct i40e_hw *hw,
 		/* Clear error status on read */
 		if (hw->nvmupd_state == I40E_NVMUPD_STATE_ERROR)
 			hw->nvmupd_state = I40E_NVMUPD_STATE_INIT;
+
+		return I40E_SUCCESS;
+	}
+
+	/*
+	 * A supported features request returns immediately
+	 * rather than going into state machine
+	 */
+	if (upd_cmd == I40E_NVMUPD_FEATURES) {
+		if (cmd->data_size < hw->nvmupd_features.size) {
+			*perrno = -EFAULT;
+			return I40E_ERR_BUF_TOO_SHORT;
+		}
+
+		/*
+		 * If buffer is bigger than i40e_nvmupd_features structure,
+		 * make sure the trailing bytes are set to 0x0.
+		 */
+		if (cmd->data_size > hw->nvmupd_features.size)
+			i40e_memset(bytes + hw->nvmupd_features.size, 0x0,
+				    cmd->data_size - hw->nvmupd_features.size,
+				    I40E_NONDMA_MEM);
+
+		i40e_memcpy(bytes, &hw->nvmupd_features,
+			    hw->nvmupd_features.size, I40E_NONDMA_MEM);
 
 		return I40E_SUCCESS;
 	}
@@ -1222,10 +1228,20 @@ static enum i40e_nvmupd_cmd i40e_nvmupd_validate_command(struct i40e_hw *hw,
 			upd_cmd = I40E_NVMUPD_READ_SA;
 			break;
 		case I40E_NVM_EXEC:
-			if (module == 0xf)
-				upd_cmd = I40E_NVMUPD_STATUS;
-			else if (module == 0)
+			switch (module) {
+			case I40E_NVM_EXEC_GET_AQ_RESULT:
 				upd_cmd = I40E_NVMUPD_GET_AQ_RESULT;
+				break;
+			case I40E_NVM_EXEC_FEATURES:
+				upd_cmd = I40E_NVMUPD_FEATURES;
+				break;
+			case I40E_NVM_EXEC_STATUS:
+				upd_cmd = I40E_NVMUPD_STATUS;
+				break;
+			default:
+				*perrno = -EFAULT;
+				return I40E_NVMUPD_INVALID;
+			}
 			break;
 		case I40E_NVM_AQE:
 			upd_cmd = I40E_NVMUPD_GET_AQ_EVENT;

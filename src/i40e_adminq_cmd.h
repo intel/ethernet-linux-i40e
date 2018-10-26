@@ -1,25 +1,5 @@
-/*******************************************************************************
- *
- * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2018 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- ******************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Copyright(c) 2013 - 2018 Intel Corporation. */
 
 #ifndef _I40E_ADMINQ_CMD_H_
 #define _I40E_ADMINQ_CMD_H_
@@ -31,7 +11,7 @@
  */
 
 #define I40E_FW_API_VERSION_MAJOR	0x0001
-#define I40E_FW_API_VERSION_MINOR_X722	0x0005
+#define I40E_FW_API_VERSION_MINOR_X722	0x0006
 #define I40E_FW_API_VERSION_MINOR_X710	0x0007
 
 #define I40E_FW_MINOR_VERSION(_h) ((_h)->mac.type == I40E_MAC_XL710 ? \
@@ -40,6 +20,8 @@
 
 /* API version 1.7 implements additional link and PHY-specific APIs  */
 #define I40E_MINOR_VER_GET_LINK_INFO_XL710 0x0007
+/* API version 1.6 for X722 devices adds ability to stop FW LLDP agent */
+#define I40E_MINOR_VER_FW_LLDP_STOPPABLE_X722 0x0006
 
 struct i40e_aq_desc {
 	__le16 flags;
@@ -1573,7 +1555,8 @@ struct i40e_aqc_replace_cloud_filters_cmd {
 	u8	old_filter_type;
 	u8	new_filter_type;
 	u8	tr_bit;
-	u8	reserved[4];
+	u8	tr_bit2;
+	u8	reserved[3];
 	__le32 addr_high;
 	__le32 addr_low;
 };
@@ -1954,6 +1937,8 @@ enum i40e_aq_phy_type {
 	I40E_PHY_TYPE_25GBASE_LR		= 0x22,
 	I40E_PHY_TYPE_25GBASE_AOC		= 0x23,
 	I40E_PHY_TYPE_25GBASE_ACC		= 0x24,
+	I40E_PHY_TYPE_2_5GBASE_T		= 0x30,
+	I40E_PHY_TYPE_5GBASE_T			= 0x31,
 	I40E_PHY_TYPE_MAX,
 	I40E_PHY_TYPE_NOT_SUPPORTED_HIGH_TEMP	= 0xFD,
 	I40E_PHY_TYPE_EMPTY			= 0xFE,
@@ -1995,19 +1980,25 @@ enum i40e_aq_phy_type {
 				BIT_ULL(I40E_PHY_TYPE_25GBASE_SR) | \
 				BIT_ULL(I40E_PHY_TYPE_25GBASE_LR) | \
 				BIT_ULL(I40E_PHY_TYPE_25GBASE_AOC) | \
-				BIT_ULL(I40E_PHY_TYPE_25GBASE_ACC))
+				BIT_ULL(I40E_PHY_TYPE_25GBASE_ACC) | \
+				BIT_ULL(I40E_PHY_TYPE_2_5GBASE_T) | \
+				BIT_ULL(I40E_PHY_TYPE_5GBASE_T))
 
+#define I40E_LINK_SPEED_2_5GB_SHIFT	0x0
 #define I40E_LINK_SPEED_100MB_SHIFT	0x1
 #define I40E_LINK_SPEED_1000MB_SHIFT	0x2
 #define I40E_LINK_SPEED_10GB_SHIFT	0x3
 #define I40E_LINK_SPEED_40GB_SHIFT	0x4
 #define I40E_LINK_SPEED_20GB_SHIFT	0x5
 #define I40E_LINK_SPEED_25GB_SHIFT	0x6
+#define I40E_LINK_SPEED_5GB_SHIFT	0x7
 
 enum i40e_aq_link_speed {
 	I40E_LINK_SPEED_UNKNOWN	= 0,
 	I40E_LINK_SPEED_100MB	= (1 << I40E_LINK_SPEED_100MB_SHIFT),
 	I40E_LINK_SPEED_1GB	= (1 << I40E_LINK_SPEED_1000MB_SHIFT),
+	I40E_LINK_SPEED_2_5GB	= (1 << I40E_LINK_SPEED_2_5GB_SHIFT),
+	I40E_LINK_SPEED_5GB	= (1 << I40E_LINK_SPEED_5GB_SHIFT),
 	I40E_LINK_SPEED_10GB	= (1 << I40E_LINK_SPEED_10GB_SHIFT),
 	I40E_LINK_SPEED_40GB	= (1 << I40E_LINK_SPEED_40GB_SHIFT),
 	I40E_LINK_SPEED_20GB	= (1 << I40E_LINK_SPEED_20GB_SHIFT),
@@ -2053,6 +2044,8 @@ struct i40e_aq_get_phy_abilities_resp {
 #define I40E_AQ_PHY_TYPE_EXT_25G_LR	0x08
 #define I40E_AQ_PHY_TYPE_EXT_25G_AOC	0x10
 #define I40E_AQ_PHY_TYPE_EXT_25G_ACC	0x20
+#define I40E_AQ_PHY_TYPE_EXT_2_5GBASE_T	0x40
+#define I40E_AQ_PHY_TYPE_EXT_5GBASE_T	0x80
 	u8	fec_cfg_curr_mod_ext_info;
 #define I40E_AQ_ENABLE_FEC_KR		0x01
 #define I40E_AQ_ENABLE_FEC_RS		0x02
@@ -2314,7 +2307,9 @@ struct i40e_aqc_phy_register_access {
 #define I40E_AQ_PHY_REG_ACCESS_EXTERNAL	1
 #define I40E_AQ_PHY_REG_ACCESS_EXTERNAL_MODULE	2
 	u8	dev_addres;
-	u8	reserved1[2];
+	u8	cmd_flags;
+#define I40E_AQ_PHY_REG_ACCESS_DONT_CHANGE_QSFP_PAGE	1
+	u8	reserved1;
 	__le32	reg_address;
 	__le32	reg_value;
 	u8	reserved2[4];
@@ -2329,6 +2324,8 @@ I40E_CHECK_CMD_LENGTH(i40e_aqc_phy_register_access);
 struct i40e_aqc_nvm_update {
 	u8	command_flags;
 #define I40E_AQ_NVM_LAST_CMD			0x01
+#define I40E_AQ_NVM_REARRANGE_TO_FLAT		0x20
+#define I40E_AQ_NVM_REARRANGE_TO_STRUCT		0x40
 #define I40E_AQ_NVM_FLASH_ONLY			0x80
 #define I40E_AQ_NVM_PRESERVATION_FLAGS_SHIFT	1
 #define I40E_AQ_NVM_PRESERVATION_FLAGS_MASK	0x03

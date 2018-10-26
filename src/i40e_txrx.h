@@ -1,25 +1,5 @@
-/*******************************************************************************
- *
- * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2018 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- ******************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Copyright(c) 2013 - 2018 Intel Corporation. */
 
 #ifndef _I40E_TXRX_H_
 #define _I40E_TXRX_H_
@@ -310,6 +290,7 @@ static inline unsigned int i40e_txd_use_count(unsigned int size)
 struct i40e_tx_buffer {
 	struct i40e_tx_desc *next_to_watch;
 	union {
+		struct xdp_frame *xdpf;
 		struct sk_buff *skb;
 		void *raw_buf;
 	};
@@ -340,6 +321,17 @@ struct i40e_queue_stats {
 	u64 packets;
 	u64 bytes;
 };
+
+#ifdef HAVE_XDP_SUPPORT
+struct i40e_xdp_stats {
+	u64 xdp_pass;
+	u64 xdp_drop;
+	u64 xdp_tx;
+	u64 xdp_unknown;
+	u64 xdp_redirect;
+	u64 xdp_redirect_fail;
+};
+#endif
 
 struct i40e_tx_queue_stats {
 	u64 restart_queue;
@@ -381,6 +373,7 @@ struct i40e_ring {
 	void *desc;			/* Descriptor ring memory */
 	struct device *dev;		/* Used for DMA mapping */
 	struct net_device *netdev;	/* netdev ring maps to */
+	struct bpf_prog *xdp_prog;
 	union {
 		struct i40e_tx_buffer *tx_bi;
 		struct i40e_rx_buffer *rx_bi;
@@ -415,11 +408,15 @@ struct i40e_ring {
 	u16 flags;
 #define I40E_TXR_FLAGS_WB_ON_ITR		BIT(0)
 #define I40E_RXR_FLAGS_BUILD_SKB_ENABLED	BIT(1)
+#define I40E_TXR_FLAGS_XDP			BIT(2)
 
 	/* stats structs */
 	struct i40e_queue_stats	stats;
 #ifdef HAVE_NDO_GET_STATS64
 	struct u64_stats_sync syncp;
+#endif
+#ifdef HAVE_XDP_SUPPORT
+	struct i40e_xdp_stats xdp_stats;
 #endif
 	union {
 		struct i40e_tx_queue_stats tx_stats;
@@ -442,6 +439,11 @@ struct i40e_ring {
 					 * i40e_clean_rx_ring_irq() is called
 					 * for this ring.
 					 */
+
+	struct i40e_channel *ch;
+#ifdef HAVE_XDP_BUFF_RXQ
+	struct xdp_rxq_info xdp_rxq;
+#endif
 } ____cacheline_internodealigned_in_smp;
 
 static inline bool ring_uses_build_skb(struct i40e_ring *ring)
@@ -465,6 +467,16 @@ static inline void clear_ring_build_skb_enabled(struct i40e_ring *ring)
 #define I40E_ITR_ADAPTIVE_LATENCY       0x8000
 #define I40E_ITR_ADAPTIVE_BULK          0x0000
 #define ITR_IS_BULK(x) (!((x) & I40E_ITR_ADAPTIVE_LATENCY))
+
+static inline bool ring_is_xdp(struct i40e_ring *ring)
+{
+	return !!(ring->flags & I40E_TXR_FLAGS_XDP);
+}
+
+static inline void set_ring_xdp(struct i40e_ring *ring)
+{
+	ring->flags |= I40E_TXR_FLAGS_XDP;
+}
 
 struct i40e_ring_container {
 	struct i40e_ring *ring;		/* pointer to linked list of ring(s) */
@@ -509,6 +521,27 @@ u32 i40e_get_tx_pending(struct i40e_ring *ring, bool in_sw);
 void i40e_detect_recover_hung(struct i40e_vsi *vsi);
 int __i40e_maybe_stop_tx(struct i40e_ring *tx_ring, int size);
 bool __i40e_chk_linearize(struct sk_buff *skb);
+#ifdef HAVE_XDP_FRAME_STRUCT
+int i40e_xdp_xmit(struct net_device *dev, int n, struct xdp_frame **frames,
+		  u32 flags);
+#else
+int i40e_xdp_xmit(struct net_device *dev, struct xdp_buff *xdp);
+#endif
+void i40e_xdp_flush(struct net_device *dev);
+
+#ifdef HAVE_XDP_SUPPORT
+#ifdef HAVE_XDP_FRAME_STRUCT
+static inline u32 xdp_get_len(struct xdp_frame *xdp)
+{
+	return xdp->len;
+}
+#else
+static inline u32 xdp_get_len(struct xdp_buff *xdp)
+{
+	return xdp->data_end - xdp->data;
+}
+#endif
+#endif
 
 /**
  * i40e_get_head - Retrieve head from head writeback

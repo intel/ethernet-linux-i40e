@@ -1,25 +1,5 @@
-/*******************************************************************************
- *
- * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2018 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- ******************************************************************************/
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 2013 - 2018 Intel Corporation. */
 
 #include "i40e_status.h"
 #include "i40e_type.h"
@@ -114,6 +94,7 @@ static i40e_status i40e_alloc_adminq_arq_ring(struct i40e_hw *hw)
  **/
 static void i40e_free_adminq_asq(struct i40e_hw *hw)
 {
+	i40e_free_virt_mem(hw, &hw->aq.asq.cmd_buf);
 	i40e_free_dma_mem(hw, &hw->aq.asq.desc_buf);
 }
 
@@ -385,7 +366,7 @@ static i40e_status i40e_init_asq(struct i40e_hw *hw)
 	/* initialize base registers */
 	ret_code = i40e_config_asq_regs(hw);
 	if (ret_code != I40E_SUCCESS)
-		goto init_adminq_free_rings;
+		goto init_config_regs;
 
 	/* success! */
 	hw->aq.asq.count = hw->aq.num_asq_entries;
@@ -393,6 +374,10 @@ static i40e_status i40e_init_asq(struct i40e_hw *hw)
 
 init_adminq_free_rings:
 	i40e_free_adminq_asq(hw);
+	return ret_code;
+
+init_config_regs:
+	i40e_free_asq_bufs(hw);
 
 init_adminq_exit:
 	return ret_code;
@@ -632,6 +617,12 @@ i40e_status i40e_init_adminq(struct i40e_hw *hw)
 	    hw->aq.api_maj_ver == I40E_FW_API_VERSION_MAJOR &&
 	    hw->aq.api_min_ver >= I40E_MINOR_VER_GET_LINK_INFO_XL710) {
 		hw->flags |= I40E_HW_FLAG_AQ_PHY_ACCESS_CAPABLE;
+		hw->flags |= I40E_HW_FLAG_FW_LLDP_STOPPABLE;
+	}
+	if (hw->mac.type == I40E_MAC_X722 &&
+	    hw->aq.api_maj_ver == I40E_FW_API_VERSION_MAJOR &&
+	    hw->aq.api_min_ver >= I40E_MINOR_VER_FW_LLDP_STOPPABLE_X722) {
+		hw->flags |= I40E_HW_FLAG_FW_LLDP_STOPPABLE;
 	}
 
 	/* Newer versions of firmware require lock when reading the NVM */
@@ -920,6 +911,8 @@ i40e_status i40e_asq_send_command(struct i40e_hw *hw,
 		cmd_completed = true;
 		if ((enum i40e_admin_queue_err)retval == I40E_AQ_RC_OK)
 			status = I40E_SUCCESS;
+		else if ((enum i40e_admin_queue_err)retval == I40E_AQ_RC_EBUSY)
+			status = I40E_ERR_NOT_READY;
 		else
 			status = I40E_ERR_ADMIN_QUEUE_ERROR;
 		hw->aq.asq_last_status = (enum i40e_admin_queue_err)retval;

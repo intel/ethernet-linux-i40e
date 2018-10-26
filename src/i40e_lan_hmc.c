@@ -1,25 +1,5 @@
-/*******************************************************************************
- *
- * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2018 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- ******************************************************************************/
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 2013 - 2018 Intel Corporation. */
 
 #include "i40e_osdep.h"
 #include "i40e_register.h"
@@ -133,7 +113,7 @@ i40e_status i40e_init_lan_hmc(struct i40e_hw *hw, u32 txq_num,
 		ret_code = I40E_ERR_INVALID_HMC_OBJ_COUNT;
 		hw_dbg(hw, "i40e_init_lan_hmc: Tx context: asks for 0x%x but max allowed is 0x%x, returns error %d\n",
 			  txq_num, obj->max_cnt, ret_code);
-		goto init_lan_hmc_out;
+		goto free_hmc_out;
 	}
 
 	/* aggregate values into the full LAN object for later */
@@ -156,7 +136,7 @@ i40e_status i40e_init_lan_hmc(struct i40e_hw *hw, u32 txq_num,
 		ret_code = I40E_ERR_INVALID_HMC_OBJ_COUNT;
 		hw_dbg(hw, "i40e_init_lan_hmc: Rx context: asks for 0x%x but max allowed is 0x%x, returns error %d\n",
 			  rxq_num, obj->max_cnt, ret_code);
-		goto init_lan_hmc_out;
+		goto free_hmc_out;
 	}
 
 	/* aggregate values into the full LAN object for later */
@@ -179,7 +159,7 @@ i40e_status i40e_init_lan_hmc(struct i40e_hw *hw, u32 txq_num,
 		ret_code = I40E_ERR_INVALID_HMC_OBJ_COUNT;
 		hw_dbg(hw, "i40e_init_lan_hmc: FCoE context: asks for 0x%x but max allowed is 0x%x, returns error %d\n",
 			  fcoe_cntx_num, obj->max_cnt, ret_code);
-		goto init_lan_hmc_out;
+		goto free_hmc_out;
 	}
 
 	/* aggregate values into the full LAN object for later */
@@ -202,7 +182,7 @@ i40e_status i40e_init_lan_hmc(struct i40e_hw *hw, u32 txq_num,
 		ret_code = I40E_ERR_INVALID_HMC_OBJ_COUNT;
 		hw_dbg(hw, "i40e_init_lan_hmc: FCoE filter: asks for 0x%x but max allowed is 0x%x, returns error %d\n",
 			  fcoe_filt_num, obj->max_cnt, ret_code);
-		goto init_lan_hmc_out;
+		goto free_hmc_out;
 	}
 
 	/* aggregate values into the full LAN object for later */
@@ -223,7 +203,7 @@ i40e_status i40e_init_lan_hmc(struct i40e_hw *hw, u32 txq_num,
 					  (sizeof(struct i40e_hmc_sd_entry) *
 					  hw->hmc.sd_table.sd_cnt));
 		if (ret_code)
-			goto init_lan_hmc_out;
+			goto free_hmc_out;
 		hw->hmc.sd_table.sd_entry =
 			(struct i40e_hmc_sd_entry *)hw->hmc.sd_table.addr.va;
 	}
@@ -231,6 +211,11 @@ i40e_status i40e_init_lan_hmc(struct i40e_hw *hw, u32 txq_num,
 	full_obj->size = l2fpm_size;
 
 init_lan_hmc_out:
+	return ret_code;
+free_hmc_out:
+	if (hw->hmc.hmc_obj_virt_mem.va)
+		i40e_free_virt_mem(hw, &hw->hmc.hmc_obj_virt_mem);
+
 	return ret_code;
 }
 

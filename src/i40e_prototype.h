@@ -1,25 +1,5 @@
-/*******************************************************************************
- *
- * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2018 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- ******************************************************************************/
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Copyright(c) 2013 - 2018 Intel Corporation. */
 
 #ifndef _I40E_PROTOTYPE_H_
 #define _I40E_PROTOTYPE_H_
@@ -222,6 +202,9 @@ i40e_status i40e_aq_discover_capabilities(struct i40e_hw *hw,
 i40e_status i40e_aq_update_nvm(struct i40e_hw *hw, u8 module_pointer,
 				u32 offset, u16 length, void *data,
 				bool last_command, u8 preservation_flags,
+				struct i40e_asq_cmd_details *cmd_details);
+i40e_status i40e_aq_rearrange_nvm(struct i40e_hw *hw,
+				u8 rearrange_nvm,
 				struct i40e_asq_cmd_details *cmd_details);
 i40e_status i40e_aq_nvm_progress(struct i40e_hw *hw, u8 *progress,
 				struct i40e_asq_cmd_details *cmd_details);
@@ -441,11 +424,11 @@ i40e_status i40e_aq_rx_ctl_write_register(struct i40e_hw *hw,
 				struct i40e_asq_cmd_details *cmd_details);
 void i40e_write_rx_ctl(struct i40e_hw *hw, u32 reg_addr, u32 reg_val);
 i40e_status i40e_aq_set_phy_register(struct i40e_hw *hw,
-				u8 phy_select, u8 dev_addr,
+				u8 phy_select, u8 dev_addr, bool page_change,
 				u32 reg_addr, u32 reg_val,
 				struct i40e_asq_cmd_details *cmd_details);
 i40e_status i40e_aq_get_phy_register(struct i40e_hw *hw,
-				u8 phy_select, u8 dev_addr,
+				u8 phy_select, u8 dev_addr, bool page_change,
 				u32 reg_addr, u32 *reg_val,
 				struct i40e_asq_cmd_details *cmd_details);
 

@@ -1,25 +1,5 @@
-/*******************************************************************************
- *
- * Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
- * Copyright(c) 2013 - 2018 Intel Corporation.
- *
- * This program is free software; you can redistribute it and/or modify it
- * under the terms and conditions of the GNU General Public License,
- * version 2, as published by the Free Software Foundation.
- *
- * This program is distributed in the hope it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
- * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
- * more details.
- *
- * The full GNU General Public License is included in this distribution in
- * the file called "COPYING".
- *
- * Contact Information:
- * e1000-devel Mailing List <e1000-devel@lists.sourceforge.net>
- * Intel Corporation, 5200 N.E. Elam Young Parkway, Hillsboro, OR 97124-6497
- *
- ******************************************************************************/
+// SPDX-License-Identifier: GPL-2.0
+/* Copyright(c) 2013 - 2018 Intel Corporation. */
 
 #include "i40e_type.h"
 #include "i40e_adminq.h"
@@ -48,6 +28,7 @@ static i40e_status i40e_set_mac_type(struct i40e_hw *hw)
 		case I40E_DEV_ID_QSFP_C:
 		case I40E_DEV_ID_10G_BASE_T:
 		case I40E_DEV_ID_10G_BASE_T4:
+		case I40E_DEV_ID_10G_BASE_T_BC:
 		case I40E_DEV_ID_20G_KR2:
 		case I40E_DEV_ID_20G_KR2_A:
 		case I40E_DEV_ID_25G_B:
@@ -949,6 +930,17 @@ i40e_status i40e_init_shared_code(struct i40e_hw *hw)
 		hw->flags |= I40E_HW_FLAG_AQ_SRCTL_ACCESS_ENABLE |
 			     I40E_HW_FLAG_NVM_READ_REQUIRES_LOCK;
 
+	/* NVMUpdate features structure initialization */
+	hw->nvmupd_features.major = I40E_NVMUPD_FEATURES_API_VER_MAJOR;
+	hw->nvmupd_features.minor = I40E_NVMUPD_FEATURES_API_VER_MINOR;
+	hw->nvmupd_features.size = sizeof(hw->nvmupd_features);
+	i40e_memset(hw->nvmupd_features.features, 0x0,
+		    I40E_NVMUPD_FEATURES_API_FEATURES_ARRAY_LEN *
+		    sizeof(*hw->nvmupd_features.features),
+		    I40E_NONDMA_MEM);
+
+	hw->nvmupd_features.features[0] = I40E_NVMUPD_FEATURE_FLAT_NVM_SUPPORT;
+
 	status = i40e_init_nvm(hw);
 	return status;
 }
@@ -1168,6 +1160,8 @@ static enum i40e_media_type i40e_get_media_type(struct i40e_hw *hw)
 		break;
 	case I40E_PHY_TYPE_100BASE_TX:
 	case I40E_PHY_TYPE_1000BASE_T:
+	case I40E_PHY_TYPE_2_5GBASE_T:
+	case I40E_PHY_TYPE_5GBASE_T:
 	case I40E_PHY_TYPE_10GBASE_T:
 		media = I40E_MEDIA_TYPE_BASET;
 		break;
@@ -1250,7 +1244,7 @@ i40e_status i40e_pf_reset(struct i40e_hw *hw)
 			I40E_GLGEN_RSTCTL_GRSTDEL_MASK) >>
 			I40E_GLGEN_RSTCTL_GRSTDEL_SHIFT;
 
-	grst_del = grst_del * 20;
+	grst_del = min(grst_del * 20, 160U);
 
 	for (cnt = 0; cnt < grst_del; cnt++) {
 		reg = rd32(hw, I40E_GLGEN_RSTAT);
@@ -3774,6 +3768,41 @@ i40e_aq_update_nvm_exit:
 }
 
 /**
+ * i40e_aq_rearrange_nvm
+ * @hw: pointer to the hw struct
+ * @rearrange_nvm: defines direction of rearrangement
+ * @cmd_details: pointer to command details structure or NULL
+ *
+ * Rearrange NVM structure, available only for transition FW
+ **/
+i40e_status i40e_aq_rearrange_nvm(struct i40e_hw *hw,
+				u8 rearrange_nvm,
+				struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aqc_nvm_update *cmd;
+	i40e_status status;
+	struct i40e_aq_desc desc;
+
+	cmd = (struct i40e_aqc_nvm_update *)&desc.params.raw;
+
+	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_nvm_update);
+
+	rearrange_nvm &= (I40E_AQ_NVM_REARRANGE_TO_FLAT |
+			 I40E_AQ_NVM_REARRANGE_TO_STRUCT);
+
+	if (!rearrange_nvm) {
+		status = I40E_ERR_PARAM;
+		goto i40e_aq_rearrange_nvm_exit;
+	}
+
+	cmd->command_flags |= rearrange_nvm;
+	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
+
+i40e_aq_rearrange_nvm_exit:
+	return status;
+}
+
+/**
  * i40e_aq_nvm_progress
  * @hw: pointer to the hw struct
  * @progress: pointer to progress returned from AQ
@@ -3978,9 +4007,7 @@ i40e_aq_set_dcb_parameters(struct i40e_hw *hw, bool dcb_enable,
 		(struct i40e_aqc_set_dcb_parameters *)&desc.params.raw;
 	i40e_status status;
 
-	if (hw->mac.type != I40E_MAC_XL710 ||
-	    (hw->aq.api_maj_ver < 1 ||
-	     (hw->aq.api_maj_ver == 1 && hw->aq.api_min_ver < 6)))
+	if (!(hw->flags & I40E_HW_FLAG_FW_LLDP_STOPPABLE))
 		return I40E_ERR_DEVICE_NOT_SUPPORTED;
 
 	i40e_fill_default_direct_cmd_desc(&desc,
@@ -4923,6 +4950,14 @@ i40e_status_code i40e_aq_replace_cloud_filters(struct i40e_hw *hw,
 	i40e_status status = I40E_SUCCESS;
 	int i = 0;
 
+	/* X722 doesn't support this command */
+	if (hw->mac.type == I40E_MAC_X722)
+		return I40E_ERR_DEVICE_NOT_SUPPORTED;
+
+	/* need FW version greater than 6.00 */
+	if (hw->aq.fw_maj_ver < 6)
+		return I40E_NOT_SUPPORTED;
+
 	i40e_fill_default_direct_cmd_desc(&desc,
 					  i40e_aqc_opc_replace_cloud_filters);
 
@@ -4932,6 +4967,7 @@ i40e_status_code i40e_aq_replace_cloud_filters(struct i40e_hw *hw,
 	cmd->new_filter_type = filters->new_filter_type;
 	cmd->valid_flags = filters->valid_flags;
 	cmd->tr_bit = filters->tr_bit;
+	cmd->tr_bit2 = filters->tr_bit2;
 
 	status = i40e_asq_send_command(hw, &desc, cmd_buf,
 		sizeof(struct i40e_aqc_replace_cloud_filters_cmd_buf),  NULL);
@@ -5431,6 +5467,7 @@ i40e_status i40e_write_phy_register(struct i40e_hw *hw,
 		break;
 	case I40E_DEV_ID_10G_BASE_T:
 	case I40E_DEV_ID_10G_BASE_T4:
+	case I40E_DEV_ID_10G_BASE_T_BC:
 	case I40E_DEV_ID_10G_BASE_T_X722:
 	case I40E_DEV_ID_25G_B:
 	case I40E_DEV_ID_25G_SFP28:
@@ -5467,6 +5504,7 @@ i40e_status i40e_read_phy_register(struct i40e_hw *hw,
 		break;
 	case I40E_DEV_ID_10G_BASE_T:
 	case I40E_DEV_ID_10G_BASE_T4:
+	case I40E_DEV_ID_10G_BASE_T_BC:
 	case I40E_DEV_ID_10G_BASE_T_X722:
 	case I40E_DEV_ID_25G_B:
 	case I40E_DEV_ID_25G_SFP28:
@@ -5586,7 +5624,7 @@ static i40e_status i40e_led_get_reg(struct i40e_hw *hw, u16 led_addr,
 	if (hw->flags & I40E_HW_FLAG_AQ_PHY_ACCESS_CAPABLE) {
 		status = i40e_aq_get_phy_register(hw,
 						I40E_AQ_PHY_REG_ACCESS_EXTERNAL,
-						I40E_PHY_COM_REG_PAGE,
+						I40E_PHY_COM_REG_PAGE, true,
 						I40E_PHY_LED_PROV_REG_1,
 						reg_val, NULL);
 	} else {
@@ -5614,7 +5652,7 @@ static i40e_status i40e_led_set_reg(struct i40e_hw *hw, u16 led_addr,
 	if (hw->flags & I40E_HW_FLAG_AQ_PHY_ACCESS_CAPABLE) {
 		status = i40e_aq_set_phy_register(hw,
 						I40E_AQ_PHY_REG_ACCESS_EXTERNAL,
-						I40E_PHY_COM_REG_PAGE,
+						I40E_PHY_COM_REG_PAGE, true,
 						I40E_PHY_LED_PROV_REG_1,
 						reg_val, NULL);
 	} else {
@@ -5648,7 +5686,7 @@ i40e_status i40e_led_get_phy(struct i40e_hw *hw, u16 *led_addr,
 	if (hw->flags & I40E_HW_FLAG_AQ_PHY_ACCESS_CAPABLE) {
 		status = i40e_aq_get_phy_register(hw,
 						I40E_AQ_PHY_REG_ACCESS_EXTERNAL,
-						I40E_PHY_COM_REG_PAGE,
+						I40E_PHY_COM_REG_PAGE, true,
 						I40E_PHY_LED_PROV_REG_1,
 						&reg_val_aq, NULL);
 		if (status == I40E_SUCCESS)
@@ -5853,6 +5891,7 @@ do_retry:
  * @hw: pointer to the hw struct
  * @phy_select: select which phy should be accessed
  * @dev_addr: PHY device address
+ * @page_change: enable auto page change
  * @reg_addr: PHY register address
  * @reg_val: new register value
  * @cmd_details: pointer to command details structure or NULL
@@ -5860,7 +5899,7 @@ do_retry:
  * Write the external PHY register.
  **/
 i40e_status i40e_aq_set_phy_register(struct i40e_hw *hw,
-				u8 phy_select, u8 dev_addr,
+				u8 phy_select, u8 dev_addr, bool page_change,
 				u32 reg_addr, u32 reg_val,
 				struct i40e_asq_cmd_details *cmd_details)
 {
@@ -5877,6 +5916,9 @@ i40e_status i40e_aq_set_phy_register(struct i40e_hw *hw,
 	cmd->reg_address = CPU_TO_LE32(reg_addr);
 	cmd->reg_value = CPU_TO_LE32(reg_val);
 
+	if (!page_change)
+		cmd->cmd_flags = I40E_AQ_PHY_REG_ACCESS_DONT_CHANGE_QSFP_PAGE;
+
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 
 	return status;
@@ -5887,6 +5929,7 @@ i40e_status i40e_aq_set_phy_register(struct i40e_hw *hw,
  * @hw: pointer to the hw struct
  * @phy_select: select which phy should be accessed
  * @dev_addr: PHY device address
+ * @page_change: enable auto page change
  * @reg_addr: PHY register address
  * @reg_val: read register value
  * @cmd_details: pointer to command details structure or NULL
@@ -5894,7 +5937,7 @@ i40e_status i40e_aq_set_phy_register(struct i40e_hw *hw,
  * Read the external PHY register.
  **/
 i40e_status i40e_aq_get_phy_register(struct i40e_hw *hw,
-				u8 phy_select, u8 dev_addr,
+				u8 phy_select, u8 dev_addr, bool page_change,
 				u32 reg_addr, u32 *reg_val,
 				struct i40e_asq_cmd_details *cmd_details)
 {
@@ -5909,6 +5952,9 @@ i40e_status i40e_aq_get_phy_register(struct i40e_hw *hw,
 	cmd->phy_interface = phy_select;
 	cmd->dev_addres = dev_addr;
 	cmd->reg_address = CPU_TO_LE32(reg_addr);
+
+	if (!page_change)
+		cmd->cmd_flags = I40E_AQ_PHY_REG_ACCESS_DONT_CHANGE_QSFP_PAGE;
 
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 	if (!status)
