@@ -43,7 +43,7 @@ static const char i40e_driver_string[] =
 
 #define DRV_VERSION_MAJOR 2
 #define DRV_VERSION_MINOR 7
-#define DRV_VERSION_BUILD 11
+#define DRV_VERSION_BUILD 12
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
 	__stringify(DRV_VERSION_BUILD) \
@@ -6195,7 +6195,6 @@ static void i40e_vsi_reinit_locked(struct i40e_vsi *vsi)
 	while (test_and_set_bit(__I40E_CONFIG_BUSY, pf->state))
 		usleep_range(1000, 2000);
 	i40e_down(vsi);
-	i40e_force_link_state(pf, true);
 	i40e_up(vsi);
 	clear_bit(__I40E_CONFIG_BUSY, pf->state);
 }
@@ -6207,6 +6206,10 @@ static void i40e_vsi_reinit_locked(struct i40e_vsi *vsi)
 int i40e_up(struct i40e_vsi *vsi)
 {
 	int err;
+
+	if (vsi->type == I40E_VSI_MAIN &&
+	    (vsi->back->flags & I40E_FLAG_LINK_DOWN_ON_CLOSE_ENABLED))
+		i40e_force_link_state(vsi->back, true);
 
 	err = i40e_vsi_configure(vsi);
 	if (!err)
