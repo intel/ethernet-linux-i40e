@@ -24,6 +24,7 @@ i40e-y := i40e_main.o \
 	i40e_txrx.o \
 	i40e_ptp.o \
 	i40e_filters.o \
+	i40e_ddp.o \
 	i40e_client.o \
 	i40e_virtchnl_pf.o
 

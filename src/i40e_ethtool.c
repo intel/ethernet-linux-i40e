@@ -6060,6 +6060,10 @@ static const struct ethtool_ops i40e_ethtool_ops = {
 	.get_fecparam = i40e_get_fec_param,
 	.set_fecparam = i40e_set_fec_param,
 #endif /* ETHTOOL_GFECPARAM */
+#if ( LINUX_VERSION_CODE > KERNEL_VERSION(4,0,0) ) || \
+    (RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(7,2))
+	.flash_device = i40e_ddp_flash,
+#endif
 };
 
 #ifdef HAVE_RHEL6_ETHTOOL_OPS_EXT_STRUCT

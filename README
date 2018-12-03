@@ -2,7 +2,7 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet Controller 700 Series
 ===============================================================================
 
-September 28, 2018
+November 29, 2018
 Copyright(c) 2014-2018 Intel Corporation.
 
 Contents
@@ -56,13 +56,14 @@ SR-IOV, the virtual function (VF) may be subject to malicious behavior.
 Software-generated layer two frames, like IEEE 802.3x (link flow control), IEEE
 802.1Qbb (priority based flow-control), and others of this type, are not
 expected and can throttle traffic between the host and the virtual switch,
-reducing performance. To resolve this issue, configure all SR-IOV enabled ports
-for VLAN tagging. This configuration allows unexpected, and potentially
-malicious, frames to be dropped.
+reducing performance. To resolve this issue, and to ensure isolation from
+unintended traffic streams, configure all SR-IOV enabled ports for VLAN tagging
+from the administrative interface on the PF. This configuration allows
+unexpected, and potentially malicious, frames to be dropped.
 
 
 Overview
---------
+========
 This driver supports kernel versions 2.6.32 and newer.
 
 Driver information can be obtained using ethtool, lspci, and ifconfig.
@@ -100,7 +101,7 @@ not support the following features:
 
 
 Identifying Your Adapter
-------------------------
+========================
 The driver in this release is compatible with devices based on the following:
   * Intel(R) Ethernet Controller X710
   * Intel(R) Ethernet Controller XL710
@@ -149,7 +150,7 @@ the version and configuration of the installed kernel sources. If you have just
 recompiled the kernel reboot the system before building.
 
 Note: RPM functionality has only been tested in Red Hat distributions.
-_lbank_line_
+
 
 1. Move the base driver tar file to the directory of your choice. For
    example, use '/home/username/i40e' or '/usr/local/src/i40e'.
@@ -286,9 +287,10 @@ SR-IOV, the virtual function (VF) may be subject to malicious behavior.
 Software-generated layer two frames, like IEEE 802.3x (link flow control), IEEE
 802.1Qbb (priority based flow-control), and others of this type, are not
 expected and can throttle traffic between the host and the virtual switch,
-reducing performance. To resolve this issue, configure all SR-IOV enabled ports
-for VLAN tagging. This configuration allows unexpected, and potentially
-malicious, frames to be dropped.
+reducing performance. To resolve this issue, and to ensure isolation from
+unintended traffic streams, configure all SR-IOV enabled ports for VLAN tagging
+from the administrative interface on the PF. This configuration allows
+unexpected, and potentially malicious, frames to be dropped.
 
 
 Configuring VLAN tagging on SR-IOV enabled adapter ports
@@ -673,6 +675,10 @@ NOTE: This driver will attempt to use multiple page sized buffers to receive
 each jumbo packet. This should help to avoid buffer starvation issues when
 allocating receive packets.
 
+NOTE: Packet loss may have a greater impact on throughput when you use jumbo
+frames. If you observe a drop in performance after enabling jumbo frames,
+enabling flow control may mitigate the issue.
+
 
 ethtool
 -------
@@ -931,74 +937,72 @@ However, instead of resulting in as many as 200,000 interrupts per second, it
 limits total interrupts per second to 50,000 via the rx-usecs-high parameter.
 
 
-Application Device Queues (ADq)
+Application Device Queues (ADQ)
 -------------------------------
-
-Application Device Queues (ADq) allows you to dedicate one or more queues to a
+Application Device Queues (ADQ) allows you to dedicate one or more queues to a
 specific application. This can reduce latency for the specified application,
 and allow Tx traffic to be rate limited per application. Follow the steps below
-to set ADq.
+to set ADQ.
 
-NOTE: Run all tc commands from the iproute2 <pathtoiproute2>/tc/ directory.
-NOTE: ADq is not compatible with cloud filters.
-  1. Create traffic classes (TCs). Maximum of 8 TCs can be created per
-  interface. The shaper bw_rlimit parameter is optional.
-  Example:
-  Sets up two tcs, tc0 and tc1, with 16 queues each and max tx rate set
-  to 1Gbit for tc0 and 3Gbit for tc1.
+Requirements:
+- Kernel version 4.15 or later
+- The sch_mqprio, act_mirred and cls_flower modules must be loaded
+- The latest version of iproute2
+- NVM version 6.01 or later
+- ADQ cannot be enabled when any the following features are enabled: Data
+Center Bridging (DCB), Multiple Functions per Port (MFP), or Sideband Filters.
+- If another driver (for example, DPDK) has set cloud filters, you cannot
+enable ADQ.
+
+1. Create traffic classes (TCs). You can create a maximum of 8 TCs per
+interface. The shaper bw_rlimit parameter is optional.
+
+This example sets up two tcs, tc0 and tc1, with 16 queues each and max tx rate
+set to 1Gbit for tc0 and 3Gbit for tc1:
   # tc qdisc add dev <interface> root mqprio num_tc 2 map 0 0 0 0 1 1 1 1
   queues 16@0 16@16 hw 1 mode channel shaper bw_rlimit min_rate 1Gbit 2Gbit
   max_rate 1Gbit 3Gbit
 
-  map: priority mapping for up to 16 priorities to tcs
-  (e.g. map 0 0 0 0 1 1 1 1 sets priorities 0-3 to use tc0 and 4-7 to
-  use tc1)
+Where
+map: priority mapping for up to 16 priorities to tcs (e.g. map 0 0 0 0 1 1 1 1
+sets priorities 0-3 to use tc0 and 4-7 to use tc1)
 
-  queues: for each tc, <num queues>@<offset> (e.g. queues 16@0 16@16 assigns
-  16 queues to tc0 at offset 0 and 16 queues to tc1 at offset 16. Max total
-  number of queues for all tcs is 64 or number of cores, whichever is
-  lower.)
+queues: for each tc, <num queues>@<offset> (e.g. queues 16@0 16@16 assigns 16
+queues to tc0 at offset 0 and 16 queues to tc1 at offset 16. Max total number
+of queues for all tcs is 64 or number of cores, whichever is lower.)
 
-  hw 1 mode channel: ‘channel’ with ‘hw’ set to 1 is a new new hardware
-  offload mode in mqprio that makes full use of the mqprio options, the
-  TCs, the queue configurations, and the QoS parameters.
+hw 1 mode channel: ‘channel’ with ‘hw’ set to 1 is a new new hardware offload
+mode in mqprio that makes full use of the mqprio options, the TCs, the queue
+configurations, and the QoS parameters.
 
-  shaper bw_rlimit: for each tc, sets minimum and maximum bandwidth rates.
-  Totals must be equal or less than port speed.
-  For example: min_rate 1Gbit 3Gbit:
-  Verify bandwidth limit using network monitoring tools such as ifstat
-  or sar –n DEV [interval] [number of samples]
+shaper bw_rlimit: for each tc, sets minimum and maximum bandwidth rates. The
+totals must be equal or less than port speed. For example:
+  min_rate 1Gbit 3Gbit:
+Verify bandwidth limit using network monitoring tools such as ifstat or sar –n
+DEV [interval] [number of samples]
 
 NOTE: Setting up channels via ethtool (ethtool -L) is not supported when the
 TCs are configured using mqprio.
 
-  2. Enable HW TC offload on interface:
+2. Enable HW TC offload on interface:
   # ethtool -K <interface> hw-tc-offload on
-  3. Apply TCs to ingress (RX) flow of interface:
+
+3. Apply TCs to ingress (RX) flow of interface:
   # tc qdisc add dev <interface> ingress
+
 NOTES:
-- You must have kernel version 4.15 or later and the sch_mqprio, act_mirred
-  and cls_flower modules loaded to set ADq
-- You must have iproute2 latest version
-- NVM version 6.01 or later is required.
-- ADq cannot be enabled when any the following features are enabled: Data
-  Center Bridging (DCB), Multiple Functions per Port (MFP), or Sideband
-  Filters.
-- If another driver (for example, DPDK) has set cloud filters, you cannot
-  enable ADq.
-- Tunnel filters are not supported in ADq. If encapsulated packets do
-  arrive in non-tunnel mode, filtering will be done on the inner headers.
-  For example, for VXLAN traffic in non-tunnel mode, PCTYPE is identified
-  as a VXLAN encapsulated packet, outer headers are ignored. Therefore,
-  inner headers are matched.
-- If a TC filter on a PF matches traffic over a VF (on the PF), that
-  traffic will be routed to the appropriate queue of the PF, and will
-  not be passed on the VF. Such traffic will end up getting dropped higher
-  up in the TCP/IP stack as it does not match PF address data.
-- If traffic matches multiple TC filters that point to different TCs,
-  that traffic will be duplicated and sent to all matching TC queues.
-  The hardware switch mirrors the packet to a VSI list when multiple
-  filters are matched.
+- Tunnel filters are not supported in ADQ. If encapsulated packets do arrive in
+non-tunnel mode, filtering will be done on the inner headers. For example, for
+VXLAN traffic in non-tunnel mode, if PCTYPE is identified as a VXLAN
+encapsulated packet, then the outer headers are ignored. Therefore, inner
+headers are matched.
+- If a TC filter on a PF matches traffic over a VF (on the PF), that traffic
+will be routed to the appropriate queue of the PF, and will not be passed on
+the VF. Such traffic will end up getting dropped higher up in the TCP/IP stack
+as it does not match PF address data.
+- If traffic matches multiple TC filters that point to different TCs, that
+traffic will be duplicated and sent to all matching TC queues. The hardware
+switch mirrors the packet to a VSI list when multiple filters are matched.
 
 
 Forward Error Correction (FEC)
@@ -1173,6 +1177,60 @@ the IP LINK command, the VF cannot change it via MBOX/AdminQ requests.
   #echo disable > /sys/class/net/p1p2/device/sriov/1/link_state
 
 
+Dynamic Device Personalization
+------------------------------
+Dynamic Device Personalization (DDP) allows you to change the packet processing
+pipeline of a device by applying a profile package to the device at runtime.
+Profiles can be used to, for example, add support for new protocols, change
+existing protocols, or change default settings. DDP profiles can also be rolled
+back without rebooting the system.
+Requirements:
+-Intel Ethernet X710/XXV710/XL710 adapter (X722 series devices are not
+supported at this time)
+-Firmware 6.0 or newer
+
+To apply a profile, copy it first to intel/i40e/ddp directory relative to your
+firmware root (usually /lib/firmware).
+For example:
+  /lib/firmware/intel/i40e/ddp
+
+Then use the ethtool -f|--flash flag with region 100:
+ethtool -f <interface name> <profile name> 100
+
+For example:
+  ethtool -f eth0 gtp.pkgo 100
+
+You can roll back to a previously loaded profile using '-' instead of profile
+name:
+ethtool -f <interface name> - 100
+
+For example:
+  ethtool -f eth0 - 100
+
+For every rollback request one profile will be removed, from last to first
+(LIFO) order.
+
+NOTES:
+- DDP profiles are loaded only on the interface corresponding to first physical
+function of the device (PF0), but the configuration is applied to all ports of
+the adapter.
+- DDP profiles are not persistent. A system reboot will reset the device to its
+default configuration.
+- DDP profiles are NOT automatically unloaded when the driver in
+unbound/unloaded. Please note that subsequent driver reload may corrupt the
+profile configuration during its initialization and is NOT recommended.
+- DDP profiles should be manually rolled-back before driver unload/unbind if
+the intention is to start with clean HW configuration.
+- Exercise caution while loading DDP profiles, attempting to load files other
+than DDP profiles provided by Intel may cause system instability, system
+crashes, or system hangs.
+
+More details about Dynamic Device Personalization can be found on the Intel
+Developer Zone site:
+https://software.intel.com/en-us/articles/dynamic-device-personalization-for-int
+el-ethernet-700-series
+
+
 Performance Optimization:
 -------------------------
 
@@ -1246,7 +1304,7 @@ ethtool.
 
 
 Known Issues/Troubleshooting
-----------------------------
+============================
 
 LACP PDUs not being sent
 ------------------------
@@ -1551,7 +1609,7 @@ affect all ports and drivers on the device. Loading DPDK with the
 
 
 Support
--------
+=======
 For general information, go to the Intel support website at:
 http://www.intel.com/support/
 
