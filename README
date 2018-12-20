@@ -2,7 +2,7 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet Controller 700 Series
 ===============================================================================
 
-November 29, 2018
+December 10, 2018
 Copyright(c) 2014-2018 Intel Corporation.
 
 Contents
@@ -149,6 +149,10 @@ Note: For the build to work properly, the currently running kernel MUST match
 the version and configuration of the installed kernel sources. If you have just
 recompiled the kernel reboot the system before building.
 
+- To compile the driver on some kernel/arch combinations, a package with the
+development version of libelf (e.g. libelf-dev, libelf-devel,
+elfutilsl-libelf-devel) may need to be installed.
+
 Note: RPM functionality has only been tested in Red Hat distributions.
 
 
@@ -170,9 +174,6 @@ Note: RPM functionality has only been tested in Red Hat distributions.
 
    The install location listed above is the default location. This may differ
    for various Linux distributions.
-   NOTE: To compile the driver on some kernel/arch combinations, a
-   package with the development version of libelf (e.g. libelf-dev,
-   libelf-devel, elfutilsl-libelf-devel) may need to be installed.
 
   NOTE: To gather and display additional statistics, use the
   I40E_ADD_PROBES pre-processor macro:
@@ -398,13 +399,11 @@ To set a filter using only the source and destination IP address:
 To set a filter based on a user defined pattern and offset:
 
   # ethtool -N ethX flow-type tcp4 src-ip 192.168.10.1 dst-ip \
-  192.168.10.2 user-def 0xffffffff00000001 m 0x40 action 2 [loc 1]
+  192.168.10.2 user-def 0x4FFFF action 2 [loc 1]
 
-  where the value of the user-def field (0xffffffff00000001) is the
-  pattern and m 0x40 is the offset.
-
-Note that in this case the mask (m 0x40) parameter is used with the user-def
-field, whereas for cloud filter support the mask parameter is not used.
+  where the value of the user-def field contains the offset (4 bytes) and
+  the pattern (0xffff). This is described in more detail in the Sideband
+  Perfect Filters section.
 
 To see the list of filters currently present:
   # ethtool <-u|-n> ethX
@@ -418,7 +417,7 @@ starts and is deleted when the flow ends. When a TCP-IP Intel Ethernet Flow
 Director rule is added from ethtool (Sideband filter), ATR is turned off by the
 driver. To re-enable ATR, the sideband can be disabled with the ethtool -K
 option. For example:
-ethtool –K [adapter] ntuple [off|on]
+ethtool -K [adapter] ntuple [off|on]
 
 If sideband is re-enabled after ATR is re-enabled, ATR remains enabled until a
 TCP-IP flow is added. When all TCP-IP sideband rules are deleted, ATR is
@@ -604,12 +603,12 @@ For cloud filters (tunneled packets):
 
   Example:
 
-    ethtool –U enp130s0 flow-type ether dst 8b:9d:ed:6a:ce:43 \
+    ethtool -U enp130s0 flow-type ether dst 8b:9d:ed:6a:ce:43 \
     src 1d:44:9d:54:da:de user-def 0x8000000000000022 loc 38 \
     action 0x200000000
       Redirect traffic on VXLAN using tunnel id 34 (hex 0x22) coming from
       outer MAC address 8b:9d:ed:6a:ce:43 and inner MAC address
-      1d:44:9d:54:da:de into VF id 1 and call this “rule 38”.
+      1d:44:9d:54:da:de into VF id 1 and call this "rule 38".
 
 
 ================================================================================
@@ -815,7 +814,7 @@ network. PTP support varies among Intel devices that support this driver. Use
 supported by the device.
 
 
-IEEE 802.1ad (QinQ) Support
+IEEE 802.1ad (QinQ) Support
 ---------------------------
 
 The IEEE 802.1ad standard, informally known as QinQ, allows for multiple VLAN
@@ -971,14 +970,14 @@ queues: for each tc, <num queues>@<offset> (e.g. queues 16@0 16@16 assigns 16
 queues to tc0 at offset 0 and 16 queues to tc1 at offset 16. Max total number
 of queues for all tcs is 64 or number of cores, whichever is lower.)
 
-hw 1 mode channel: ‘channel’ with ‘hw’ set to 1 is a new new hardware offload
+hw 1 mode channel: 'channel' with 'hw' set to 1 is a new new hardware offload
 mode in mqprio that makes full use of the mqprio options, the TCs, the queue
 configurations, and the QoS parameters.
 
 shaper bw_rlimit: for each tc, sets minimum and maximum bandwidth rates. The
 totals must be equal or less than port speed. For example:
   min_rate 1Gbit 3Gbit:
-Verify bandwidth limit using network monitoring tools such as ifstat or sar –n
+Verify bandwidth limit using network monitoring tools such as ifstat or sar -n
 DEV [interval] [number of samples]
 
 NOTE: Setting up channels via ethtool (ethtool -L) is not supported when the
@@ -1188,6 +1187,7 @@ Requirements:
 -Intel Ethernet X710/XXV710/XL710 adapter (X722 series devices are not
 supported at this time)
 -Firmware 6.0 or newer
+-RHEL 7.5 or later or Linux Kernel 4.0.1 or newer
 
 To apply a profile, copy it first to intel/i40e/ddp directory relative to your
 firmware root (usually /lib/firmware).
