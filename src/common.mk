@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
-# Copyright(c) 2013 - 2018 Intel Corporation.
+# Copyright(c) 2013 - 2019 Intel Corporation.
 
 # common Makefile rules useful for out-of-tree Linux driver builds
 #
@@ -135,6 +135,10 @@ endif
 
 ifeq (,$(wildcard ${SYSTEM_MAP_FILE}))
   $(warning Missing System.map file - depmod will not check for missing symbols)
+endif
+
+ifneq ($(words $(subst :, ,$(CURDIR))), 1)
+  $(error Sources directory '$(CURDIR)' cannot contain spaces nor colons. Rename directory or move sources to another path)
 endif
 
 #######################

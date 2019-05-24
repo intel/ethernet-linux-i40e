@@ -5,7 +5,7 @@
 .\" * Other names and brands may be claimed as the property of others.
 .\"
 .
-.TH i40e 1 "November 12, 2018"
+.TH i40e 1 "February 7, 2019"
 .SH NAME
 i40e \-This file describes the Linux* Base Driver
 for the Intel Ethernet Controller XL710 Family of Controllers.
@@ -16,7 +16,7 @@ modprobe i40e [<option>=<VAL1>,<VAL2>,...]
 .SH DESCRIPTION
 This driver is intended for \fB2.6.32\fR and newer kernels. A version of the driver may already be included by your distribution and/or the kernel.org kernel.
 
-This driver includes support for any 64 bit Linux supported system, including Itanium(R)2, x86_64, PPC64, ARM, etc.
+This driver includes support for any 64 bit Linux supported system, x86_64, PPC64, ARM, etc.
 .LP
 This driver is only supported as a loadable module at this time. Intel is not supplying patches against the kernel source to allow for static linking of the drivers.
 
@@ -42,6 +42,25 @@ NOTE: This driver will attempt to use multiple page sized buffers to receive eac
 
 NOTE: Packet loss may have a greater impact on throughput when you use jumbo frames. If you observe a drop in performance after enabling jumbo frames, enabling flow control may mitigate the issue.
 See the section "Jumbo Frames" in the Readme.
+.LP
+.B EEE (Energy Efficient Ethernet)
+.IP
+.B Valid Range: 0-1
+.IP
+0 = Disables EEE
+.IP
+1 = Enables EEE
+.IP
+A link between two EEE-compliant devices will result in periodic bursts of data followed by periods where the link is in an idle state. This Low Power Idle (LPI) state is supported at 2.5 Gbps and 5 Gbps link speeds.
+
+NOTES:
+- EEE support requires auto-negotiation.
+- Both link partners must support EEE.
+- EEE is not supported on all Intel(R) Ethernet Network devices or at all link speeds.
+
+Example:
+ethtool --show-eee devname
+ethtool --set-eee devname [eee on|off]
 .SH SUPPORT
 .LP
 For additional information regarding building and installation, see the

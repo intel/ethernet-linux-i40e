@@ -2,8 +2,8 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet Controller 700 Series
 ===============================================================================
 
-December 10, 2018
-Copyright(c) 2014-2018 Intel Corporation.
+February 7, 2019
+Copyright(c) 2014-2019 Intel Corporation.
 
 Contents
 ========
@@ -77,12 +77,6 @@ drivers.
 For questions related to hardware requirements, refer to the documentation
 supplied with your Intel adapter. All hardware requirements listed apply to use
 with Linux.
-
-Adapter teaming is implemented using the native Linux Channel bonding module.
-This is included in supported Linux kernels. Channel Bonding documentation can
-be found in the Linux kernel source:
-/documentation/networking/bonding.txt
-
 This driver supports XDP (Express Data Path) on kernel 4.14 and later. Note
 that XDP is blocked for frame sizes larger than 3KB.
 
@@ -611,6 +605,26 @@ For cloud filters (tunneled packets):
       1d:44:9d:54:da:de into VF id 1 and call this "rule 38".
 
 
+EEE (Energy Efficient Ethernet)
+-------------------------------
+Valid Range: 0-1
+0 = Disables EEE
+1 = Enables EEE
+A link between two EEE-compliant devices will result in periodic bursts of data
+followed by periods where the link is in an idle state. This Low Power Idle
+(LPI) state is supported at 2.5 Gbps and 5 Gbps link speeds.
+
+NOTES:
+- EEE support requires auto-negotiation.
+- Both link partners must support EEE.
+- EEE is not supported on all Intel(R) Ethernet Network devices or at all link
+speeds.
+
+Example:
+ethtool --show-eee devname
+ethtool --set-eee devname [eee on|off]
+
+
 ================================================================================
 
 
@@ -901,10 +915,18 @@ Adapter firmware implements LLDP and DCBX protocol agents as per 802.1AB and
 and can accept settings from a DCBX capable peer. Software configuration of
 DCBX parameters via dcbtool/lldptool are not supported.
 
-NOTE: Firmware LLDP can be disabled by setting the private flag disable-fw-lldp.
-
 The i40e driver implements the DCB netlink interface layer to allow user-space
 to communicate with the driver and query DCB configuration for the port.
+
+
+FW-LLDP (Firmware Link Layer Discovery Protocol)
+------------------------------------------------
+FW-LLDP (Firmware Link Layer Discovery Protocol) can be enabled/disabled by
+setting the private flag disable_fw_lldp. Setting disable_fw_lldp to 'off'
+enables FW-LLDP. Setting disable_fw_lldp to 'on' disables FW-LLDP.
+NOTE: You must enable the UEFI HII "LLDP Agent" attribute for this setting to
+take affect. If "LLDP AGENT" is set to disabled, you cannot enable it from the
+OS.
 
 
 Interrupt Rate Limiting
@@ -1640,14 +1662,14 @@ St - Fifth Floor, Boston, MA 02110-1301 USA.
 The full GNU General Public License is included in this distribution in the
 file called "COPYING".
 
-Copyright(c) 2014-2018 Intel Corporation.
+Copyright(c) 2014-2019 Intel Corporation.
 ================================================================================
 
 
 Trademarks
 ----------
-Intel and Itanium are trademarks or registered trademarks of Intel Corporation
-or its subsidiaries in the United States and/or other countries.
+Intel is a trademark or registered trademark of Intel Corporation or its
+subsidiaries in the United States and/or other countries.
 
 * Other names and brands may be claimed as the property of others.
 

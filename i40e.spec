@@ -1,6 +1,6 @@
 Name: i40e
 Summary: Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
-Version: 2.7.29
+Version: 2.8.43
 Release: 1
 Source: %{name}-%{version}.tar.gz
 Vendor: Intel Corporation
@@ -42,6 +42,7 @@ find lib -name "i40e.ko" \
 rm -rf %{buildroot}
 
 %files -f file.list
+
 %defattr(-,root,root)
 %{_mandir}/man7/i40e.7.gz
 %doc COPYING
