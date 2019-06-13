@@ -1,6 +1,9 @@
 # SPDX-License-Identifier: GPL-2.0
 # Copyright(c) 2013 - 2019 Intel Corporation.
 
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2015-2019 Intel Corporation
+#
 # common Makefile rules useful for out-of-tree Linux driver builds
 #
 # Usage: include common.mk

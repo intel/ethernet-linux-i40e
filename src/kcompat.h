@@ -181,14 +181,6 @@ struct msix_entry {
 #define PCIE_LINK_STATE_L1 2
 #endif
 
-#ifndef mmiowb
-#ifdef CONFIG_IA64
-#define mmiowb() asm volatile ("mf.a" ::: "memory")
-#else
-#define mmiowb()
-#endif
-#endif
-
 #ifndef SET_NETDEV_DEV
 #define SET_NETDEV_DEV(net, pdev)
 #endif
@@ -5351,7 +5343,8 @@ void __kc_skb_complete_tx_timestamp(struct sk_buff *skb,
 #define skb_clone_sk __kc_skb_clone_sk
 #define skb_complete_tx_timestamp __kc_skb_complete_tx_timestamp
 #endif
-unsigned int __kc_eth_get_headlen(unsigned char *data, unsigned int max_len);
+u32 __kc_eth_get_headlen(const struct net_device *dev, unsigned char *data,
+			 unsigned int max_len);
 #define eth_get_headlen __kc_eth_get_headlen
 #ifndef ETH_P_XDSA
 #define ETH_P_XDSA 0x00F8
@@ -5765,10 +5758,14 @@ static inline void page_ref_inc(struct page *page)
 #define	IPV4_USER_FLOW	0x0d	/* spec only (usr_ip4_spec) */
 #endif
 
-#if ((RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,4)) ||\
-     (SLE_VERSION_CODE >= SLE_VERSION(12,2,0)))
+#if (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,4))
 #define HAVE_TC_SETUP_CLSFLOWER
-#endif /* RHEL7.4+ || SLES12sp2+ */
+#define HAVE_TC_FLOWER_ENC
+#endif
+
+#if (SLE_VERSION_CODE >= SLE_VERSION(12,2,0))
+#define HAVE_TC_SETUP_CLSFLOWER
+#endif
 
 #else /* >= 4.6.0 */
 #define HAVE_PAGE_COUNT_BULK_UPDATE
@@ -5801,6 +5798,7 @@ static inline void page_ref_inc(struct page *page)
 #define HAVE_ETHTOOL_25G_BITS
 #define HAVE_ETHTOOL_50G_BITS
 #define HAVE_ETHTOOL_100G_BITS
+#define HAVE_TCF_MIRRED_REDIRECT
 #endif /* 4.7.0 */
 
 /*****************************************************************************/
@@ -5821,6 +5819,10 @@ struct udp_tunnel_info {
 #define HAVE_TCF_EXTS_TO_LIST
 #endif
 
+#if (UBUNTU_VERSION_CODE && UBUNTU_VERSION_CODE < UBUNTU_VERSION(4,8,0,0))
+#define tc_no_actions(_exts) true
+#define tc_for_each_action(_a, _exts) while (0)
+#endif
 #if !(SLE_VERSION_CODE && (SLE_VERSION_CODE >= SLE_VERSION(12,3,0))) &&\
 	!(RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,4))
 static inline int
@@ -5881,6 +5883,11 @@ pci_release_mem_regions(struct pci_dev *pdev)
 #define HAVE_ETHTOOL_NEW_1G_BITS
 #define HAVE_ETHTOOL_NEW_10G_BITS
 #endif /* RHEL7.4+ */
+#if (!(SLE_VERSION_CODE) && !(RHEL_RELEASE_CODE)) || \
+     SLE_VERSION_CODE && (SLE_VERSION_CODE <= SLE_VERSION(12,3,0)) || \
+     RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE <= RHEL_RELEASE_VERSION(7,5))
+#define time_is_before_jiffies64(a)	time_after64(get_jiffies_64(), a)
+#endif /* !SLE_VERSION_CODE && !RHEL_RELEASE_CODE || (SLES <= 12.3.0) || (RHEL <= 7.5) */
 #else /* >=4.9 */
 #define HAVE_ETHTOOL_NEW_1G_BITS
 #define HAVE_ETHTOOL_NEW_10G_BITS
@@ -5995,6 +6002,7 @@ static inline void __page_frag_cache_drain(struct page *page,
  * it means napi_poll is invoked in busy_poll context
  */
 #define HAVE_NAPI_STATE_IN_BUSY_POLL
+#define HAVE_TCF_MIRRED_EGRESS_REDIRECT
 #endif /* 4.10.0 */
 
 /*****************************************************************************/
@@ -6013,6 +6021,10 @@ static inline void __page_frag_cache_drain(struct page *page,
 
 /*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4,13,0))
+#if ((SLE_VERSION_CODE && (SLE_VERSION_CODE > SLE_VERSION(12,3,0))) || \
+     (RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,5)))
+#define HAVE_TCF_EXTS_HAS_ACTION
+#endif
 #define  PCI_EXP_LNKCAP_SLS_8_0GB 0x00000003 /* LNKCAP2 SLS Vector bit 2 */
 #if (SLE_VERSION_CODE && (SLE_VERSION_CODE >= SLE_VERSION(12,4,0)))
 #define HAVE_PCI_ERROR_HANDLER_RESET_PREPARE
@@ -6066,6 +6078,7 @@ struct _kc_bpf_prog {
 #else /* > 4.14 */
 #define HAVE_XDP_SUPPORT
 #define HAVE_NDO_SETUP_TC_REMOVE_TC_TO_NETDEV
+#define HAVE_TCF_EXTS_HAS_ACTION
 #endif /* 4.14.0 */
 
 /*****************************************************************************/
@@ -6186,6 +6199,9 @@ const char *_kc_phy_speed_to_str(int speed);
      !(SLE_VERSION_CODE && (SLE_VERSION_CODE >= SLE_VERSION(15,1,0))))
 #define TC_SETUP_QDISC_MQPRIO TC_SETUP_MQPRIO
 #endif /* !(RHEL >= 7.6) && !(SLES >= 15.1) */
+#if (RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,6)))
+#define HAVE_TCF_BLOCK
+#endif
 void _kc_ethtool_intersect_link_masks(struct ethtool_link_ksettings *dst,
 				      struct ethtool_link_ksettings *src);
 #define ethtool_intersect_link_masks _kc_ethtool_intersect_link_masks
@@ -6193,6 +6209,7 @@ void _kc_ethtool_intersect_link_masks(struct ethtool_link_ksettings *dst,
 #define HAVE_NDO_BPF
 #define HAVE_XDP_BUFF_DATA_META
 #define HAVE_TC_CB_AND_SETUP_QDISC_MQPRIO
+#define HAVE_TCF_BLOCK
 #endif /* 4.15.0 */
 
 /*****************************************************************************/
@@ -6251,6 +6268,7 @@ tc_cls_can_offload_and_chain0(const struct net_device *dev,
 #include <linux/nospec.h>
 #define HAVE_XDP_BUFF_RXQ
 #define HAVE_TC_FLOWER_OFFLOAD_COMMON_EXTACK
+#define HAVE_TCF_MIRRED_DEV
 #endif /* 4.16.0 */
 
 /*****************************************************************************/
@@ -6335,6 +6353,10 @@ static inline dma_addr_t __kc_xdp_umem_get_dma(struct xdp_umem *umem, u64 addr)
 
 /*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4,19,0))
+#define bitmap_alloc(nbits, flags) \
+	kmalloc_array(BITS_TO_LONGS(nbits), sizeof(unsigned long), flags)
+#define bitmap_zalloc(nbits, flags) bitmap_alloc(nbits, ((flags) | __GFP_ZERO))
+#define bitmap_free(bitmap) kfree(bitmap)
 #ifdef ETHTOOL_GLINKSETTINGS
 #define ethtool_ks_clear(ptr, name) \
 	ethtool_link_ksettings_zero_link_mode(ptr, name)
@@ -6348,12 +6370,15 @@ static inline dma_addr_t __kc_xdp_umem_get_dma(struct xdp_umem *umem, u64 addr)
 #define HAVE_NETPOLL_CONTROLLER
 #define REQUIRE_PCI_CLEANUP_AER_ERROR_STATUS
 #if (SLE_VERSION_CODE && (SLE_VERSION_CODE >= SLE_VERSION(15,1,0)))
-#define HAVE_TCF_BLOCK_CB_REGISTER_EXTACK
+#define HAVE_TCF_BLOCK
+#define HAVE_TCF_MIRRED_DEV
 #define HAVE_NDO_SELECT_QUEUE_SB_DEV
+#define HAVE_TCF_BLOCK_CB_REGISTER_EXTACK
 #endif
 #if ((RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,0)) ||\
      (SLE_VERSION_CODE >= SLE_VERSION(15,1,0)))
 #define HAVE_TCF_EXTS_FOR_EACH_ACTION
+#undef HAVE_TCF_EXTS_TO_LIST
 #endif /* RHEL8.0+ */
 #else /* >= 4.19.0 */
 #define HAVE_TCF_BLOCK_CB_REGISTER_EXTACK
@@ -6396,7 +6421,24 @@ static inline bool __kc_napi_if_scheduled_mark_missed(struct napi_struct *n)
 
 /*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5,0,0))
+struct ptp_system_timestamp {
+	struct timespec64 pre_ts;
+	struct timespec64 post_ts;
+};
+
+static inline void
+ptp_read_system_prets(struct ptp_system_timestamp __always_unused *sts)
+{
+	;
+}
+
+static inline void
+ptp_read_system_postts(struct ptp_system_timestamp __always_unused *sts)
+{
+	;
+}
 #else /* >= 5.0.0 */
+#define HAVE_PTP_SYS_OFFSET_EXTENDED_IOCTL
 #define HAVE_NDO_BRIDGE_SETLINK_EXTACK
 #define HAVE_DMA_ALLOC_COHERENT_ZEROES_MEM
 #endif /* 5.0.0 */
@@ -6479,6 +6521,14 @@ void flow_rule_match_ipv6_addrs(const struct flow_rule *rule,
 void flow_rule_match_ports(const struct flow_rule *rule,
 			   struct flow_match_ports *out);
 #ifdef HAVE_TC_FLOWER_ENC
+void flow_rule_match_enc_ports(const struct flow_rule *rule,
+			       struct flow_match_ports *out);
+void flow_rule_match_enc_control(const struct flow_rule *rule,
+				 struct flow_match_control *out);
+void flow_rule_match_enc_ipv4_addrs(const struct flow_rule *rule,
+				    struct flow_match_ipv4_addrs *out);
+void flow_rule_match_enc_ipv6_addrs(const struct flow_rule *rule,
+				    struct flow_match_ipv6_addrs *out);
 void flow_rule_match_enc_keyid(const struct flow_rule *rule,
 			       struct flow_match_enc_keyid *out);
 #endif
@@ -6500,11 +6550,33 @@ static inline bool flow_rule_match_key(const struct flow_rule *rule,
 #define HAVE_NDO_FDB_ADD_EXTACK
 #define NO_XDP_QUERY_XSK_UMEM
 #define HAVE_TC_FLOW_RULE_INFRASTRUCTURE
+#define HAVE_TC_FLOWER_ENC_IP
 #endif /* 5.1.0 */
 
 /*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5,2,0))
 #define netdev_xmit_more()	(skb->xmit_more)
+
+#ifndef eth_get_headlen
+static inline u32
+__kc_eth_get_headlen(const struct net_device __always_unused *dev, void *data,
+		     unsigned int len)
+{
+	return eth_get_headlen(data, len);
+}
+
+#define eth_get_headlen(dev, data, len) __kc_eth_get_headlen(dev, data, len)
+#endif /* !eth_get_headlen */
+
+#ifndef mmiowb
+#ifdef CONFIG_IA64
+#define mmiowb() asm volatile ("mf.a" ::: "memory")
+#else
+#define mmiowb()
+#endif
+#endif /* mmiowb */
+
 #else /* >= 5.2.0 */
+#define SPIN_UNLOCK_IMPLIES_MMIOWB
 #endif /* 5.2.0 */
 #endif /* _KCOMPAT_H_ */

@@ -2,7 +2,7 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet Controller 700 Series
 ===============================================================================
 
-February 7, 2019
+May 29, 2019
 Copyright(c) 2014-2019 Intel Corporation.
 
 Contents
@@ -794,7 +794,6 @@ on your device, you may not be able to change the auto-negotiation setting.
 
 RSS Hash Flow
 -------------
-
 Allows you to set the hash bytes per flow type and any combination of one or
 more options for Receive Side Scaling (RSS) hash byte configuration.
 
@@ -830,7 +829,6 @@ supported by the device.
 
 IEEE 802.1ad (QinQ) Support
 ---------------------------
-
 The IEEE 802.1ad standard, informally known as QinQ, allows for multiple VLAN
 IDs within a single Ethernet frame. VLAN IDs are sometimes referred to as
 "tags," and multiple VLAN IDs are thus referred to as a "tag stack." Tag stacks
@@ -850,7 +848,6 @@ supported for 802.1ad (QinQ) packets.
 
 VXLAN and GENEVE Overlay HW Offloading
 --------------------------------------
-
 Virtual Extensible LAN (VXLAN) allows you to extend an L2 network over an L3
 network, which may be useful in a virtualized or cloud environment. Some
 Intel(R) Ethernet Network devices perform VXLAN processing, offloading it from
@@ -866,7 +863,6 @@ the HW offloading features.
 
 Multiple Functions per Port
 ---------------------------
-
 Some adapters based on the Intel Ethernet Controller X710/XL710 support
 multiple functions on a single physical port. Configure these functions through
 the System Setup/BIOS.
@@ -931,7 +927,6 @@ OS.
 
 Interrupt Rate Limiting
 -----------------------
-
 The Intel(R) Ethernet Controller XL710 family supports an interrupt rate
 limiting mechanism. The user can control, via ethtool, the number of
 microseconds between interrupts.
@@ -1255,7 +1250,6 @@ el-ethernet-700-series
 
 Performance Optimization:
 -------------------------
-
 Driver defaults are meant to fit a wide variety of workloads, but if further
 optimization is required we recommend experimenting with the following settings.
 
@@ -1277,7 +1271,6 @@ Virtualized Environments:
 
 3. Configure as many rx/tx queues in the VM as available. Do not rely on
   the default setting of 1.
-
 
 Non-virtualized Environments
 
@@ -1328,6 +1321,16 @@ ethtool.
 Known Issues/Troubleshooting
 ============================
 
+Linux bonding fails with Virtual Functions bound to an Intel(R) Ethernet
+Controller 700 series based device
+------------------------------------------------------------------------
+If you bind Virtual Functions (VFs) to an Intel(R) Ethernet Controller 700
+series based device, the VF slaves may fail when they become the active slave.
+If the MAC address of the VF is set by the PF (Physical Function) of the
+device, when you add a slave, or change the active-backup slave, Linux bonding
+tries to sync the backup slave's MAC address to the same MAC address as the
+active slave. Linux bonding will fail at this point. This issue will not occur
+if the VF's MAC address is not set by the PF.
 LACP PDUs not being sent
 ------------------------
 Configuring bonding interface of mode 4 (802.3ad) on Ubuntu 14.04.5 will

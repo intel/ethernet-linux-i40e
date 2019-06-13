@@ -5224,7 +5224,13 @@ i40e_status i40e_enable_eee(struct i40e_hw *hw, bool enable)
 			    I40E_AQ_PHY_FEC_CONFIG_MASK;
 
 	/* Set desired EEE state */
-	config.eee_capability = enable ? eee_capability : 0;
+	if (enable) {
+		config.eee_capability = eee_capability;
+		config.eeer |= I40E_PRTPM_EEER_TX_LPI_EN_MASK;
+	} else {
+		config.eee_capability = 0;
+		config.eeer &= ~I40E_PRTPM_EEER_TX_LPI_EN_MASK;
+	}
 
 	/* Save modified config */
 	status = i40e_aq_set_phy_config(hw, &config, NULL);
@@ -5891,6 +5897,74 @@ i40e_status i40e_get_phy_lpi_status(struct i40e_hw *hw,
 }
 
 /**
+ * i40e_get_lpi_counters - read LPI counters from EEE statistics
+ * @hw: pointer to the hw struct
+ * @tx_counter: pointer to memory for TX LPI counter
+ * @rx_counter: pointer to memory for RX LPI counter
+ *
+ * Read Low Power Idle (LPI) mode counters from Energy Efficient
+ * Ethernet (EEE) statistics.
+ **/
+i40e_status i40e_get_lpi_counters(struct i40e_hw *hw,
+					    u32 *tx_counter, u32 *rx_counter)
+{
+	i40e_status retval;
+	u32 cmd_status;
+
+	retval = i40e_aq_run_phy_activity(hw,
+			I40E_AQ_RUN_PHY_ACTIVITY_ACTIVITY_ID_USER_DEFINED,
+			I40E_AQ_RUN_PHY_ACTIVITY_DNL_OPCODE_GET_EEE_STATISTICS,
+			&cmd_status, tx_counter, rx_counter, NULL);
+
+	if (cmd_status != I40E_AQ_RUN_PHY_ACTIVITY_CMD_STATUS_SUCCESS)
+		retval = I40E_ERR_ADMIN_QUEUE_ERROR;
+
+	return retval;
+}
+
+/**
+ * i40e_lpi_stat_update - update LPI counters with values relative to offset
+ * @hw: pointer to the hw struct
+ * @offset_loaded: flag indicating need of writing current value to offset
+ * @tx_offset: pointer to offset of TX LPI counter
+ * @tx_stat: pointer to value of TX LPI counter
+ * @rx_offset: pointer to offset of RX LPI counter
+ * @rx_stat: pointer to value of RX LPI counter
+ *
+ * Update Low Power Idle (LPI) mode counters while having regard to passed
+ * offsets.
+ **/
+i40e_status i40e_lpi_stat_update(struct i40e_hw *hw,
+					   bool offset_loaded, u64 *tx_offset,
+					   u64 *tx_stat, u64 *rx_offset,
+					   u64 *rx_stat)
+{
+	i40e_status retval;
+	u32 tx_counter, rx_counter;
+
+	retval = i40e_get_lpi_counters(hw, &tx_counter, &rx_counter);
+	if (retval)
+		goto err;
+
+	if (!offset_loaded) {
+		*tx_offset = tx_counter;
+		*rx_offset = rx_counter;
+	}
+
+	if (tx_counter >= *tx_offset)
+		*tx_stat = (u32)(tx_counter - *tx_offset);
+	else
+		*tx_stat = (u32)((tx_counter + BIT_ULL(32)) - *tx_offset);
+
+	if (rx_counter >= *rx_offset)
+		*rx_stat = (u32)(rx_counter - *rx_offset);
+	else
+		*rx_stat = (u32)((rx_counter + BIT_ULL(32)) - *rx_offset);
+err:
+	return retval;
+}
+
+/**
  * i40e_aq_rx_ctl_read_register - use FW to read from an Rx control register
  * @hw: pointer to the hw struct
  * @reg_addr: register address
@@ -6091,6 +6165,51 @@ i40e_status i40e_aq_get_phy_register(struct i40e_hw *hw,
 		*reg_val = LE32_TO_CPU(cmd->reg_value);
 
 	return status;
+}
+
+/**
+ * i40e_aq_run_phy_activity
+ * @hw: pointer to the hw struct
+ * @activity_id: ID of DNL activity to run
+ * @dnl_opcode: opcode passed to DNL script
+ * @cmd_status: pointer to memory to write return value of DNL script
+ * @data0: pointer to memory for first 4 bytes of data returned by DNL script
+ * @data1: pointer to memory for last 4 bytes of data returned by DNL script
+ * @cmd_details: pointer to command details structure or NULL
+ *
+ * Run DNL admin command.
+ **/
+enum i40e_status_code
+i40e_aq_run_phy_activity(struct i40e_hw *hw, u16 activity_id, u32 dnl_opcode,
+			 u32 *cmd_status, u32 *data0, u32 *data1,
+			 struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aqc_run_phy_activity *cmd;
+	i40e_status retval;
+	struct i40e_aq_desc desc;
+
+	cmd = (struct i40e_aqc_run_phy_activity *)&desc.params.raw;
+
+	if (!cmd_status || !data0 || !data1) {
+		retval = I40E_ERR_PARAM;
+		goto err;
+	}
+
+	i40e_fill_default_direct_cmd_desc(&desc,
+					  i40e_aqc_opc_run_phy_activity);
+
+	cmd->activity_id = CPU_TO_LE16(activity_id);
+	cmd->params.cmd.dnl_opcode = CPU_TO_LE32(dnl_opcode);
+
+	retval = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
+	if (retval)
+		goto err;
+
+	*cmd_status = LE32_TO_CPU(cmd->params.resp.cmd_status);
+	*data0 = LE32_TO_CPU(cmd->params.resp.data0);
+	*data1 = LE32_TO_CPU(cmd->params.resp.data1);
+err:
+	return retval;
 }
 
 /**

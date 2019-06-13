@@ -2275,7 +2275,8 @@ static struct sk_buff *i40e_construct_skb(struct i40e_ring *rx_ring,
 	/* Determine available headroom for copy */
 	headlen = size;
 	if (headlen > I40E_RX_HDR_SIZE)
-		headlen = eth_get_headlen(xdp->data, I40E_RX_HDR_SIZE);
+		headlen = eth_get_headlen(skb->dev, xdp->data,
+					  I40E_RX_HDR_SIZE);
 
 	/* align pull length to size of long to optimize memcpy performance */
 	memcpy(__skb_put(skb, headlen), xdp->data,
@@ -3820,21 +3821,35 @@ static inline int i40e_tx_map(struct i40e_ring *tx_ring, struct sk_buff *skb,
 
 	/* notify HW of packet */
 #ifdef HAVE_SKB_XMIT_MORE
-	if (netif_xmit_stopped(txring_txq(tx_ring)) || !skb->xmit_more) {
+	if (netif_xmit_stopped(txring_txq(tx_ring)) || !netdev_xmit_more()) {
 		writel(i, tx_ring->tail);
 
-		/* we need this if more than one processor can write to our tail
-		 * at a time, it synchronizes IO on IA64/Altix systems
+#ifndef SPIN_UNLOCK_IMPLIES_MMIOWB
+		/* We need this mmiowb on IA64/Altix systems where wmb() isn't
+		 * guaranteed to synchronize I/O.
+		 *
+		 * Note that mmiowb() only provides a guarantee about ordering
+		 * when in conjunction with a spin_unlock(). This barrier is
+		 * used to guarantee the I/O ordering with respect to a spin
+		 * lock in the networking core code.
 		 */
 		mmiowb();
+#endif
 	}
 #else
 	writel(i, tx_ring->tail);
 
-	/* we need this if more than one processor can write to our tail
-	 * at a time, it synchronizes IO on IA64/Altix systems
+#ifndef SPIN_UNLOCK_IMPLIES_MMIOWB
+	/* We need this mmiowb on IA64/Altix systems where wmb() isn't
+	 * guaranteed to synchronize I/O.
+	 *
+	 * Note that mmiowb() only provides a guarantee about ordering when in
+	 * conjunction with a spin_unlock(). This barrier is used to guarantee
+	 * the I/O ordering with respect to a spin lock in the networking core
+	 * code.
 	 */
 	mmiowb();
+#endif
 #endif /* HAVE_XMIT_MORE */
 
 	return 0;
