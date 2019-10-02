@@ -1773,6 +1773,20 @@ no_buffers:
 	return true;
 }
 
+#define I40E_XDP_PASS          0
+#define I40E_XDP_CONSUMED      BIT(0)
+#define I40E_XDP_TX            BIT(1)
+#define I40E_XDP_REDIR         BIT(2)
+
+static inline void i40e_xdp_ring_update_tail(struct i40e_ring *xdp_ring)
+{
+	/* Force memory writes to complete before letting h/w
+	 * know there are new descriptors to fetch.
+	 */
+	wmb();
+	writel_relaxed(xdp_ring->next_to_use, xdp_ring->tail);
+}
+
 #ifdef I40E_ADD_PROBES
 static void i40e_rx_extra_counters(struct i40e_vsi *vsi, u32 rx_error,
 				   const struct i40e_rx_ptype_decoded decoded)
@@ -2415,11 +2429,6 @@ static bool i40e_is_non_eop(struct i40e_ring *rx_ring,
 	return true;
 }
 
-#define I40E_XDP_PASS          0
-#define I40E_XDP_CONSUMED      BIT(0)
-#define I40E_XDP_TX            BIT(1)
-#define I40E_XDP_REDIR         BIT(2)
-
 #ifdef HAVE_XDP_SUPPORT
 #ifdef HAVE_XDP_FRAME_STRUCT
 static int i40e_xmit_xdp_ring(struct xdp_frame *xdp,
@@ -2523,15 +2532,6 @@ static void i40e_rx_buffer_flip(struct i40e_ring *rx_ring,
 
 	rx_buffer->page_offset += truesize;
 #endif
-}
-
-static inline void i40e_xdp_ring_update_tail(struct i40e_ring *xdp_ring)
-{
-	/* Force memory writes to complete before letting h/w
-	 * know there are new descriptors to fetch.
-	 */
-	wmb();
-	writel_relaxed(xdp_ring->next_to_use, xdp_ring->tail);
 }
 
 /**

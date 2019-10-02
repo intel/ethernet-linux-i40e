@@ -196,6 +196,7 @@ static const struct i40e_stats i40e_gstrings_pfc_stats[] = {
 
 #define I40E_GLOBAL_STATS_LEN	ARRAY_SIZE(i40e_gstrings_stats)
 
+/* Length (number) of PF core stats only (i.e. without queues / extra stats): */
 #define I40E_PF_STATS_LEN	(I40E_GLOBAL_STATS_LEN + \
 				 I40E_PFC_STATS_LEN + \
 				 I40E_VEB_STATS_LEN + \
@@ -207,6 +208,47 @@ static const struct i40e_stats i40e_gstrings_pfc_stats[] = {
 #define I40E_QUEUE_STATS_XDP_LEN ARRAY_SIZE(i40e_gstrings_rx_queue_xdp_stats)
 #endif
 
+#ifndef I40E_PF_EXTRA_STATS_OFF
+
+#define I40E_STATS_NAME_VFID_EXTRA "vf___."
+#define I40E_STATS_NAME_VFID_EXTRA_LEN (sizeof(I40E_STATS_NAME_VFID_EXTRA) - 1)
+
+static struct i40e_stats i40e_gstrings_eth_stats_extra[] = {
+	I40E_VSI_STAT(I40E_STATS_NAME_VFID_EXTRA
+		      "rx_bytes", eth_stats.rx_bytes),
+	I40E_VSI_STAT(I40E_STATS_NAME_VFID_EXTRA
+		      "rx_unicast", eth_stats.rx_unicast),
+	I40E_VSI_STAT(I40E_STATS_NAME_VFID_EXTRA
+		      "rx_multicast", eth_stats.rx_multicast),
+	I40E_VSI_STAT(I40E_STATS_NAME_VFID_EXTRA
+		      "rx_broadcast", eth_stats.rx_broadcast),
+	I40E_VSI_STAT(I40E_STATS_NAME_VFID_EXTRA
+		      "rx_discards", eth_stats.rx_discards),
+	I40E_VSI_STAT(I40E_STATS_NAME_VFID_EXTRA
+		      "rx_unknown_protocol", eth_stats.rx_unknown_protocol),
+	I40E_VSI_STAT(I40E_STATS_NAME_VFID_EXTRA
+		      "tx_bytes", eth_stats.tx_bytes),
+	I40E_VSI_STAT(I40E_STATS_NAME_VFID_EXTRA
+		      "tx_unicast", eth_stats.tx_unicast),
+	I40E_VSI_STAT(I40E_STATS_NAME_VFID_EXTRA
+		      "tx_multicast", eth_stats.tx_multicast),
+	I40E_VSI_STAT(I40E_STATS_NAME_VFID_EXTRA
+		      "tx_broadcast", eth_stats.tx_broadcast),
+	I40E_VSI_STAT(I40E_STATS_NAME_VFID_EXTRA
+		      "tx_discards", eth_stats.tx_discards),
+	I40E_VSI_STAT(I40E_STATS_NAME_VFID_EXTRA
+		      "tx_errors", eth_stats.tx_errors),
+};
+
+#define I40E_STATS_EXTRA_COUNT	128  /* as for now only I40E_MAX_VF_COUNT */
+/* Following length value does not include the length values for queues stats */
+#define I40E_STATS_EXTRA_LEN	ARRAY_SIZE(i40e_gstrings_eth_stats_extra)
+/* Length (number) of PF extra stats only (i.e. without core stats / queues): */
+#define I40E_PF_STATS_EXTRA_LEN (I40E_STATS_EXTRA_COUNT * I40E_STATS_EXTRA_LEN)
+/* Length (number) of enhanced/all PF stats (i.e. core with extra stats): */
+#define I40E_PF_STATS_ENHANCE_LEN (I40E_PF_STATS_LEN + I40E_PF_STATS_EXTRA_LEN)
+
+#endif /* !I40E_PF_EXTRA_STATS_OFF */
 #endif /* ETHTOOL_GSTATS */
 #ifdef ETHTOOL_TEST
 enum i40e_ethtool_test_id {
@@ -2438,11 +2480,23 @@ static int i40e_get_stats_count(struct net_device *netdev)
 	 * works because the num_tx_queues is set at device creation and never
 	 * changes.
 	 */
+#ifndef I40E_PF_EXTRA_STATS_OFF
+	/* The same applies to additional stats showing here the network usage
+	 * counters for VFs. In order to handle it in a safe way, we also
+	 * report here, similarly as in the queues case described above,
+	 * the maximum possible, fixed number of these extra stats items.
+	 */
+#endif /* !I40E_PF_EXTRA_STATS_OFF */
 	stats_len += I40E_QUEUE_STATS_LEN * 2 * netdev->num_tx_queues;
 #ifdef HAVE_XDP_SUPPORT
 	stats_len += I40E_QUEUE_STATS_XDP_LEN * netdev->num_tx_queues;
 #endif
 
+#ifndef I40E_PF_EXTRA_STATS_OFF
+	if (vsi == pf->vsi[pf->lan_vsi] && pf->hw.partition_id == 1)
+		stats_len += I40E_PF_STATS_EXTRA_LEN;
+
+#endif /* !I40E_PF_EXTRA_STATS_OFF */
 	return stats_len;
 }
 
@@ -2513,6 +2567,12 @@ static void i40e_get_ethtool_stats(struct net_device *netdev,
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_pf *pf = vsi->back;
 	struct i40e_veb *veb = NULL;
+#ifndef I40E_PF_EXTRA_STATS_OFF
+	unsigned int vsi_idx;
+	unsigned int vf_idx;
+	unsigned int vf_id;
+	bool is_vf_valid;
+#endif /* !I40E_PF_EXTRA_STATS_OFF */
 	unsigned int i;
 	bool veb_stats;
 	u64 *p = data;
@@ -2565,11 +2625,94 @@ static void i40e_get_ethtool_stats(struct net_device *netdev,
 		i40e_add_ethtool_stats(&data, &pfc, i40e_gstrings_pfc_stats);
 	}
 
+#ifndef I40E_PF_EXTRA_STATS_OFF
+	/* As for now, we only process the SRIOV type VSIs (as extra stats to
+	 * PF core stats) which are correlated with VF LAN VSI (hence below,
+	 * in this for-loop instruction block, only VF's LAN VSIs are currently
+	 * processed).
+	 */
+	for (vf_id = 0; vf_id < pf->num_alloc_vfs; vf_id++) {
+		is_vf_valid = true;
+		for (vf_idx = 0; vf_idx < pf->num_alloc_vfs; vf_idx++)
+			if (pf->vf[vf_idx].vf_id == vf_id)
+				break;
+		if (vf_idx >= pf->num_alloc_vfs) {
+			dev_info(&pf->pdev->dev,
+				 "In the PF's array, there is no VF instance with VF_ID identifier %d or it is not set/initialized correctly yet\n",
+				 vf_id);
+			is_vf_valid = false;
+			goto check_vf;
+		}
+		vsi_idx = pf->vf[vf_idx].lan_vsi_idx;
+
+		vsi = pf->vsi[vsi_idx];
+		if (!vsi) {
+			/* It means empty field in the PF VSI array... */
+			dev_info(&pf->pdev->dev,
+				 "No LAN VSI instance referenced by VF %d or it is not set/initialized correctly yet\n",
+				 vf_id);
+			is_vf_valid = false;
+			goto check_vf;
+		}
+		if (vsi->vf_id != vf_id) {
+			dev_info(&pf->pdev->dev,
+				 "In the PF's array, there is incorrectly set/initialized LAN VSI or reference to it from VF %d is not set/initialized correctly yet\n",
+				 vf_id);
+			is_vf_valid = false;
+			goto check_vf;
+		}
+		if (vsi->vf_id != pf->vf[vf_idx].vf_id ||
+		    !i40e_find_vsi_from_id(pf, pf->vf[vsi->vf_id].lan_vsi_id)) {
+			/* Disjointed identifiers or broken references VF-VSI */
+			dev_warn(&pf->pdev->dev,
+				 "SRIOV LAN VSI (index %d in PF VSI array) with invalid VF Identifier %d (referenced by VF %d, ordered as %d in VF array)\n",
+				 vsi_idx, pf->vsi[vsi_idx]->vf_id,
+				 pf->vf[vf_idx].vf_id, vf_idx);
+			is_vf_valid = false;
+		}
+check_vf:
+		if (!is_vf_valid) {
+			i40e_add_ethtool_stats(&data, NULL,
+					       i40e_gstrings_eth_stats_extra);
+		} else {
+			i40e_update_eth_stats(vsi);
+			i40e_add_ethtool_stats(&data, vsi,
+					       i40e_gstrings_eth_stats_extra);
+		}
+	}
+	for (; vf_id < I40E_STATS_EXTRA_COUNT; vf_id++)
+		i40e_add_ethtool_stats(&data, NULL,
+				       i40e_gstrings_eth_stats_extra);
+
+#endif /* !I40E_PF_EXTRA_STATS_OFF */
 check_data_pointer:
 	WARN_ONCE(data - p != i40e_get_stats_count(netdev),
 		  "ethtool stats count mismatch!");
 }
 
+#ifndef I40E_PF_EXTRA_STATS_OFF
+/**
+ * i40e_update_vfid_in_stats - print VF num to stats names
+ * @stats_extra: array of stats structs with stats name strings
+ * @strings_num: number of stats name strings in array above (length)
+ * @vf_id: VF number to update stats name strings with
+ *
+ * Helper function to i40e_get_stat_strings() in case of extra stats.
+ **/
+static inline void
+i40e_update_vfid_in_stats(struct i40e_stats stats_extra[],
+			  int strings_num, int vf_id)
+{
+	int i;
+
+	for (i = 0; i < strings_num; i++) {
+		snprintf(stats_extra[i].stat_string,
+			 I40E_STATS_NAME_VFID_EXTRA_LEN, "vf%03d", vf_id);
+		stats_extra[i].stat_string[I40E_STATS_NAME_VFID_EXTRA_LEN -
+								       1] = '.';
+	}
+}
+#endif /* !I40E_PF_EXTRA_STATS_OFF */
 /**
  * i40e_get_stat_strings - copy stat strings into supplied buffer
  * @netdev: the netdev to collect strings for
@@ -2604,7 +2747,7 @@ static void i40e_get_stat_strings(struct net_device *netdev, u8 *data)
 	}
 
 	if (vsi != pf->vsi[pf->lan_vsi] || pf->hw.partition_id != 1)
-		return;
+		goto check_data_pointer;
 
 	i40e_add_stat_strings(&data, i40e_gstrings_veb_stats);
 
@@ -2616,6 +2759,16 @@ static void i40e_get_stat_strings(struct net_device *netdev, u8 *data)
 	for (i = 0; i < I40E_MAX_USER_PRIORITY; i++)
 		i40e_add_stat_strings(&data, i40e_gstrings_pfc_stats, i);
 
+#ifndef I40E_PF_EXTRA_STATS_OFF
+	for (i = 0; i < I40E_STATS_EXTRA_COUNT; i++) {
+		i40e_update_vfid_in_stats
+			(i40e_gstrings_eth_stats_extra,
+			 ARRAY_SIZE(i40e_gstrings_eth_stats_extra), i);
+		i40e_add_stat_strings(&data, i40e_gstrings_eth_stats_extra);
+	}
+
+#endif /* !I40E_PF_EXTRA_STATS_OFF */
+check_data_pointer:
 	WARN_ONCE(data - p != i40e_get_stats_count(netdev) * ETH_GSTRING_LEN,
 		  "stat strings count mismatch!");
 }
@@ -6099,10 +6252,9 @@ static int i40e_get_eee(struct net_device *netdev, struct ethtool_eee *edata)
 
 	edata->advertised = phy_cfg.eee_capability ? SUPPORTED_Autoneg : 0U;
 	edata->eee_enabled = !!edata->advertised;
-	edata->tx_lpi_enabled = edata->eee_enabled;
+	edata->tx_lpi_enabled = pf->stats.tx_lpi_status;
 
-	if (edata->advertised & edata->lp_advertised)
-		edata->eee_active = true;
+	edata->eee_active = pf->stats.tx_lpi_status && pf->stats.rx_lpi_status;
 
 	return 0;
 }
@@ -6152,7 +6304,13 @@ static int i40e_set_eee(struct net_device *netdev, struct ethtool_eee *edata)
 			    I40E_AQ_PHY_FEC_CONFIG_MASK;
 
 	/* Set desired EEE state */
-	config.eee_capability = edata->eee_enabled ? eee_capability : 0;
+	if (edata->eee_enabled) {
+		config.eee_capability = eee_capability;
+		config.eeer |= I40E_PRTPM_EEER_TX_LPI_EN_MASK;
+	} else {
+		config.eee_capability = 0;
+		config.eeer &= ~I40E_PRTPM_EEER_TX_LPI_EN_MASK;
+	}
 
 	/* Apply modified PHY configuration */
 	status = i40e_aq_set_phy_config(hw, &config, NULL);
@@ -6164,6 +6322,7 @@ static int i40e_set_eee(struct net_device *netdev, struct ethtool_eee *edata)
 #endif /* ETHTOOL_SEEE */
 
 static const struct ethtool_ops i40e_ethtool_recovery_mode_ops = {
+	.get_drvinfo		= i40e_get_drvinfo,
 	.set_eeprom		= i40e_set_eeprom,
 	.get_eeprom_len		= i40e_get_eeprom_len,
 	.get_eeprom		= i40e_get_eeprom,

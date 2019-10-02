@@ -61,7 +61,7 @@ i40e_status i40e_blink_phy_link_led(struct i40e_hw *hw,
 i40e_status i40e_get_phy_lpi_status(struct i40e_hw *hw,
 					      struct i40e_hw_port_stats *stats);
 i40e_status i40e_get_lpi_counters(struct i40e_hw *hw, u32 *tx_counter,
-					    u32 *rx_counter);
+					    u32 *rx_counter, bool *is_clear);
 i40e_status i40e_lpi_stat_update(struct i40e_hw *hw,
 					   bool offset_loaded, u64 *tx_offset,
 					   u64 *tx_stat, u64 *rx_offset,
@@ -363,6 +363,8 @@ void i40e_nvmupd_clear_wait_state(struct i40e_hw *hw);
 void i40e_set_pci_config_data(struct i40e_hw *hw, u16 link_status);
 i40e_status i40e_enable_eee(struct i40e_hw *hw, bool enable);
 
+i40e_status i40e_set_mac_type(struct i40e_hw *hw);
+
 extern struct i40e_rx_ptype_decoded i40e_ptype_lookup[];
 
 static INLINE struct i40e_rx_ptype_decoded decode_rx_desc_ptype(u8 ptype)
@@ -441,14 +443,25 @@ i40e_status i40e_aq_rx_ctl_write_register(struct i40e_hw *hw,
 				u32 reg_addr, u32 reg_val,
 				struct i40e_asq_cmd_details *cmd_details);
 void i40e_write_rx_ctl(struct i40e_hw *hw, u32 reg_addr, u32 reg_val);
-i40e_status i40e_aq_set_phy_register(struct i40e_hw *hw,
-				u8 phy_select, u8 dev_addr, bool page_change,
-				u32 reg_addr, u32 reg_val,
-				struct i40e_asq_cmd_details *cmd_details);
-i40e_status i40e_aq_get_phy_register(struct i40e_hw *hw,
-				u8 phy_select, u8 dev_addr, bool page_change,
-				u32 reg_addr, u32 *reg_val,
-				struct i40e_asq_cmd_details *cmd_details);
+enum i40e_status_code
+i40e_aq_set_phy_register_ext(struct i40e_hw *hw,
+			     u8 phy_select, u8 dev_addr, bool page_change,
+			     bool set_mdio, u8 mdio_num,
+			     u32 reg_addr, u32 reg_val,
+			     struct i40e_asq_cmd_details *cmd_details);
+enum i40e_status_code
+i40e_aq_get_phy_register_ext(struct i40e_hw *hw,
+			     u8 phy_select, u8 dev_addr, bool page_change,
+			     bool set_mdio, u8 mdio_num,
+			     u32 reg_addr, u32 *reg_val,
+			     struct i40e_asq_cmd_details *cmd_details);
+
+/* Convenience wrappers for most common use case */
+#define i40e_aq_set_phy_register(hw, ps, da, pc, ra, rv, cd) \
+	i40e_aq_set_phy_register_ext(hw, ps, da, pc, false, 0, ra, rv, cd)
+#define i40e_aq_get_phy_register(hw, ps, da, pc, ra, rv, cd) \
+	i40e_aq_get_phy_register_ext(hw, ps, da, pc, false, 0, ra, rv, cd)
+
 enum i40e_status_code
 i40e_aq_run_phy_activity(struct i40e_hw *hw, u16 activity_id, u32 opcode,
 			 u32 *cmd_status, u32 *data0, u32 *data1,

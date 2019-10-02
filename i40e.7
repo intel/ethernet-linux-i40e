@@ -28,12 +28,14 @@ use with Linux.
 .LP
 Jumbo Frames support is enabled by changing the Maximum Transmission Unit (MTU) to a value larger than the default value of 1500.
 
-Use the ifconfig command to increase the MTU size. For example, enter the following where <x> is the interface number:
+Use the ifconfig command to increase the MTU size. For example, enter the following where <ethX> is the interface number:
 
-   ifconfig eth<x> mtu 9000 up
+# ifconfig <ethX> mtu 9000 up
+
 Alternatively, you can use the ip command as follows:
-   ip link set mtu 9000 dev eth<x>
-   ip link set up dev eth<x>
+
+# ip link set mtu 9000 dev <ethX>
+# ip link set up dev <ethX>
 
 .LP
 NOTE: The maximum MTU setting for Jumbo Frames is 9702. This value coincides with the maximum Jumbo Frames size of 9728 bytes.
@@ -51,6 +53,7 @@ See the section "Jumbo Frames" in the Readme.
 .IP
 1 = Enables EEE
 .IP
+
 A link between two EEE-compliant devices will result in periodic bursts of data followed by periods where the link is in an idle state. This Low Power Idle (LPI) state is supported at 2.5 Gbps and 5 Gbps link speeds.
 
 NOTES:
@@ -59,8 +62,9 @@ NOTES:
 - EEE is not supported on all Intel(R) Ethernet Network devices or at all link speeds.
 
 Example:
-ethtool --show-eee devname
-ethtool --set-eee devname [eee on|off]
+
+# ethtool --show-eee devname
+# ethtool --set-eee devname [eee on|off]
 .SH SUPPORT
 .LP
 For additional information regarding building and installation, see the

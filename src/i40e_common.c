@@ -13,7 +13,7 @@
  * This function sets the mac type of the adapter based on the
  * vendor ID and device ID stored in the hw structure.
  **/
-static i40e_status i40e_set_mac_type(struct i40e_hw *hw)
+i40e_status i40e_set_mac_type(struct i40e_hw *hw)
 {
 	i40e_status status = I40E_SUCCESS;
 
@@ -5901,25 +5901,40 @@ i40e_status i40e_get_phy_lpi_status(struct i40e_hw *hw,
  * @hw: pointer to the hw struct
  * @tx_counter: pointer to memory for TX LPI counter
  * @rx_counter: pointer to memory for RX LPI counter
+ * @is_clear:   returns true if counters are clear after read
  *
  * Read Low Power Idle (LPI) mode counters from Energy Efficient
  * Ethernet (EEE) statistics.
  **/
 i40e_status i40e_get_lpi_counters(struct i40e_hw *hw,
-					    u32 *tx_counter, u32 *rx_counter)
+					    u32 *tx_counter, u32 *rx_counter,
+					    bool *is_clear)
 {
-	i40e_status retval;
-	u32 cmd_status;
+	/* only X710-T*L requires special handling of counters
+	 * for other devices we just read the MAC registers
+	 */
+	if (hw->device_id == I40E_DEV_ID_10G_BASE_T_BC &&
+	    hw->phy.link_info.link_speed != I40E_LINK_SPEED_1GB) {
+		i40e_status retval;
+		u32 cmd_status;
 
-	retval = i40e_aq_run_phy_activity(hw,
-			I40E_AQ_RUN_PHY_ACTIVITY_ACTIVITY_ID_USER_DEFINED,
-			I40E_AQ_RUN_PHY_ACTIVITY_DNL_OPCODE_GET_EEE_STATISTICS,
-			&cmd_status, tx_counter, rx_counter, NULL);
+		*is_clear = false;
+		retval = i40e_aq_run_phy_activity(hw,
+				I40E_AQ_RUN_PHY_ACT_ID_USR_DFND,
+				I40E_AQ_RUN_PHY_ACT_DNL_OPCODE_GET_EEE_STAT,
+				&cmd_status, tx_counter, rx_counter, NULL);
 
-	if (cmd_status != I40E_AQ_RUN_PHY_ACTIVITY_CMD_STATUS_SUCCESS)
-		retval = I40E_ERR_ADMIN_QUEUE_ERROR;
+		if (cmd_status != I40E_AQ_RUN_PHY_ACT_CMD_STAT_SUCC)
+			retval = I40E_ERR_ADMIN_QUEUE_ERROR;
 
-	return retval;
+		return retval;
+	}
+
+	*is_clear = true;
+	*tx_counter = rd32(hw, I40E_PRTPM_TLPIC);
+	*rx_counter = rd32(hw, I40E_PRTPM_RLPIC);
+
+	return I40E_SUCCESS;
 }
 
 /**
@@ -5941,25 +5956,28 @@ i40e_status i40e_lpi_stat_update(struct i40e_hw *hw,
 {
 	i40e_status retval;
 	u32 tx_counter, rx_counter;
+	bool is_clear;
 
-	retval = i40e_get_lpi_counters(hw, &tx_counter, &rx_counter);
+	retval = i40e_get_lpi_counters(hw, &tx_counter, &rx_counter, &is_clear);
 	if (retval)
 		goto err;
 
-	if (!offset_loaded) {
-		*tx_offset = tx_counter;
-		*rx_offset = rx_counter;
+	if (is_clear) {
+		*tx_stat += tx_counter;
+		*rx_stat += rx_counter;
+	} else {
+		if (!offset_loaded) {
+			*tx_offset = tx_counter;
+			*rx_offset = rx_counter;
+		}
+
+		*tx_stat = (tx_counter >= *tx_offset) ?
+			(u32)(tx_counter - *tx_offset) :
+			(u32)((tx_counter + BIT_ULL(32)) - *tx_offset);
+		*rx_stat = (rx_counter >= *rx_offset) ?
+			(u32)(rx_counter - *rx_offset) :
+			(u32)((rx_counter + BIT_ULL(32)) - *rx_offset);
 	}
-
-	if (tx_counter >= *tx_offset)
-		*tx_stat = (u32)(tx_counter - *tx_offset);
-	else
-		*tx_stat = (u32)((tx_counter + BIT_ULL(32)) - *tx_offset);
-
-	if (rx_counter >= *rx_offset)
-		*rx_stat = (u32)(rx_counter - *rx_offset);
-	else
-		*rx_stat = (u32)((rx_counter + BIT_ULL(32)) - *rx_offset);
 err:
 	return retval;
 }
@@ -6091,21 +6109,51 @@ do_retry:
 }
 
 /**
- * i40e_aq_set_phy_register
+ * i40e_mdio_if_number_selection - MDIO I/F number selection
+ * @hw: pointer to the hw struct
+ * @set_mdio: use MDIO I/F number specified by mdio_num
+ * @mdio_num: MDIO I/F number
+ * @cmd: pointer to PHY Register command structure
+ **/
+static void
+i40e_mdio_if_number_selection(struct i40e_hw *hw, bool set_mdio, u8 mdio_num,
+			      struct i40e_aqc_phy_register_access *cmd)
+{
+	if (set_mdio && cmd->phy_interface == I40E_AQ_PHY_REG_ACCESS_EXTERNAL) {
+		if (hw->flags & I40E_HW_FLAG_AQ_PHY_ACCESS_EXTENDED)
+			cmd->cmd_flags |=
+				I40E_AQ_PHY_REG_ACCESS_SET_MDIO_IF_NUMBER |
+				((mdio_num <<
+				I40E_AQ_PHY_REG_ACCESS_MDIO_IF_NUMBER_SHIFT) &
+				I40E_AQ_PHY_REG_ACCESS_MDIO_IF_NUMBER_MASK);
+		else
+			i40e_debug(hw, I40E_DEBUG_PHY,
+				   "MDIO I/F number selection not supported by current FW version.\n");
+	}
+}
+
+/**
+ * i40e_aq_set_phy_register_ext
  * @hw: pointer to the hw struct
  * @phy_select: select which phy should be accessed
  * @dev_addr: PHY device address
  * @page_change: enable auto page change
+ * @set_mdio: use MDIO I/F number specified by mdio_num
+ * @mdio_num: MDIO I/F number
  * @reg_addr: PHY register address
  * @reg_val: new register value
  * @cmd_details: pointer to command details structure or NULL
  *
  * Write the external PHY register.
+ * NOTE: In common cases MDIO I/F number should not be changed, thats why you
+ * may use simple wrapper i40e_aq_set_phy_register.
  **/
-i40e_status i40e_aq_set_phy_register(struct i40e_hw *hw,
-				u8 phy_select, u8 dev_addr, bool page_change,
-				u32 reg_addr, u32 reg_val,
-				struct i40e_asq_cmd_details *cmd_details)
+enum i40e_status_code
+i40e_aq_set_phy_register_ext(struct i40e_hw *hw,
+			     u8 phy_select, u8 dev_addr, bool page_change,
+			     bool set_mdio, u8 mdio_num,
+			     u32 reg_addr, u32 reg_val,
+			     struct i40e_asq_cmd_details *cmd_details)
 {
 	struct i40e_aq_desc desc;
 	struct i40e_aqc_phy_register_access *cmd =
@@ -6123,27 +6171,35 @@ i40e_status i40e_aq_set_phy_register(struct i40e_hw *hw,
 	if (!page_change)
 		cmd->cmd_flags = I40E_AQ_PHY_REG_ACCESS_DONT_CHANGE_QSFP_PAGE;
 
+	i40e_mdio_if_number_selection(hw, set_mdio, mdio_num, cmd);
+
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 
 	return status;
 }
 
 /**
- * i40e_aq_get_phy_register
+ * i40e_aq_get_phy_register_ext
  * @hw: pointer to the hw struct
  * @phy_select: select which phy should be accessed
  * @dev_addr: PHY device address
  * @page_change: enable auto page change
+ * @set_mdio: use MDIO I/F number specified by mdio_num
+ * @mdio_num: MDIO I/F number
  * @reg_addr: PHY register address
  * @reg_val: read register value
  * @cmd_details: pointer to command details structure or NULL
  *
  * Read the external PHY register.
+ * NOTE: In common cases MDIO I/F number should not be changed, thats why you
+ * may use simple wrapper i40e_aq_get_phy_register.
  **/
-i40e_status i40e_aq_get_phy_register(struct i40e_hw *hw,
-				u8 phy_select, u8 dev_addr, bool page_change,
-				u32 reg_addr, u32 *reg_val,
-				struct i40e_asq_cmd_details *cmd_details)
+enum i40e_status_code
+i40e_aq_get_phy_register_ext(struct i40e_hw *hw,
+			     u8 phy_select, u8 dev_addr, bool page_change,
+			     bool set_mdio, u8 mdio_num,
+			     u32 reg_addr, u32 *reg_val,
+			     struct i40e_asq_cmd_details *cmd_details)
 {
 	struct i40e_aq_desc desc;
 	struct i40e_aqc_phy_register_access *cmd =
@@ -6159,6 +6215,8 @@ i40e_status i40e_aq_get_phy_register(struct i40e_hw *hw,
 
 	if (!page_change)
 		cmd->cmd_flags = I40E_AQ_PHY_REG_ACCESS_DONT_CHANGE_QSFP_PAGE;
+
+	i40e_mdio_if_number_selection(hw, set_mdio, mdio_num, cmd);
 
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 	if (!status)

@@ -34,7 +34,6 @@ enum i40e_queue_ctrl {
 enum i40e_vf_states {
 	I40E_VF_STATE_INIT = 0,
 	I40E_VF_STATE_ACTIVE,
-	I40E_VF_STATE_IWARPENA,
 	I40E_VF_STATE_DISABLED,
 	I40E_VF_STATE_MC_PROMISC,
 	I40E_VF_STATE_UC_PROMISC,
@@ -45,7 +44,6 @@ enum i40e_vf_states {
 enum i40e_vf_capabilities {
 	I40E_VIRTCHNL_VF_CAP_PRIVILEGE = 0,
 	I40E_VIRTCHNL_VF_CAP_L2,
-	I40E_VIRTCHNL_VF_CAP_IWARP,
 };
 
 /* In ADq, max 4 VSI's can be allocated per VF including primary VF VSI.
@@ -107,6 +105,8 @@ struct i40e_vf {
 	DECLARE_BITMAP(mirror_vlans, VLAN_N_VID);
 	u16 vlan_rule_id;
 #define I40E_NO_VF_MIRROR	-1
+/* assuming vf ids' range is <0..max_supported> */
+#define I40E_IS_MIRROR_VLAN_ID_VALID(id) ((id) >= 0)
 	u16 ingress_rule_id;
 	int ingress_vlan;
 	u16 egress_rule_id;
@@ -125,9 +125,6 @@ struct i40e_vf {
 	struct i40evf_channel ch[I40E_MAX_VF_VSI];
 	struct hlist_head cloud_filter_list;
 	u16 num_cloud_filters;
-
-	/* RDMA Client */
-	struct virtchnl_iwarp_qvlist_info *qvlist_info;
 };
 
 void i40e_free_vfs(struct i40e_pf *pf);
