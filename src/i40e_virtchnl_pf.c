@@ -40,6 +40,39 @@ static void i40e_vc_vf_broadcast(struct i40e_pf *pf,
 }
 
 /**
+ * i40e_vc_link_speed2mbps - Convert AdminQ link_speed bit represented
+ * to integer value of Mbps
+ * @link_speed: the speed to convert
+ *
+ * Returns the speed as direct value of Mbps.
+ **/
+static INLINE u32
+i40e_vc_link_speed2mbps(enum i40e_aq_link_speed link_speed)
+{
+	switch (link_speed) {
+	case I40E_LINK_SPEED_100MB:
+		return SPEED_100;
+	case I40E_LINK_SPEED_1GB:
+		return SPEED_1000;
+	case I40E_LINK_SPEED_2_5GB:
+		return SPEED_2500;
+	case I40E_LINK_SPEED_5GB:
+		return SPEED_5000;
+	case I40E_LINK_SPEED_10GB:
+		return SPEED_10000;
+	case I40E_LINK_SPEED_20GB:
+		return SPEED_20000;
+	case I40E_LINK_SPEED_25GB:
+		return SPEED_25000;
+	case I40E_LINK_SPEED_40GB:
+		return SPEED_40000;
+	case I40E_LINK_SPEED_UNKNOWN:
+		return SPEED_UNKNOWN;
+	}
+	return SPEED_UNKNOWN;
+}
+
+/**
  * i40e_vc_notify_vf_link_state
  * @vf: pointer to the VF structure
  *
@@ -56,6 +89,24 @@ static void i40e_vc_notify_vf_link_state(struct i40e_vf *vf)
 	pfe.event = VIRTCHNL_EVENT_LINK_CHANGE;
 	pfe.severity = PF_EVENT_SEVERITY_INFO;
 
+#ifdef VIRTCHNL_VF_CAP_ADV_LINK_SPEED
+	/* Always report link is down if the VF queues aren't enabled */
+	if (!vf->queues_enabled) {
+		pfe.event_data.link_event_adv.link_status = false;
+		pfe.event_data.link_event_adv.link_speed = 0;
+#ifdef HAVE_NDO_SET_VF_LINK_STATE
+	} else if (vf->link_forced) {
+		pfe.event_data.link_event_adv.link_status = vf->link_up;
+		pfe.event_data.link_event_adv.link_speed =
+			(vf->link_up ? SPEED_40000 : 0);
+#endif
+	} else {
+		pfe.event_data.link_event_adv.link_status =
+			ls->link_info & I40E_AQ_LINK_UP;
+		pfe.event_data.link_event_adv.link_speed =
+			i40e_vc_link_speed2mbps(ls->link_speed);
+	}
+#else /* VIRTCHNL_VF_CAP_ADV_LINK_SPEED */
 	/* Always report link is down if the VF queues aren't enabled */
 	if (!vf->queues_enabled) {
 		pfe.event_data.link_event.link_status = false;
@@ -72,6 +123,7 @@ static void i40e_vc_notify_vf_link_state(struct i40e_vf *vf)
 		pfe.event_data.link_event.link_speed =
 			i40e_virtchnl_link_speed(ls->link_speed);
 	}
+#endif /* VIRTCHNL_VF_CAP_ADV_LINK_SPEED */
 
 	i40e_aq_send_msg_to_vf(hw, abs_vf_id, VIRTCHNL_OP_EVENT,
 			       I40E_SUCCESS, (u8 *)&pfe, sizeof(pfe), NULL);
@@ -780,6 +832,19 @@ static int i40e_vf_add_ingress_egress_mirror(struct i40e_vf *vf, int mirror,
 	ret = i40e_validate_vf(pf, mirror);
 	if (ret)
 		goto err_out;
+	if (I40E_IS_MIRROR_VLAN_ID_VALID(vf->ingress_vlan)) {
+		dev_err(&pf->pdev->dev,
+			"VF=%d already has an ingress mirroring configured, only one rule per VF is supported!\n",
+			vf->vf_id);
+		ret = -EPERM;
+		goto err_out;
+	} else if (I40E_IS_MIRROR_VLAN_ID_VALID(vf->egress_vlan)) {
+		dev_err(&pf->pdev->dev,
+			"VF=%d already has an egress mirroring configured, only one rule per VF is supported!\n",
+			vf->vf_id);
+		ret = -EPERM;
+		goto err_out;
+	}
 	mirror_vf = &pf->vf[mirror];
 	mirror_vsi = pf->vsi[mirror_vf->lan_vsi_idx];
 	mr_list = kcalloc(cnt, sizeof(__le16), GFP_KERNEL);
@@ -873,22 +938,39 @@ static int i40e_configure_vf_link(struct i40e_vf *vf, u8 link)
 	switch (link) {
 	case VFD_LINKSTATE_AUTO:
 		vf->link_forced = false;
+#ifdef VIRTCHNL_VF_CAP_ADV_LINK_SPEED
+		pfe.event_data.link_event_adv.link_status =
+			ls->link_info & I40E_AQ_LINK_UP;
+		pfe.event_data.link_event_adv.link_speed =
+			i40e_vc_link_speed2mbps(ls->link_speed);
+#else /* VIRTCHNL_VF_CAP_ADV_LINK_SPEED */
 		pfe.event_data.link_event.link_status =
 			ls->link_info & I40E_AQ_LINK_UP;
 		pfe.event_data.link_event.link_speed =
 			i40e_virtchnl_link_speed(ls->link_speed);
+#endif /* VIRTCHNL_VF_CAP_ADV_LINK_SPEED */
 		break;
 	case VFD_LINKSTATE_ON:
 		vf->link_forced = true;
 		vf->link_up = true;
+#ifdef VIRTCHNL_VF_CAP_ADV_LINK_SPEED
+		pfe.event_data.link_event_adv.link_status = true;
+		pfe.event_data.link_event_adv.link_speed = SPEED_40000;
+#else /* VIRTCHNL_VF_CAP_ADV_LINK_SPEED */
 		pfe.event_data.link_event.link_status = true;
-		pfe.event_data.link_event.link_speed = I40E_LINK_SPEED_40GB;
+		pfe.event_data.link_event.link_speed = VIRTCHNL_LINK_SPEED_40GB;
+#endif /* VIRTCHNL_VF_CAP_ADV_LINK_SPEED */
 		break;
 	case VFD_LINKSTATE_OFF:
 		vf->link_forced = true;
 		vf->link_up = false;
+#ifdef VIRTCHNL_VF_CAP_ADV_LINK_SPEED
+		pfe.event_data.link_event_adv.link_status = false;
+		pfe.event_data.link_event_adv.link_speed = 0;
+#else /* VIRTCHNL_VF_CAP_ADV_LINK_SPEED */
 		pfe.event_data.link_event.link_status = false;
 		pfe.event_data.link_event.link_speed = 0;
+#endif /* VIRTCHNL_VF_CAP_ADV_LINK_SPEED */
 		break;
 	default:
 		ret = -EINVAL;
@@ -1504,6 +1586,7 @@ static i40e_status i40e_config_vf_promiscuous_mode(struct i40e_vf *vf,
 		}
 		return aq_ret;
 	} else if (i40e_getnum_vf_vsi_vlan_filters(vsi)) {
+		spin_lock_bh(&vsi->mac_filter_hash_lock);
 		hash_for_each(vsi->mac_filter_hash, bkt, f, hlist) {
 			if (f->vlan < 0 || f->vlan > I40E_MAX_VLANID)
 				continue;
@@ -1537,6 +1620,7 @@ static i40e_status i40e_config_vf_promiscuous_mode(struct i40e_vf *vf,
 					i40e_aq_str(&pf->hw, aq_err));
 			}
 		}
+		spin_unlock_bh(&vsi->mac_filter_hash_lock);
 		return aq_ret;
 	}
 	aq_ret = i40e_aq_set_vsi_multicast_promiscuous(hw, vsi->seid, allmulti,
@@ -2262,6 +2346,10 @@ static int i40e_vc_get_vf_resources_msg(struct i40e_vf *vf, u8 *msg)
 				  VIRTCHNL_VF_OFFLOAD_VLAN;
 
 	vfres->vf_cap_flags = VIRTCHNL_VF_OFFLOAD_L2;
+#ifdef VIRTCHNL_VF_CAP_ADV_LINK_SPEED
+	vfres->vf_cap_flags |= VIRTCHNL_VF_CAP_ADV_LINK_SPEED;
+#endif /* VIRTCHNL_VF_CAP_ADV_LINK_SPEED */
+
 	vsi = pf->vsi[vf->lan_vsi_idx];
 	if (!vsi->info.pvid)
 		vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_VLAN;
@@ -3889,7 +3977,7 @@ static int i40e_vc_add_qch_msg(struct i40e_vf *vf, u8 *msg)
 	struct i40e_link_status *ls;
 	int i, adq_request_qps = 0;
 	i40e_status aq_ret = 0;
-	u64 speed = 0;
+	u32 speed;
 
 	ls = &pf->hw.phy.link_info;
 	if (!test_bit(I40E_VF_STATE_ACTIVE, &vf->vf_states)) {
@@ -3952,26 +4040,8 @@ static int i40e_vc_add_qch_msg(struct i40e_vf *vf, u8 *msg)
 	}
 
 	/* get link speed in MB to validate rate limit */
-	switch (ls->link_speed) {
-	case VIRTCHNL_LINK_SPEED_100MB:
-		speed = SPEED_100;
-		break;
-	case VIRTCHNL_LINK_SPEED_1GB:
-		speed = SPEED_1000;
-		break;
-	case VIRTCHNL_LINK_SPEED_10GB:
-		speed = SPEED_10000;
-		break;
-	case VIRTCHNL_LINK_SPEED_20GB:
-		speed = SPEED_20000;
-		break;
-	case VIRTCHNL_LINK_SPEED_25GB:
-		speed = SPEED_25000;
-		break;
-	case VIRTCHNL_LINK_SPEED_40GB:
-		speed = SPEED_40000;
-		break;
-	default:
+	speed = i40e_vc_link_speed2mbps(ls->link_speed);
+	if (speed == SPEED_UNKNOWN) {
 		dev_err(&pf->pdev->dev, "Cannot detect link speed\n");
 		aq_ret = I40E_ERR_PARAM;
 		goto err;
@@ -4739,22 +4809,39 @@ int i40e_ndo_set_vf_link_state(struct net_device *netdev, int vf_id, int link)
 	switch (link) {
 	case IFLA_VF_LINK_STATE_AUTO:
 		vf->link_forced = false;
+#ifdef VIRTCHNL_VF_CAP_ADV_LINK_SPEED
+		pfe.event_data.link_event_adv.link_status =
+			ls->link_info & I40E_AQ_LINK_UP;
+		pfe.event_data.link_event_adv.link_speed =
+			i40e_vc_link_speed2mbps(ls->link_speed);
+#else /* VIRTCHNL_VF_CAP_ADV_LINK_SPEED */
 		pfe.event_data.link_event.link_status =
 			ls->link_info & I40E_AQ_LINK_UP;
 		pfe.event_data.link_event.link_speed =
 			i40e_virtchnl_link_speed(ls->link_speed);
+#endif /* VIRTCHNL_VF_CAP_ADV_LINK_SPEED */
 		break;
 	case IFLA_VF_LINK_STATE_ENABLE:
 		vf->link_forced = true;
 		vf->link_up = true;
+#ifdef VIRTCHNL_VF_CAP_ADV_LINK_SPEED
+		pfe.event_data.link_event_adv.link_status = true;
+		pfe.event_data.link_event_adv.link_speed = SPEED_40000;
+#else /* VIRTCHNL_VF_CAP_ADV_LINK_SPEED */
 		pfe.event_data.link_event.link_status = true;
 		pfe.event_data.link_event.link_speed = VIRTCHNL_LINK_SPEED_40GB;
+#endif /* VIRTCHNL_VF_CAP_ADV_LINK_SPEED */
 		break;
 	case IFLA_VF_LINK_STATE_DISABLE:
 		vf->link_forced = true;
 		vf->link_up = false;
+#ifdef VIRTCHNL_VF_CAP_ADV_LINK_SPEED
+		pfe.event_data.link_event_adv.link_status = false;
+		pfe.event_data.link_event_adv.link_speed = 0;
+#else /* VIRTCHNL_VF_CAP_ADV_LINK_SPEED */
 		pfe.event_data.link_event.link_status = false;
 		pfe.event_data.link_event.link_speed = 0;
+#endif /* VIRTCHNL_VF_CAP_ADV_LINK_SPEED */
 		break;
 	default:
 		ret = -EINVAL;

@@ -106,6 +106,22 @@
 		8086 0008  Ethernet Network Adapter OCP XXV710-1
 		8086 0009  Ethernet 25G 2P XXV710 Adapter
 		8086 4001  Ethernet Network Adapter XXV710-2
+	15ff  Ethernet Controller X710 for 10GBASE-T
+		1137 02c1  Ethernet Network Adapter X710-T2L
+		8086 0000  Ethernet Network Adapter X710-TL
+		8086 0001  Ethernet Network Adapter X710-T4L
+		8086 0002  Ethernet Network Adapter X710-T4L
+		8086 0003  Ethernet Network Adapter X710-T2L
+		8086 0004  Ethernet Network Adapter X710-T2L
+		8086 0005  Ethernet 10G 2P X710-T2L-t Adapter
+		8086 0006  Ethernet 10G 4P X710-T4L-t Adapter
+		8086 0007  Ethernet 10G 2P X710-T2L-t OCP
+		8086 0008  Ethernet 10G 4P X710-T4L-t OCP
+		8086 0009  Ethernet Network Adapter X710-T4L for OCP 3.0
+		8086 000a  Ethernet Network Adapter X710-T4L for OCP 3.0
+		8086 000b  Ethernet Network Adapter X710-T2L for OCP 3.0
+		8086 000c  Ethernet Network Adapter X710-T2L for OCP 3.0
+		8086 000f  Ethernet Network Adapter X710-T2L for OCP 3.0
 	37ce  Ethernet Connection X722 for 10GbE backplane
 		1590 0215  Ethernet 10Gb 2-port 568i Adapter
 		17aa 4023  Ethernet Connection X722 for 10GbE backplane

@@ -268,10 +268,6 @@ struct msix_entry {
 #define node_online(node) ((node) == 0)
 #endif
 
-#ifndef num_online_cpus
-#define num_online_cpus() smp_num_cpus
-#endif
-
 #ifndef cpu_online
 #define cpu_online(cpuid) test_bit((cpuid), &cpu_online_map)
 #endif
@@ -1026,6 +1022,11 @@ void destroy_vfd_sysfs(struct pci_dev *pdev, struct vfd_objects *vfd_obj);
 	err;						\
 })
 #endif /* GCC_VERSION < 5.1.0 */
+
+/* Newer kernels removed <linux/pci-aspm.h> */
+#if ( LINUX_VERSION_CODE < KERNEL_VERSION(5,4,0) )
+#define HAVE_PCI_ASPM_H
+#endif
 
 /*****************************************************************************/
 /* 2.4.3 => 2.4.0 */
@@ -2775,7 +2776,9 @@ void _kc_pci_disable_link_state(struct pci_dev *dev, int state);
 #define pci_disable_link_state(p, s) _kc_pci_disable_link_state(p, s)
 #else /* < 2.6.26 */
 #define NETDEV_CAN_SET_GSO_MAX_SIZE
+#ifdef HAVE_PCI_ASPM_H
 #include <linux/pci-aspm.h>
+#endif
 #define HAVE_NETDEV_VLAN_FEATURES
 #ifndef PCI_EXP_LNKCAP_ASPMS
 #define PCI_EXP_LNKCAP_ASPMS 0x00000c00 /* ASPM Support */

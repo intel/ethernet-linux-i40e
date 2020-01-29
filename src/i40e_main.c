@@ -39,7 +39,7 @@ static const char i40e_driver_string[] =
 #define DRV_VERSION_LOCAL
 #endif /* DRV_VERSION_LOCAL */
 
-#define DRV_VERSION_DESC ".30"
+#define DRV_VERSION_DESC ".82"
 
 #define DRV_VERSION_MAJOR 2
 #define DRV_VERSION_MINOR 10
@@ -1129,6 +1129,8 @@ static void i40e_update_pf_stats(struct i40e_pf *pf)
 	i40e_lpi_stat_update(hw, pf->stat_offsets_loaded,
 			     &osd->tx_lpi_count, &nsd->tx_lpi_count,
 			     &osd->rx_lpi_count, &nsd->rx_lpi_count);
+	i40e_get_lpi_duration(hw, nsd,
+			      &nsd->tx_lpi_duration, &nsd->rx_lpi_duration);
 
 	if (pf->flags & I40E_FLAG_FD_SB_ENABLED &&
 	    !test_bit(__I40E_FD_SB_AUTO_DISABLED, pf->state))
@@ -6216,9 +6218,28 @@ void i40e_print_link_message(struct i40e_vsi *vsi, bool isup)
 			    "NIC Link is Up, %sbps Full Duplex, Requested FEC: %s, Negotiated FEC: %s, Autoneg: %s, Flow Control: %s\n",
 			    speed, req_fec, fec, an, fc);
 	} else {
-		netdev_info(vsi->netdev,
-			    "NIC Link is Up, %sbps Full Duplex, Flow Control: %s\n",
-			    speed, fc);
+		struct ethtool_eee edata;
+
+		edata.supported = 0;
+		edata.eee_enabled = false;
+#ifdef HAVE_RHEL6_ETHTOOL_OPS_EXT_STRUCT
+		if (get_ethtool_ops_ext(vsi->netdev)->get_eee)
+			get_ethtool_ops_ext(vsi->netdev)
+				->get_eee(vsi->netdev, &edata);
+#else
+		if (vsi->netdev->ethtool_ops->get_eee)
+			vsi->netdev->ethtool_ops->get_eee(vsi->netdev, &edata);
+#endif /* HAVE_RHEL6_ETHTOOL_OPS_EXT_STRUCT */
+
+		if (edata.supported)
+			netdev_info(vsi->netdev,
+				    "NIC Link is Up, %sbps Full Duplex, Flow Control: %s, EEE: %s\n",
+				    speed, fc,
+				    edata.eee_enabled ? "Enabled" : "Disabled");
+		else
+			netdev_info(vsi->netdev,
+				    "NIC Link is Up, %sbps Full Duplex, Flow Control: %s\n",
+				    speed, fc);
 	}
 
 }
@@ -7396,6 +7417,8 @@ static int i40e_validate_mqprio_qopt(struct i40e_vsi *vsi,
 	}
 	if (vsi->num_queue_pairs <
 	    (mqprio_qopt->qopt.offset[i] + mqprio_qopt->qopt.count[i])) {
+		dev_err(&vsi->back->pdev->dev,
+			"Failed to create traffic channel, insufficient number of queues.\n");
 		return -EINVAL;
 	}
 	if (sum_max_rate > i40e_get_link_speed(vsi)) {
@@ -8625,6 +8648,14 @@ static int i40e_handle_lldp_event(struct i40e_pf *pf,
 	int ret = 0;
 	u8 type;
 
+	/* X710-T*L 2.5G and 5G speeds don't support DCB */
+	if (hw->device_id == I40E_DEV_ID_10G_BASE_T_BC &&
+	    (hw->phy.link_info.link_speed &
+	     ~(I40E_LINK_SPEED_2_5GB | I40E_LINK_SPEED_5GB)) &&
+	     !(pf->flags & I40E_FLAG_DCB_CAPABLE))
+		/* let firmware decide if the DCB should be disabled */
+		pf->flags |= I40E_FLAG_DCB_CAPABLE;
+
 	/* Not DCB capable or capability disabled */
 	if (!(pf->flags & I40E_FLAG_DCB_CAPABLE))
 		return ret;
@@ -8656,10 +8687,20 @@ static int i40e_handle_lldp_event(struct i40e_pf *pf,
 	/* Get updated DCBX data from firmware */
 	ret = i40e_get_dcb_config(&pf->hw);
 	if (ret) {
-		dev_info(&pf->pdev->dev,
-			 "Failed querying DCB configuration data from firmware, err %s aq_err %s\n",
-			 i40e_stat_str(&pf->hw, ret),
-			 i40e_aq_str(&pf->hw, pf->hw.aq.asq_last_status));
+		/* X710-T*L 2.5G and 5G speeds don't support DCB */
+		if (hw->device_id == I40E_DEV_ID_10G_BASE_T_BC &&
+		    (hw->phy.link_info.link_speed &
+		     (I40E_LINK_SPEED_2_5GB | I40E_LINK_SPEED_5GB))) {
+			dev_warn(&pf->pdev->dev,
+				 "DCB is not supported for X710-T*L 2.5/5G speeds\n");
+			pf->flags &= ~I40E_FLAG_DCB_CAPABLE;
+		} else {
+			dev_info(&pf->pdev->dev,
+				 "Failed querying DCB configuration data from firmware, err %s aq_err %s\n",
+				 i40e_stat_str(&pf->hw, ret),
+				 i40e_aq_str(&pf->hw,
+					     pf->hw.aq.asq_last_status));
+		}
 		goto exit;
 	}
 
@@ -15143,8 +15184,10 @@ static int i40e_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 #endif
 {
 	struct i40e_aq_get_phy_abilities_resp abilities;
+#ifdef CONFIG_DCB
 	enum i40e_get_fw_lldp_status_resp lldp_status;
 	i40e_status status;
+#endif /* CONFIG_DCB */
 	struct i40e_pf *pf;
 	struct i40e_hw *hw;
 	static u16 pfs_found;
@@ -15389,7 +15432,7 @@ static int i40e_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 #ifdef HAVE_PCI_ERS
 	pci_save_state(pdev);
 #endif
-
+#ifdef CONFIG_DCB
 	status = i40e_get_fw_lldp_status(&pf->hw, &lldp_status);
 	(status == I40E_SUCCESS &&
 	 lldp_status == I40E_GET_FW_LLDP_STATUS_ENABLED) ?
@@ -15403,7 +15446,6 @@ static int i40e_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	/* Enable FW to write default DCB config on link-up */
 	i40e_aq_set_dcb_parameters(hw, true, NULL);
 
-#ifdef CONFIG_DCB
 	err = i40e_init_pf_dcb(pf);
 	if (err) {
 		dev_info(&pdev->dev, "DCB init failed %d, disabled\n", err);

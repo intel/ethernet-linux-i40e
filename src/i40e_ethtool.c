@@ -163,6 +163,8 @@ static const struct i40e_stats i40e_gstrings_stats[] = {
 	I40E_PF_STAT("port.rx_lpi_status", stats.rx_lpi_status),
 	I40E_PF_STAT("port.tx_lpi_count", stats.tx_lpi_count),
 	I40E_PF_STAT("port.rx_lpi_count", stats.rx_lpi_count),
+	I40E_PF_STAT("port.tx_lpi_duration", stats.tx_lpi_duration),
+	I40E_PF_STAT("port.rx_lpi_duration", stats.rx_lpi_duration),
 };
 
 struct i40e_pfc_stats {
@@ -6261,6 +6263,34 @@ static int i40e_get_eee(struct net_device *netdev, struct ethtool_eee *edata)
 #endif /* ETHTOOL_GEEE */
 
 #ifdef ETHTOOL_SEEE
+static int i40e_is_eee_param_supported(struct net_device *netdev,
+				       struct ethtool_eee *edata)
+{
+	struct i40e_netdev_priv *np = netdev_priv(netdev);
+	struct i40e_vsi *vsi = np->vsi;
+	struct i40e_pf *pf = vsi->back;
+	struct i40e_ethtool_not_used {
+		u32 value;
+		const char *name;
+	} param[] = {
+		{edata->advertised & ~SUPPORTED_Autoneg, "advertise"},
+		{edata->tx_lpi_timer, "tx-timer"},
+		{edata->tx_lpi_enabled != pf->stats.tx_lpi_status, "tx-lpi"}
+	};
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(param); i++) {
+		if (param[i].value) {
+			netdev_info(netdev,
+				    "EEE setting %s not supported\n",
+				    param[i].name);
+			return -EOPNOTSUPP;
+		}
+	}
+
+	return 0;
+}
+
 static int i40e_set_eee(struct net_device *netdev, struct ethtool_eee *edata)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
@@ -6271,6 +6301,10 @@ static int i40e_set_eee(struct net_device *netdev, struct ethtool_eee *edata)
 	struct i40e_pf *pf = vsi->back;
 	struct i40e_hw *hw = &pf->hw;
 	__le16 eee_capability;
+
+	/* Deny parameters we don't support */
+	if (i40e_is_eee_param_supported(netdev, edata))
+		return -EOPNOTSUPP;
 
 	/* Get initial PHY capabilities */
 	status = i40e_aq_get_phy_capabilities(hw, false, true, &abilities,

@@ -931,10 +931,6 @@ i40e_status i40e_init_shared_code(struct i40e_hw *hw)
 	else
 		hw->pf_id = (u8)(func_rid & 0x7);
 
-	if (hw->mac.type == I40E_MAC_X722)
-		hw->flags |= I40E_HW_FLAG_AQ_SRCTL_ACCESS_ENABLE |
-			     I40E_HW_FLAG_NVM_READ_REQUIRES_LOCK;
-
 	/* NVMUpdate features structure initialization */
 	hw->nvmupd_features.major = I40E_NVMUPD_FEATURES_API_VER_MAJOR;
 	hw->nvmupd_features.minor = I40E_NVMUPD_FEATURES_API_VER_MINOR;
@@ -1850,7 +1846,8 @@ i40e_status i40e_aq_get_link_info(struct i40e_hw *hw,
 	     hw->aq.fw_min_ver < 40)) && hw_link_info->phy_type == 0xE)
 		hw_link_info->phy_type = I40E_PHY_TYPE_10GBASE_SFPP_CU;
 
-	if (hw->flags & I40E_HW_FLAG_AQ_PHY_ACCESS_CAPABLE) {
+	if (hw->flags & I40E_HW_FLAG_AQ_PHY_ACCESS_CAPABLE &&
+	    hw->mac.type != I40E_MAC_X722) {
 		__le32 tmp;
 
 		i40e_memcpy(&tmp, resp->link_type, sizeof(tmp),
@@ -5935,6 +5932,62 @@ i40e_status i40e_get_lpi_counters(struct i40e_hw *hw,
 	*rx_counter = rd32(hw, I40E_PRTPM_RLPIC);
 
 	return I40E_SUCCESS;
+}
+
+/**
+ * i40e_get_lpi_duration - read LPI time duration from EEE statistics
+ * @hw: pointer to the hw struct
+ * @stat: pointer to structure with status of rx and tx lpi
+ * @tx_duration: pointer to memory for TX LPI time duration
+ * @rx_duration: pointer to memory for RX LPI time duration
+ *
+ * Read Low Power Idle (LPI) mode time duration from Energy Efficient
+ * Ethernet (EEE) statistics.
+ */
+i40e_status i40e_get_lpi_duration(struct i40e_hw *hw,
+					    struct i40e_hw_port_stats *stat,
+					    u64 *tx_duration, u64 *rx_duration)
+{
+	u32 tx_time_dur, rx_time_dur;
+	i40e_status retval;
+	u32 cmd_status;
+
+	if (hw->device_id != I40E_DEV_ID_10G_BASE_T_BC)
+		return I40E_ERR_NOT_IMPLEMENTED;
+
+	retval = i40e_aq_run_phy_activity
+		(hw, I40E_AQ_RUN_PHY_ACT_ID_USR_DFND,
+		I40E_AQ_RUN_PHY_ACT_DNL_OPCODE_GET_EEE_DUR,
+		&cmd_status, &tx_time_dur, &rx_time_dur, NULL);
+
+	if (retval)
+		return retval;
+	if ((cmd_status & I40E_AQ_RUN_PHY_ACT_CMD_STAT_MASK) !=
+	    I40E_AQ_RUN_PHY_ACT_CMD_STAT_SUCC)
+		return I40E_ERR_ADMIN_QUEUE_ERROR;
+
+	if (hw->phy.link_info.link_speed == I40E_LINK_SPEED_1GB &&
+	    !tx_time_dur && !rx_time_dur &&
+	    stat->tx_lpi_status && stat->rx_lpi_status) {
+		retval = i40e_aq_run_phy_activity
+			(hw, I40E_AQ_RUN_PHY_ACT_ID_USR_DFND,
+			I40E_AQ_RUN_PHY_ACT_DNL_OPCODE_GET_EEE_STAT_DUR,
+			&cmd_status,
+			&tx_time_dur, &rx_time_dur, NULL);
+
+		if (retval)
+			return retval;
+		if ((cmd_status & I40E_AQ_RUN_PHY_ACT_CMD_STAT_MASK) !=
+		    I40E_AQ_RUN_PHY_ACT_CMD_STAT_SUCC)
+			return I40E_ERR_ADMIN_QUEUE_ERROR;
+		tx_time_dur = 0;
+		rx_time_dur = 0;
+	}
+
+	*tx_duration = tx_time_dur;
+	*rx_duration = rx_time_dur;
+
+	return retval;
 }
 
 /**

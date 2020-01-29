@@ -20,6 +20,8 @@
 
 /* API version 1.7 implements additional link and PHY-specific APIs  */
 #define I40E_MINOR_VER_GET_LINK_INFO_XL710 0x0007
+/* API version 1.9 for X722 implements additional link and PHY-specific APIs */
+#define I40E_MINOR_VER_GET_LINK_INFO_X722 0x0009
 /* API version 1.6 for X722 devices adds ability to stop FW LLDP agent */
 #define I40E_MINOR_VER_FW_LLDP_STOPPABLE_X722 0x0006
 
@@ -2301,13 +2303,16 @@ struct i40e_aqc_run_phy_activity {
 	union {
 		struct {
 			__le32  dnl_opcode;
+#define I40E_AQ_RUN_PHY_ACT_DNL_OPCODE_GET_EEE_STAT_DUR	0x801a
 #define I40E_AQ_RUN_PHY_ACT_DNL_OPCODE_GET_EEE_STAT	0x801b
+#define I40E_AQ_RUN_PHY_ACT_DNL_OPCODE_GET_EEE_DUR	0x1801b
 			__le32  data;
 			u8	reserved2[4];
 		} cmd;
 		struct {
 			__le32	cmd_status;
 #define I40E_AQ_RUN_PHY_ACT_CMD_STAT_SUCC		0x4
+#define I40E_AQ_RUN_PHY_ACT_CMD_STAT_MASK		0xFFFF
 			__le32	data0;
 			__le32	data1;
 		} resp;
