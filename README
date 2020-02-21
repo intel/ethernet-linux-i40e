@@ -2,8 +2,8 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet Controller 700 Series
 ===============================================================================
 
-October 11, 2019
-Copyright(c) 2014-2019 Intel Corporation.
+January 7, 2020
+Copyright(c) 2014-2020 Intel Corporation.
 
 Contents
 ========
@@ -228,7 +228,6 @@ To manually build the driver
    that is being tested:
 
    # ping <IP_address>
-
 
 
 Command Line Parameters
@@ -474,6 +473,28 @@ For example, to set a Tx rate limit of 1000Mbps for VF 0:
 # ip link set eth0 vf 0 rate 1000
 
 
+Malicious Driver Detection (MDD) for VFs
+----------------------------------------
+Some Intel Ethernet devices use Malicious Driver Detection (MDD) to detect
+malicious traffic from the VF and disable Tx/Rx queues or drop the offending
+packet until a VF driver reset occurs. You can view MDD messages in the PF's
+system log using the dmesg command.
+
+- If the PF driver logs MDD events from the VF, confirm that the correct VF
+driver is installed.
+- To restore functionality, you can manually reload the VF or VM.
+
+
+MAC and VLAN Anti-Spoofing Feature for VFs
+------------------------------------------
+When a malicious driver on a Virtual Function (VF) interface attempts to send a
+spoofed packet, it is dropped by the hardware and not transmitted.
+
+NOTE: This feature can be disabled for a specific VF:
+
+# ip link set <pf dev> vf <vf id> spoofchk {off|on}
+
+
 Intel(R) Ethernet Flow Director
 -------------------------------
 NOTE: Intel Ethernet Flow Director parameters are only supported on kernel
@@ -490,17 +511,20 @@ The Intel Ethernet Flow Director performs the following tasks:
 NOTE: An included script (set_irq_affinity) automates setting the IRQ to CPU
 affinity.
 
-NOTE: The Linux i40e driver supports the following flow types: IPv4, TCPv4, and
-UDPv4. For a given flow type, it supports valid combinations of IP addresses
-(source or destination) and UDP/TCP ports (source and destination). For
-example, you can supply only a source IP address, a source IP address and a
-destination port, or any combination of one or more of these four parameters.
+NOTE: This driver supports the following flow types:
+- IPv4
+- TCPv4
+- UDPv4
+For a given flow type, it supports valid combinations of IP addresses (source
+or destination) and UDP/TCP ports (source and destination). For example, you
+can supply only a source IP address, a source IP address and a destination
+port, or any combination of one or more of these four parameters.
 
-NOTE: The Linux i40e driver allows you to filter traffic based on a
-user-defined flexible two-byte pattern and offset by using the ethtool user-def
-and mask fields. Only L3 and L4 flow types are supported for user-defined
-flexible filters. For a given flow type, you must clear all Intel Ethernet Flow
-Director filters before changing the input set (for that flow type).
+NOTE: This driver allows you to filter traffic based on a user-defined flexible
+two-byte pattern and offset by using the ethtool user-def and mask fields. Only
+L3 and L4 flow types are supported for user-defined flexible filters. For a
+given flow type, you must clear all Intel Ethernet Flow Director filters before
+changing the input set (for that flow type).
 
 To enable or disable the Intel Ethernet Flow Director:
 
@@ -1008,19 +1032,9 @@ switch.
 
 NAPI
 ----
-NAPI (Rx polling mode) is supported in the i40e driver.
+This driver supports NAPI (Rx polling mode).
 For more information on NAPI, see
 https://www.linuxfoundation.org/collaborate/workgroups/networking/napi
-
-
-MAC and VLAN Anti-Spoofing Feature for VFs
-------------------------------------------
-When a malicious driver on a Virtual Function (VF) interface attempts to send a
-spoofed packet, it is dropped by the hardware and not transmitted.
-
-NOTE: This feature can be disabled for a specific VF:
-
-# ip link set <pf dev> vf <vf id> spoofchk {off|on}
 
 
 IEEE 802.1ad (QinQ) Support
@@ -1106,12 +1120,33 @@ dropped packets during network stress. Bandwidth can be allocated to each of
 these priorities, which is enforced at the hardware level (802.1Qaz).
 
 Adapter firmware implements LLDP and DCBX protocol agents as per 802.1AB and
-802.1Qaz respectively. The firmware based DCBX agent runs in willing mode only
-and can accept settings from a DCBX capable peer. Software configuration of
-DCBX parameters via dcbtool/lldptool are not supported.
+802.1Qaz respectively. There are potentially two DCBX modes on Linux, depending
+on the underlying PF device:
+- Intel Ethernet Controller 700 Series adapters only support firmware DCBX
+mode. They do not support software DCBX.
 
-The i40e driver implements the DCB netlink interface layer to allow user-space
-to communicate with the driver and query DCB configuration for the port.
+DCB parameters can be established via a firmware LLDP/DCBX agent. Only one
+LLDP/DCBX agent can be active on a single interface at a time. When the
+firmware DCBX agent is active, software agents will not be able to receive or
+transmit LLDP frames.
+
+See the "FW-LLDP (Firmware Link Layer Discovery Protocol)" section in this
+README for the ethtool commands to query the status of the firmware LLDP/DCBX
+agent.
+
+When operating in firmware DCBX mode, the adapter is in an "always willing"
+state. DCB settings are applied on the adapter by transmitting a nonwilling
+configuration from the link partner. Typically this is a switch. For
+configuring DCBX parameters on a switch, please consult the switch
+manufacturer's documentation.
+
+NOTES:
+- You can disable the firmware agent using ethtool private flags. For DCB to be
+operational, the firmware LLDP agent is required.
+- Software configuration of DCBX parameters via dcbtool/lldptool is not
+supported.
+- The driver implements the DCB netlink interface layer to allow user-space to
+communicate with the driver and query DCB configuration for the port.
 
 
 FW-LLDP (Firmware Link Layer Discovery Protocol)
@@ -1121,11 +1156,11 @@ persists across boots.
 
 To enable LLDP:
 
-# ethtool --set-priv-flags <ethX> disable_fw_lldp off
+# ethtool --set-priv-flags <ethX> disable-fw-lldp off
 
 To disable LLDP:
 
-# ethtool --set-priv-flags <ethX> disable_fw_lldp on
+# ethtool --set-priv-flags <ethX> disable-fw-lldp on
 
 To check the current LLDP setting:
 
@@ -1654,8 +1689,8 @@ MAC address of Virtual Function changes unexpectedly
 If a Virtual Function's MAC address is not assigned in the host, then the VF
 (virtual function) driver will use a random MAC address. This random MAC
 address may change each time the VF driver is reloaded. You can assign a static
-MAC address in the host machine. This static MAC address will survive
-a VF driver reload.
+MAC address in the host machine. This static MAC address will survive a VF
+driver reload.
 
 
 Changing the number of Rx or Tx queues with ethtool -L may cause a kernel panic
@@ -1881,7 +1916,7 @@ St - Fifth Floor, Boston, MA 02110-1301 USA.
 The full GNU General Public License is included in this distribution in the
 file called "COPYING".
 
-Copyright(c) 2014-2019 Intel Corporation.
+Copyright(c) 2014-2020 Intel Corporation.
 
 
 Trademarks

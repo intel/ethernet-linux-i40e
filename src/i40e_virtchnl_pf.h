@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2019 Intel Corporation. */
+/* Copyright(c) 2013 - 2020 Intel Corporation. */
 
 #ifndef _I40E_VIRTCHNL_PF_H_
 #define _I40E_VIRTCHNL_PF_H_
@@ -38,6 +38,7 @@ enum i40e_vf_states {
 	I40E_VF_STATE_MC_PROMISC,
 	I40E_VF_STATE_UC_PROMISC,
 	I40E_VF_STATE_PRE_ENABLE,
+	I40E_VF_STATE_LOADED_VF_DRIVER,
 };
 
 /* VF capabilities */
@@ -118,6 +119,9 @@ struct i40e_vf {
 	bool loopback;
 	bool vlan_stripping;
 	u8 promisc_mode;
+	u8 bw_share;
+	bool bw_share_applied; /* true if config is applied to the device */
+	bool pf_ctrl_disable; /* tracking bool for PF ctrl of VF enable/disable */
 
 	/* ADq related variables */
 	bool adq_enabled; /* flag to enable adq */
@@ -171,7 +175,10 @@ int i40e_ndo_set_vf_spoofchk(struct net_device *netdev, int vf_id, bool enable);
 
 void i40e_vc_notify_link_state(struct i40e_pf *pf);
 void i40e_vc_notify_reset(struct i40e_pf *pf);
-
+#ifdef HAVE_VF_STATS
+int i40e_get_vf_stats(struct net_device *netdev, int vf_id,
+		      struct ifla_vf_stats *vf_stats);
+#endif
 extern const struct vfd_ops i40e_vfd_ops;
 
 #endif /* _I40E_VIRTCHNL_PF_H_ */

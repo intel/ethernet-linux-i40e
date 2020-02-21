@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2019 Intel Corporation. */
+/* Copyright(c) 2013 - 2020 Intel Corporation. */
 
 #ifndef _KCOMPAT_H_
 #define _KCOMPAT_H_
@@ -276,10 +276,15 @@ struct msix_entry {
 #include <linux/random.h>
 #endif
 
-#ifndef DECLARE_BITMAP
+#ifndef BITS_PER_TYPE
+#define BITS_PER_TYPE(type) (sizeof(type) * BITS_PER_BYTE)
+#endif
+
 #ifndef BITS_TO_LONGS
 #define BITS_TO_LONGS(bits) (((bits)+BITS_PER_LONG-1)/BITS_PER_LONG)
 #endif
+
+#ifndef DECLARE_BITMAP
 #define DECLARE_BITMAP(name,bits) long name[BITS_TO_LONGS(bits)]
 #endif
 
@@ -5065,7 +5070,10 @@ static inline struct pci_dev *pci_upstream_bridge(struct pci_dev *dev)
 #define U32_MAX ((u32)~0U)
 #endif
 
+#if (!(RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,2)))
 #define dev_consume_skb_any(x) dev_kfree_skb_any(x)
+#define dev_consume_skb_irq(x) dev_kfree_skb_irq(x)
+#endif
 
 #if (!(RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,0)) && \
      !(SLE_VERSION_CODE && SLE_VERSION_CODE >= SLE_VERSION(12,0,0)))
@@ -5946,7 +5954,17 @@ pci_release_mem_regions(struct pci_dev *pdev)
      RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE <= RHEL_RELEASE_VERSION(7,5))
 #define time_is_before_jiffies64(a)	time_after64(get_jiffies_64(), a)
 #endif /* !SLE_VERSION_CODE && !RHEL_RELEASE_CODE || (SLES <= 12.3.0) || (RHEL <= 7.5) */
+#if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7,4))
+static inline void bitmap_from_u64(unsigned long *dst, u64 mask)
+{
+	dst[0] = mask & ULONG_MAX;
+
+	if (sizeof(mask) > sizeof(unsigned long))
+		dst[1] = mask >> 32;
+}
+#endif /* <RHEL7.4 */
 #else /* >=4.9 */
+#define HAVE_FLOW_DISSECTOR_KEY_VLAN_PRIO
 #define HAVE_ETHTOOL_NEW_1G_BITS
 #define HAVE_ETHTOOL_NEW_10G_BITS
 #endif /* KERNEL_VERSION(4.9.0) */
@@ -6072,6 +6090,47 @@ static inline void __page_frag_cache_drain(struct page *page,
      (RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,5))))
 #define HAVE_VOID_NDO_GET_STATS64
 #endif /* (SLES >= 12.3.0) && (RHEL >= 7.5) */
+
+static inline void _kc_dev_kfree_skb_irq(struct sk_buff *skb)
+{
+	if (!skb)
+		return;
+	dev_kfree_skb_irq(skb);
+}
+
+#undef dev_kfree_skb_irq
+#define dev_kfree_skb_irq _kc_dev_kfree_skb_irq
+
+static inline void _kc_dev_consume_skb_irq(struct sk_buff *skb)
+{
+	if (!skb)
+		return;
+	dev_consume_skb_irq(skb);
+}
+
+#undef dev_consume_skb_irq
+#define dev_consume_skb_irq _kc_dev_consume_skb_irq
+
+static inline void _kc_dev_kfree_skb_any(struct sk_buff *skb)
+{
+	if (!skb)
+		return;
+	dev_kfree_skb_any(skb);
+}
+
+#undef dev_kfree_skb_any
+#define dev_kfree_skb_any _kc_dev_kfree_skb_any
+
+static inline void _kc_dev_consume_skb_any(struct sk_buff *skb)
+{
+	if (!skb)
+		return;
+	dev_consume_skb_any(skb);
+}
+
+#undef dev_consume_skb_any
+#define dev_consume_skb_any _kc_dev_consume_skb_any
+
 #else /* > 4.11 */
 #define HAVE_VOID_NDO_GET_STATS64
 #define HAVE_VM_OPS_FAULT_NO_VMA
@@ -6133,6 +6192,10 @@ struct _kc_xdp_buff {
 struct _kc_bpf_prog {
 };
 #define bpf_prog _kc_bpf_prog
+#ifndef DIV_ROUND_DOWN_ULL
+#define DIV_ROUND_DOWN_ULL(ll, d) \
+	({ unsigned long long _tmp = (ll); do_div(_tmp, d); _tmp; })
+#endif /* DIV_ROUND_DOWN_ULL */
 #else /* > 4.14 */
 #define HAVE_XDP_SUPPORT
 #define HAVE_NDO_SETUP_TC_REMOVE_TC_TO_NETDEV
@@ -6325,6 +6388,9 @@ tc_cls_can_offload_and_chain0(const struct net_device *dev,
 }
 #endif /* HAVE_TC_CB_AND_SETUP_QDISC_MQPRIO */
 #endif /* !(RHEL >= 7.6) && !(SLES >= 15.1) */
+#ifndef sizeof_field
+#define sizeof_field(TYPE, MEMBER) (sizeof((((TYPE *)0)->MEMBER)))
+#endif /* sizeof_field */
 #else /* >= 4.16 */
 #include <linux/nospec.h>
 #define HAVE_XDP_BUFF_RXQ
@@ -6453,6 +6519,7 @@ static inline dma_addr_t __kc_xdp_umem_get_dma(struct xdp_umem *umem, u64 addr)
 #define HAVE_NETDEV_SB_DEV
 #undef HAVE_TCF_EXTS_TO_LIST
 #define HAVE_TCF_EXTS_FOR_EACH_ACTION
+#define HAVE_TCF_VLAN_TPID
 #endif /* 4.19.0 */
 
 /*****************************************************************************/
@@ -6544,6 +6611,7 @@ ptp_read_system_postts(struct ptp_system_timestamp __always_unused *sts)
 /*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5,1,0))
 #if (RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,1)))
+#define HAVE_TC_FLOW_RULE_INFRASTRUCTURE
 #define HAVE_NDO_FDB_ADD_EXTACK
 #else /* RHEL < 8.1 */
 #ifdef HAVE_TC_SETUP_CLSFLOWER
@@ -6737,6 +6805,8 @@ static inline void skb_frag_off_add(skb_frag_t *frag, int delta)
 
 #define __flow_indr_block_cb_register __tc_indr_block_cb_register
 #define __flow_indr_block_cb_unregister __tc_indr_block_cb_unregister
+#else /* >= 5.4.0 */
+#define HAVE_NDO_XSK_WAKEUP
 #endif /* 5.4.0 */
 
 #endif /* _KCOMPAT_H_ */

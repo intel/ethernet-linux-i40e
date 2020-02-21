@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2013 - 2019 Intel Corporation. */
+/* Copyright(c) 2013 - 2020 Intel Corporation. */
 
 #include "i40e_type.h"
 #include "i40e_adminq.h"
@@ -31,6 +31,7 @@ i40e_status i40e_set_mac_type(struct i40e_hw *hw)
 		case I40E_DEV_ID_10G_BASE_T_BC:
 		case I40E_DEV_ID_10G_B:
 		case I40E_DEV_ID_10G_SFP:
+		case I40E_DEV_ID_5G_BASE_T_BC:
 		case I40E_DEV_ID_20G_KR2:
 		case I40E_DEV_ID_20G_KR2_A:
 		case I40E_DEV_ID_25G_B:
@@ -1427,9 +1428,9 @@ static u32 i40e_led_is_mine(struct i40e_hw *hw, int idx)
 	u32 gpio_val = 0;
 	u32 port;
 
-	if (!hw->func_caps.led[idx])
+	if (!I40E_IS_X710TL_DEVICE(hw->device_id) &&
+	    !hw->func_caps.led[idx])
 		return 0;
-
 	gpio_val = rd32(hw, I40E_GLGEN_GPIO_CTL(idx));
 	port = (gpio_val & I40E_GLGEN_GPIO_CTL_PRT_NUM_MASK) >>
 		I40E_GLGEN_GPIO_CTL_PRT_NUM_SHIFT;
@@ -1448,7 +1449,14 @@ static u32 i40e_led_is_mine(struct i40e_hw *hw, int idx)
 #define I40E_FILTER_ACTIVITY 0xE
 #define I40E_LINK_ACTIVITY 0xC
 #define I40E_MAC_ACTIVITY 0xD
+#define I40E_FW_LED BIT(4)
+#define I40E_LED_MODE_VALID (I40E_GLGEN_GPIO_CTL_LED_MODE_MASK >> \
+			     I40E_GLGEN_GPIO_CTL_LED_MODE_SHIFT)
+
 #define I40E_LED0 22
+
+#define I40E_PIN_FUNC_SDP 0x0
+#define I40E_PIN_FUNC_LED 0x1
 
 /**
  * i40e_led_get - return current on/off mode
@@ -1461,6 +1469,7 @@ static u32 i40e_led_is_mine(struct i40e_hw *hw, int idx)
  **/
 u32 i40e_led_get(struct i40e_hw *hw)
 {
+	u32 current_mode = 0;
 	u32 mode = 0;
 	int i;
 
@@ -1472,10 +1481,27 @@ u32 i40e_led_get(struct i40e_hw *hw)
 
 		if (!gpio_val)
 			continue;
+
+		/* ignore gpio LED src mode entries related to the activity
+		 *  LEDs
+		 */
+		current_mode = ((gpio_val & I40E_GLGEN_GPIO_CTL_LED_MODE_MASK)
+				>> I40E_GLGEN_GPIO_CTL_LED_MODE_SHIFT);
+		switch (current_mode) {
+		case I40E_COMBINED_ACTIVITY:
+		case I40E_FILTER_ACTIVITY:
+		case I40E_MAC_ACTIVITY:
+		case I40E_LINK_ACTIVITY:
+			continue;
+		default:
+			break;
+		}
+
 		mode = (gpio_val & I40E_GLGEN_GPIO_CTL_LED_MODE_MASK) >>
 			I40E_GLGEN_GPIO_CTL_LED_MODE_SHIFT;
 		break;
 	}
+
 	return mode;
 }
 
@@ -1490,10 +1516,13 @@ u32 i40e_led_get(struct i40e_hw *hw)
  **/
 void i40e_led_set(struct i40e_hw *hw, u32 mode, bool blink)
 {
+	u32 current_mode = 0;
 	int i;
 
-	if (mode & 0xfffffff0)
+	if (mode & ~I40E_LED_MODE_VALID) {
 		hw_dbg(hw, "invalid mode passed in %X\n", mode);
+		return;
+	}
 
 	/* as per the documentation GPIO 22-29 are the LED
 	 * GPIO pins named LED0..LED7
@@ -1503,6 +1532,35 @@ void i40e_led_set(struct i40e_hw *hw, u32 mode, bool blink)
 
 		if (!gpio_val)
 			continue;
+
+		/* ignore gpio LED src mode entries related to the activity
+		 * LEDs
+		 */
+		current_mode = ((gpio_val & I40E_GLGEN_GPIO_CTL_LED_MODE_MASK)
+				>> I40E_GLGEN_GPIO_CTL_LED_MODE_SHIFT);
+		switch (current_mode) {
+		case I40E_COMBINED_ACTIVITY:
+		case I40E_FILTER_ACTIVITY:
+		case I40E_MAC_ACTIVITY:
+		case I40E_LINK_ACTIVITY:
+			continue;
+		default:
+			break;
+		}
+
+		if (I40E_IS_X710TL_DEVICE(hw->device_id)) {
+			u32 pin_func = 0;
+
+			if (mode & I40E_FW_LED)
+				pin_func = I40E_PIN_FUNC_SDP;
+			else
+				pin_func = I40E_PIN_FUNC_LED;
+
+			gpio_val &= ~I40E_GLGEN_GPIO_CTL_PIN_FUNC_MASK;
+			gpio_val |= ((pin_func <<
+				     I40E_GLGEN_GPIO_CTL_PIN_FUNC_SHIFT) &
+				     I40E_GLGEN_GPIO_CTL_PIN_FUNC_MASK);
+		}
 		gpio_val &= ~I40E_GLGEN_GPIO_CTL_LED_MODE_MASK;
 		/* this & is a bit of paranoia, but serves as a range check */
 		gpio_val |= ((mode << I40E_GLGEN_GPIO_CTL_LED_MODE_SHIFT) &
@@ -1562,19 +1620,22 @@ i40e_status i40e_aq_get_phy_capabilities(struct i40e_hw *hw,
 		status = i40e_asq_send_command(hw, &desc, abilities,
 					       abilities_size, cmd_details);
 
-		if (status != I40E_SUCCESS)
-			break;
-
-		if (hw->aq.asq_last_status == I40E_AQ_RC_EIO) {
+		switch (hw->aq.asq_last_status) {
+		case I40E_AQ_RC_EIO:
 			status = I40E_ERR_UNKNOWN_PHY;
 			break;
-		} else if (hw->aq.asq_last_status == I40E_AQ_RC_EAGAIN) {
+		case I40E_AQ_RC_EAGAIN:
 			usleep_range(1000, 2000);
 			total_delay++;
 			status = I40E_ERR_TIMEOUT;
+			break;
+		/* also covers I40E_AQ_RC_OK */
+		default:
+			break;
 		}
-	} while ((hw->aq.asq_last_status != I40E_AQ_RC_OK) &&
-		 (total_delay < max_delay));
+
+	} while ((hw->aq.asq_last_status == I40E_AQ_RC_EAGAIN) &&
+		(total_delay < max_delay));
 
 	if (status != I40E_SUCCESS)
 		return status;
@@ -2163,7 +2224,8 @@ i40e_status i40e_aq_set_vsi_mc_promisc_on_vlan(struct i40e_hw *hw,
 	cmd->seid = CPU_TO_LE16(seid);
 	cmd->vlan_tag = CPU_TO_LE16(vid | I40E_AQC_SET_VSI_VLAN_VALID);
 
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
+	status = i40e_asq_send_command_atomic(hw, &desc, NULL, 0,
+					      cmd_details, true);
 
 	return status;
 }
@@ -2197,7 +2259,8 @@ i40e_status i40e_aq_set_vsi_uc_promisc_on_vlan(struct i40e_hw *hw,
 	cmd->seid = CPU_TO_LE16(seid);
 	cmd->vlan_tag = CPU_TO_LE16(vid | I40E_AQC_SET_VSI_VLAN_VALID);
 
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
+	status = i40e_asq_send_command_atomic(hw, &desc, NULL, 0,
+					      cmd_details, true);
 
 	return status;
 }
@@ -2576,9 +2639,16 @@ i40e_status i40e_update_link_info(struct i40e_hw *hw)
 		if (status)
 			return status;
 
-		hw->phy.link_info.req_fec_info =
-			abilities.fec_cfg_curr_mod_ext_info &
-			(I40E_AQ_REQUEST_FEC_KR | I40E_AQ_REQUEST_FEC_RS);
+		if (abilities.fec_cfg_curr_mod_ext_info &
+		    I40E_AQ_ENABLE_FEC_AUTO)
+			hw->phy.link_info.req_fec_info =
+				(I40E_AQ_REQUEST_FEC_KR |
+				 I40E_AQ_REQUEST_FEC_RS);
+		else
+			hw->phy.link_info.req_fec_info =
+				abilities.fec_cfg_curr_mod_ext_info &
+				(I40E_AQ_REQUEST_FEC_KR |
+				 I40E_AQ_REQUEST_FEC_RS);
 
 		i40e_memcpy(hw->phy.link_info.module_type, &abilities.module_type,
 			sizeof(hw->phy.link_info.module_type), I40E_NONDMA_TO_NONDMA);
@@ -5173,69 +5243,6 @@ i40e_status i40e_aq_debug_dump(struct i40e_hw *hw, u8 cluster_id,
 }
 
 /**
- * i40e_enable_eee
- * @hw: pointer to the hardware structure
- * @enable: state of Energy Efficient Ethernet mode to be set
- *
- * Enables or disables Energy Efficient Ethernet (EEE) mode
- * accordingly to @enable parameter.
- **/
-i40e_status i40e_enable_eee(struct i40e_hw *hw, bool enable)
-{
-	struct i40e_aq_get_phy_abilities_resp abilities;
-	struct i40e_aq_set_phy_config config;
-	i40e_status status;
-	__le16 eee_capability;
-
-	/* Get initial PHY capabilities */
-	status = i40e_aq_get_phy_capabilities(hw, false, true, &abilities,
-					      NULL);
-	if (status)
-		goto err;
-
-	/* Check whether NIC configuration is compatible with Energy Efficient
-	 * Ethernet (EEE) mode.
-	 */
-	if (abilities.eee_capability == 0) {
-		status = I40E_ERR_CONFIG;
-		goto err;
-	}
-
-	/* Cache initial EEE capability */
-	eee_capability = abilities.eee_capability;
-
-	/* Get current configuration */
-	status = i40e_aq_get_phy_capabilities(hw, false, false, &abilities,
-					      NULL);
-	if (status)
-		goto err;
-
-	/* Cache current configuration */
-	config.phy_type = abilities.phy_type;
-	config.link_speed = abilities.link_speed;
-	config.abilities = abilities.abilities |
-			   I40E_AQ_PHY_ENABLE_ATOMIC_LINK;
-	config.eeer = abilities.eeer_val;
-	config.low_power_ctrl = abilities.d3_lpan;
-	config.fec_config = abilities.fec_cfg_curr_mod_ext_info &
-			    I40E_AQ_PHY_FEC_CONFIG_MASK;
-
-	/* Set desired EEE state */
-	if (enable) {
-		config.eee_capability = eee_capability;
-		config.eeer |= I40E_PRTPM_EEER_TX_LPI_EN_MASK;
-	} else {
-		config.eee_capability = 0;
-		config.eeer &= ~I40E_PRTPM_EEER_TX_LPI_EN_MASK;
-	}
-
-	/* Save modified config */
-	status = i40e_aq_set_phy_config(hw, &config, NULL);
-err:
-	return status;
-}
-
-/**
  * i40e_read_bw_from_alt_ram
  * @hw: pointer to the hardware structure
  * @max_bw: pointer for max_bw read
@@ -5556,6 +5563,7 @@ i40e_status i40e_write_phy_register(struct i40e_hw *hw,
 	case I40E_DEV_ID_10G_BASE_T:
 	case I40E_DEV_ID_10G_BASE_T4:
 	case I40E_DEV_ID_10G_BASE_T_BC:
+	case I40E_DEV_ID_5G_BASE_T_BC:
 	case I40E_DEV_ID_10G_BASE_T_X722:
 	case I40E_DEV_ID_25G_B:
 	case I40E_DEV_ID_25G_SFP28:
@@ -5593,6 +5601,7 @@ i40e_status i40e_read_phy_register(struct i40e_hw *hw,
 	case I40E_DEV_ID_10G_BASE_T:
 	case I40E_DEV_ID_10G_BASE_T4:
 	case I40E_DEV_ID_10G_BASE_T_BC:
+	case I40E_DEV_ID_5G_BASE_T_BC:
 	case I40E_DEV_ID_10G_BASE_T_X722:
 	case I40E_DEV_ID_25G_B:
 	case I40E_DEV_ID_25G_SFP28:
@@ -5865,7 +5874,8 @@ i40e_status i40e_get_phy_lpi_status(struct i40e_hw *hw,
 	stat->rx_lpi_status = 0;
 	stat->tx_lpi_status = 0;
 
-	if (hw->device_id == I40E_DEV_ID_10G_BASE_T_BC &&
+	if ((hw->device_id == I40E_DEV_ID_10G_BASE_T_BC ||
+	     hw->device_id == I40E_DEV_ID_5G_BASE_T_BC) &&
 	    (hw->phy.link_info.link_speed == I40E_LINK_SPEED_2_5GB ||
 	     hw->phy.link_info.link_speed == I40E_LINK_SPEED_5GB)) {
 		ret = i40e_aq_get_phy_register(hw,
@@ -5910,8 +5920,9 @@ i40e_status i40e_get_lpi_counters(struct i40e_hw *hw,
 	/* only X710-T*L requires special handling of counters
 	 * for other devices we just read the MAC registers
 	 */
-	if (hw->device_id == I40E_DEV_ID_10G_BASE_T_BC &&
-	    hw->phy.link_info.link_speed != I40E_LINK_SPEED_1GB) {
+	if ((hw->device_id == I40E_DEV_ID_10G_BASE_T_BC ||
+	     hw->device_id == I40E_DEV_ID_5G_BASE_T_BC) &&
+	     hw->phy.link_info.link_speed != I40E_LINK_SPEED_1GB) {
 		i40e_status retval;
 		u32 cmd_status;
 
@@ -5952,7 +5963,8 @@ i40e_status i40e_get_lpi_duration(struct i40e_hw *hw,
 	i40e_status retval;
 	u32 cmd_status;
 
-	if (hw->device_id != I40E_DEV_ID_10G_BASE_T_BC)
+	if (hw->device_id != I40E_DEV_ID_10G_BASE_T_BC &&
+	    hw->device_id != I40E_DEV_ID_5G_BASE_T_BC)
 		return I40E_ERR_NOT_IMPLEMENTED;
 
 	retval = i40e_aq_run_phy_activity

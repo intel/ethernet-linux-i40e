@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2013 - 2019 Intel Corporation. */
+/* Copyright(c) 2013 - 2020 Intel Corporation. */
 
 /* this lets the macros that return timespec64 or structs compile cleanly with
  * W=2
@@ -766,7 +766,7 @@ static long i40e_ptp_create_clock(struct i40e_pf *pf)
 	pf->tstamp_config.tx_type = HWTSTAMP_TX_OFF;
 
 	/* Set the previous "reset" time to the current Kernel clock time */
-	pf->ptp_prev_hw_time = ktime_to_timespec64(ktime_get_real());
+	ktime_get_real_ts64(&pf->ptp_prev_hw_time);
 	pf->ptp_reset_start = ktime_get();
 
 	return 0;

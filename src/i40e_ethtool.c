@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2013 - 2019 Intel Corporation. */
+/* Copyright(c) 2013 - 2020 Intel Corporation. */
 
 /* ethtool support for i40e */
 
@@ -287,6 +287,7 @@ struct i40e_priv_flags {
 static const struct i40e_priv_flags i40e_gstrings_priv_flags[] = {
 	/* NOTE: MFP setting cannot be changed */
 	I40E_PRIV_FLAG("MFP", I40E_FLAG_MFP_ENABLED, 1),
+	I40E_PRIV_FLAG("total-port-shutdown", I40E_FLAG_TOTAL_PORT_SHUTDOWN, 1),
 	I40E_PRIV_FLAG("LinkPolling", I40E_FLAG_LINK_POLLING_ENABLED, 0),
 	I40E_PRIV_FLAG("flow-director-atr", I40E_FLAG_FD_ATR_ENABLED, 0),
 	I40E_PRIV_FLAG("veb-stats", I40E_FLAG_VEB_STATS_ENABLED, 0),
@@ -616,7 +617,14 @@ static void i40e_get_settings_link_up_fec(u8 req_fec_info,
 	ethtool_link_ksettings_add_link_mode(ks, supported, FEC_RS);
 	ethtool_link_ksettings_add_link_mode(ks, supported, FEC_BASER);
 
-	if (I40E_AQ_SET_FEC_REQUEST_RS & req_fec_info) {
+	if ((I40E_AQ_SET_FEC_REQUEST_RS & req_fec_info) &&
+	    (I40E_AQ_SET_FEC_REQUEST_KR & req_fec_info)) {
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     FEC_NONE);
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     FEC_BASER);
+		ethtool_link_ksettings_add_link_mode(ks, advertising, FEC_RS);
+	} else if (I40E_AQ_SET_FEC_REQUEST_RS & req_fec_info) {
 		ethtool_link_ksettings_add_link_mode(ks, advertising, FEC_RS);
 	} else if (I40E_AQ_SET_FEC_REQUEST_KR & req_fec_info) {
 		ethtool_link_ksettings_add_link_mode(ks, advertising,
@@ -624,12 +632,6 @@ static void i40e_get_settings_link_up_fec(u8 req_fec_info,
 	} else {
 		ethtool_link_ksettings_add_link_mode(ks, advertising,
 						     FEC_NONE);
-		if (I40E_AQ_SET_FEC_AUTO & req_fec_info) {
-			ethtool_link_ksettings_add_link_mode(ks, advertising,
-							     FEC_RS);
-			ethtool_link_ksettings_add_link_mode(ks, advertising,
-							     FEC_BASER);
-		}
 	}
 }
 #endif /* ETHTOOL_GFECPARAM */
@@ -1617,6 +1619,7 @@ static int i40e_get_fec_param(struct net_device *netdev,
 	struct i40e_hw *hw = &pf->hw;
 	i40e_status status = 0;
 	int err = 0;
+	u8 fec_cfg;
 
 	/* Get the current phy config */
 	memset(&abilities, 0, sizeof(abilities));
@@ -1628,18 +1631,16 @@ static int i40e_get_fec_param(struct net_device *netdev,
 	}
 
 	fecparam->fec = 0;
-	if (abilities.fec_cfg_curr_mod_ext_info & I40E_AQ_SET_FEC_AUTO)
+	fec_cfg = abilities.fec_cfg_curr_mod_ext_info;
+	if (fec_cfg & I40E_AQ_SET_FEC_AUTO)
 		fecparam->fec |= ETHTOOL_FEC_AUTO;
-	if ((abilities.fec_cfg_curr_mod_ext_info &
-	     I40E_AQ_SET_FEC_REQUEST_RS) ||
-	    (abilities.fec_cfg_curr_mod_ext_info &
-	     I40E_AQ_SET_FEC_ABILITY_RS))
+	else if (fec_cfg & (I40E_AQ_SET_FEC_REQUEST_RS |
+		 I40E_AQ_SET_FEC_ABILITY_RS))
 		fecparam->fec |= ETHTOOL_FEC_RS;
-	if ((abilities.fec_cfg_curr_mod_ext_info &
-	     I40E_AQ_SET_FEC_REQUEST_KR) ||
-	    (abilities.fec_cfg_curr_mod_ext_info & I40E_AQ_SET_FEC_ABILITY_KR))
+	else if (fec_cfg & (I40E_AQ_SET_FEC_REQUEST_KR |
+		 I40E_AQ_SET_FEC_ABILITY_KR))
 		fecparam->fec |= ETHTOOL_FEC_BASER;
-	if (abilities.fec_cfg_curr_mod_ext_info == 0)
+	if (fec_cfg == 0)
 		fecparam->fec |= ETHTOOL_FEC_OFF;
 
 	if (hw->phy.link_info.fec_info & I40E_AQ_CONFIG_FEC_KR_ENA)
@@ -2489,9 +2490,9 @@ static int i40e_get_stats_count(struct net_device *netdev)
 	 * the maximum possible, fixed number of these extra stats items.
 	 */
 #endif /* !I40E_PF_EXTRA_STATS_OFF */
-	stats_len += I40E_QUEUE_STATS_LEN * 2 * netdev->num_tx_queues;
+	stats_len += I40E_QUEUE_STATS_LEN * 2 * netdev->real_num_tx_queues;
 #ifdef HAVE_XDP_SUPPORT
-	stats_len += I40E_QUEUE_STATS_XDP_LEN * netdev->num_tx_queues;
+	stats_len += I40E_QUEUE_STATS_XDP_LEN * netdev->real_num_tx_queues;
 #endif
 
 #ifndef I40E_PF_EXTRA_STATS_OFF
@@ -2587,7 +2588,7 @@ static void i40e_get_ethtool_stats(struct net_device *netdev,
 	i40e_add_ethtool_stats(&data, vsi, i40e_gstrings_misc_stats);
 
 	rcu_read_lock();
-	for (i = 0; i < netdev->num_tx_queues; i++) {
+	for (i = 0; i < netdev->real_num_tx_queues; i++) {
 		i40e_add_queue_stats(&data, READ_ONCE(vsi->tx_rings[i]));
 		i40e_add_queue_stats(&data, READ_ONCE(vsi->rx_rings[i]));
 #ifdef HAVE_XDP_SUPPORT
@@ -2737,7 +2738,7 @@ static void i40e_get_stat_strings(struct net_device *netdev, u8 *data)
 
 	i40e_add_stat_strings(&data, i40e_gstrings_misc_stats);
 
-	for (i = 0; i < netdev->num_tx_queues; i++) {
+	for (i = 0; i < netdev->real_num_tx_queues; i++) {
 		i40e_add_stat_strings(&data, i40e_gstrings_queue_stats,
 				      "tx", i);
 		i40e_add_stat_strings(&data, i40e_gstrings_queue_stats,
@@ -3331,6 +3332,52 @@ static void i40e_set_itr_per_queue(struct i40e_vsi *vsi,
 }
 
 /**
+ * i40e_is_coalesce_param_invalid - check for unsupported coalesce parameters
+ * @netdev: pointer to the netdev associated with this query
+ * @ec: ethtool structure to fill with driver's coalesce settings
+ *
+ * Print netdev info if driver doesn't support one of the parameters
+ * and return error. When any parameters will be implemented, remove only
+ * this parameter from param array.
+ */
+static
+int i40e_is_coalesce_param_invalid(struct net_device *netdev,
+				   struct ethtool_coalesce *ec)
+{
+	struct i40e_ethtool_not_used {
+		u32 value;
+		const char *name;
+	} param[] = {
+		{ec->stats_block_coalesce_usecs, "stats-block-usecs"},
+		{ec->rate_sample_interval, "sample-interval"},
+		{ec->pkt_rate_low, "pkt-rate-low"},
+		{ec->pkt_rate_high, "pkt-rate-high"},
+		{ec->rx_max_coalesced_frames, "rx-frames"},
+		{ec->rx_coalesce_usecs_irq, "rx-usecs-irq"},
+		{ec->tx_max_coalesced_frames, "tx-frames"},
+		{ec->tx_coalesce_usecs_irq, "tx-usecs-irq"},
+		{ec->rx_coalesce_usecs_low, "rx-usecs-low"},
+		{ec->rx_max_coalesced_frames_low, "rx-frames-low"},
+		{ec->tx_coalesce_usecs_low, "tx-usecs-low"},
+		{ec->tx_max_coalesced_frames_low, "tx-frames-low"},
+		{ec->rx_max_coalesced_frames_high, "rx-frames-high"},
+		{ec->tx_max_coalesced_frames_high, "tx-frames-high"}
+	};
+	int i;
+
+	for (i = 0; i < ARRAY_SIZE(param); i++) {
+		if (param[i].value) {
+			netdev_info(netdev,
+				    "Setting %s not supported\n",
+				    param[i].name);
+			return -EOPNOTSUPP;
+		}
+	}
+
+	return 0;
+}
+
+/**
  * __i40e_set_coalesce - set coalesce settings for particular queue
  * @netdev: the netdev to change
  * @ec: ethtool coalesce settings
@@ -3347,6 +3394,9 @@ static int __i40e_set_coalesce(struct net_device *netdev,
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_pf *pf = vsi->back;
 	int i;
+
+	if (i40e_is_coalesce_param_invalid(netdev, ec))
+		return -EOPNOTSUPP;
 
 	if (ec->tx_max_coalesced_frames_irq || ec->rx_max_coalesced_frames_irq)
 		vsi->work_limit = ec->tx_max_coalesced_frames_irq;
@@ -3602,18 +3652,31 @@ static int i40e_parse_rx_flow_user_data(struct ethtool_rx_flow_spec *fsp,
 	mask = be64_to_cpu(*((__be64 *)fsp->m_ext.data));
 
 #define I40E_USERDEF_CLOUD_FILTER	BIT_ULL(63)
-#define I40E_USERDEF_TENANT_ID		GENMASK_ULL(23, 0)
-#define I40E_USERDEF_TUNNEL_TYPE	GENMASK_ULL(31, 24)
 
-#define I40E_USERDEF_FLEX_WORD		GENMASK_ULL(15, 0)
-#define I40E_USERDEF_FLEX_OFFSET	GENMASK_ULL(31, 16)
+#define I40E_USERDEF_CLOUD_RESERVED	GENMASK_ULL(62, 32)
+#define I40E_USERDEF_TUNNEL_TYPE	GENMASK_ULL(31, 24)
+#define I40E_USERDEF_TENANT_ID		GENMASK_ULL(23, 0)
+
+#define I40E_USERDEF_RESERVED		GENMASK_ULL(62, 32)
 #define I40E_USERDEF_FLEX_FILTER	GENMASK_ULL(31, 0)
+
+#define I40E_USERDEF_FLEX_OFFSET	GENMASK_ULL(31, 16)
+#define I40E_USERDEF_FLEX_WORD		GENMASK_ULL(15, 0)
 
 	if ((mask & I40E_USERDEF_CLOUD_FILTER) &&
 	    (value & I40E_USERDEF_CLOUD_FILTER))
 		data->cloud_filter = true;
 
 	if (data->cloud_filter) {
+		/* Make sure that the reserved bits are not set */
+		valid = i40e_check_mask(mask, I40E_USERDEF_CLOUD_RESERVED);
+		if (valid < 0) {
+			return -EINVAL;
+		} else if (valid) {
+			if ((value & I40E_USERDEF_CLOUD_RESERVED) != 0)
+				return -EINVAL;
+		}
+
 		/* These fields are only valid if this is a cloud filter */
 		valid = i40e_check_mask(mask, I40E_USERDEF_TENANT_ID);
 		if (valid < 0) {
@@ -3632,6 +3695,15 @@ static int i40e_parse_rx_flow_user_data(struct ethtool_rx_flow_spec *fsp,
 			data->tunnel_type_valid = true;
 		}
 	} else {
+		/* Make sure that the reserved bits are not set */
+		valid = i40e_check_mask(mask, I40E_USERDEF_RESERVED);
+		if (valid < 0) {
+			return -EINVAL;
+		} else if (valid) {
+			if ((value & I40E_USERDEF_RESERVED) != 0)
+				return -EINVAL;
+		}
+
 		/* These fields are only valid if this isn't a cloud filter */
 		valid = i40e_check_mask(mask, I40E_USERDEF_FLEX_FILTER);
 		if (valid < 0) {
@@ -3925,7 +3997,13 @@ static int i40e_get_cloud_filter_entry(struct i40e_pf *pf,
 	}
 
 	if (filter->flags & I40E_CLOUD_FIELD_IIP) {
-		fsp->flow_type = IP_USER_FLOW;
+		if (i40e_is_l4mode_enabled())  {
+			fsp->flow_type = UDP_V4_FLOW;
+			fsp->h_u.udp_ip4_spec.pdst = filter->dst_port;
+		} else {
+			fsp->flow_type = IP_USER_FLOW;
+		}
+
 		fsp->h_u.usr_ip4_spec.ip4dst = filter->inner_ip[0];
 		fsp->h_u.usr_ip4_spec.ip_ver = ETH_RX_NFC_IP4;
 	} else {
@@ -4213,6 +4291,16 @@ static int i40e_cloud_filter_mask2flags(struct i40e_pf *pf,
 		}
 		break;
 
+	case UDP_V4_FLOW:
+		if (fsp->m_u.udp_ip4_spec.pdst == cpu_to_be16(0xffff)) {
+			i |= I40E_CLOUD_FIELD_IIP;
+		} else {
+			dev_info(&pf->pdev->dev, "Bad UDP dst mask 0x%04x\n",
+				 be32_to_cpu(fsp->m_u.udp_ip4_spec.pdst));
+			return I40E_ERR_CONFIG;
+		}
+		break;
+
 	default:
 		return I40E_ERR_CONFIG;
 	}
@@ -4315,7 +4403,8 @@ static int i40e_add_cloud_filter_ethtool(struct i40e_vsi *vsi,
 
 		if (vf >= pf->num_alloc_vfs)
 			return -EINVAL;
-		if (ring >= pf->vf[vf].num_queue_pairs)
+		if (!i40e_is_l4mode_enabled() &&
+		    ring >= pf->vf[vf].num_queue_pairs)
 			return -EINVAL;
 		dest_seid = pf->vsi[pf->vf[vf].lan_vsi_idx]->seid;
 	}
@@ -4342,7 +4431,7 @@ static int i40e_add_cloud_filter_ethtool(struct i40e_vsi *vsi,
 	}
 	if (filter && (filter->id == fsp->location)) {
 		/* found it in the cloud list, so remove it */
-		ret = i40e_add_del_cloud_filter(vsi, filter, false);
+		ret = i40e_add_del_cloud_filter_ex(pf, filter, false);
 		if (ret && pf->hw.aq.asq_last_status != I40E_AQ_RC_ENOENT)
 			return ret;
 		hlist_del(&filter->cloud_node);
@@ -4374,6 +4463,10 @@ static int i40e_add_cloud_filter_ethtool(struct i40e_vsi *vsi,
 		filter->inner_ip[0] = fsp->h_u.usr_ip4_spec.ip4dst;
 		break;
 
+	case UDP_V4_FLOW:
+		filter->dst_port = fsp->h_u.udp_ip4_spec.pdst;
+		break;
+
 	default:
 		dev_info(&pf->pdev->dev, "unknown flow type 0x%x\n",
 			 (fsp->flow_type & ~FLOW_EXT));
@@ -4396,7 +4489,7 @@ static int i40e_add_cloud_filter_ethtool(struct i40e_vsi *vsi,
 	filter->flags = flags;
 	filter->inner_vlan = fsp->h_ext.vlan_tci;
 
-	ret = i40e_add_del_cloud_filter(vsi, filter, true);
+	ret = i40e_add_del_cloud_filter_ex(pf, filter, true);
 	if (ret) {
 		kfree(filter);
 		return ret;
@@ -4427,7 +4520,6 @@ static int i40e_del_cloud_filter_ethtool(struct i40e_pf *pf,
 	struct i40e_cloud_filter *rule, *filter = NULL;
 	struct ethtool_rx_flow_spec *fsp;
 	struct hlist_node *node2;
-	struct i40e_vsi *vsi = pf->vsi[pf->lan_vsi];
 
 	fsp = (struct ethtool_rx_flow_spec *)&cmd->fs;
 	hlist_for_each_entry_safe(rule, node2,
@@ -4444,7 +4536,7 @@ static int i40e_del_cloud_filter_ethtool(struct i40e_pf *pf,
 		return -ENOENT;
 
 	/* remove filter from the list even if failed to remove from device */
-	(void)i40e_add_del_cloud_filter(vsi, filter, false);
+	(void)i40e_add_del_cloud_filter_ex(pf, filter, false);
 	hlist_del(&filter->cloud_node);
 	kfree(filter);
 	pf->num_cloud_filters--;
@@ -5997,6 +6089,13 @@ flags_complete:
 		}
 		if (i40e_set_fec_cfg(dev, fec_cfg))
 			dev_warn(&pf->pdev->dev, "Cannot change FEC config\n");
+	}
+
+	if ((changed_flags & I40E_FLAG_LINK_DOWN_ON_CLOSE_ENABLED) &&
+	    (orig_flags & I40E_FLAG_TOTAL_PORT_SHUTDOWN)) {
+		dev_err(&pf->pdev->dev,
+			"Setting link-down-on-close not supported on this port\n");
+		return -EOPNOTSUPP;
 	}
 
 	if ((changed_flags & new_flags &
