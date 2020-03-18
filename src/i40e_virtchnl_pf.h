@@ -113,8 +113,6 @@ struct i40e_vf {
 	u16 egress_rule_id;
 	int egress_vlan;
 	DECLARE_BITMAP(trunk_vlans, VLAN_N_VID);
-	bool mac_anti_spoof;
-	bool vlan_anti_spoof;
 	bool allow_untagged;
 	bool loopback;
 	bool vlan_stripping;

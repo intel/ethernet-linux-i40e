@@ -635,43 +635,6 @@ err_out:
 #ifdef HAVE_NDO_SET_VF_LINK_STATE
 
 /**
- * i40e_set_spoof_settings
- * @vsi: VF VSI to configure
- * @sec_flag: the spoof check flag to enable or disable
- * @enable: enable or disable
- *
- * This function sets the spoof check settings
- *
- * Returns 0 on success, negative on failure
- **/
-static int i40e_set_spoof_settings(struct i40e_vsi *vsi, u8 sec_flag,
-				   bool enable)
-{
-	struct i40e_pf *pf = vsi->back;
-	struct i40e_hw *hw = &pf->hw;
-	struct i40e_vsi_context ctxt;
-	int ret = 0;
-
-	vsi->info.valid_sections = CPU_TO_LE16(I40E_AQ_VSI_PROP_SECURITY_VALID);
-	if (enable)
-		vsi->info.sec_flags |= sec_flag;
-	else
-		vsi->info.sec_flags &= ~sec_flag;
-
-	memset(&ctxt, 0, sizeof(ctxt));
-	ctxt.seid = vsi->seid;
-	ctxt.pf_num = vsi->back->hw.pf_id;
-	ctxt.info = vsi->info;
-	ret = i40e_aq_update_vsi_params(hw, &ctxt, NULL);
-	if (ret) {
-		dev_err(&pf->pdev->dev, "Error %d updating VSI parameters\n",
-			ret);
-		ret = -EIO;
-	}
-	return ret;
-}
-
-/**
  * i40e_configure_vf_loopback
  * @vsi: VF VSI to configure
  * @vf_id: VF identifier
@@ -1079,7 +1042,6 @@ static int i40e_restore_vfd_config(struct i40e_vf *vf, struct i40e_vsi *vsi)
 {
 	struct i40e_pf *pf = vf->pf;
 	int ret = 0, cnt = 0;
-	u8 sec_flag;
 	u16 vid;
 
 	/* Restore all VF-d configuration on reset */
@@ -1118,18 +1080,6 @@ static int i40e_restore_vfd_config(struct i40e_vf *vf, struct i40e_vsi *vsi)
 		if (!ret)
 			vf->vlan_rule_id = rule_id;
 		kfree(mr_list);
-	}
-
-	sec_flag = I40E_AQ_VSI_SEC_FLAG_ENABLE_MAC_CHK;
-	ret = i40e_set_spoof_settings(vsi, sec_flag, vf->mac_anti_spoof);
-	if (ret)
-		goto err_out;
-
-	if (vf->vlan_anti_spoof) {
-		sec_flag = I40E_AQ_VSI_SEC_FLAG_ENABLE_VLAN_CHK;
-		ret = i40e_set_spoof_settings(vsi, sec_flag, true);
-		if (ret)
-			goto err_out;
 	}
 
 	ret = i40e_configure_vf_loopback(vsi, vf->vf_id, vf->loopback);
@@ -2166,8 +2116,6 @@ int i40e_alloc_vfs(struct i40e_pf *pf, u16 num_alloc_vfs)
 #endif /* HAVE_NDO_SET_VF_LINK_STATE */
 		/* assign default loopback value */
 		vfs[i].loopback = true;
-		/* assign default mac anti spoof value */
-		vfs[i].mac_anti_spoof = true;
 		/* assign default allow_untagged value */
 		vfs[i].allow_untagged = true;
 		/* assign default capabilities */
@@ -4740,6 +4688,15 @@ int i40e_ndo_set_vf_port_vlan(struct net_device *netdev,
 	}
 
 	if (vlan_id || qos) {
+		u16 vid = 0;
+		/* remove trunk if port vlan setting is called */
+		if (bitmap_weight(vf->trunk_vlans, VLAN_N_VID)) {
+			for_each_set_bit(vid, vf->trunk_vlans, VLAN_N_VID) {
+				i40e_vsi_kill_vlan(vsi, vid);
+				clear_bit(vid, vf->trunk_vlans);
+			}
+		}
+
 		ret = i40e_vsi_add_pvid(vsi, vlanprio);
 		if (ret) {
 			dev_info(&vsi->back->pdev->dev,
@@ -4781,17 +4738,15 @@ int i40e_ndo_set_vf_port_vlan(struct net_device *netdev,
 	/* The Port VLAN needs to be saved across resets the same as the
 	 * default LAN MAC address.
 	 */
+	vf->port_vlan_id = le16_to_cpu(vsi->info.pvid);
 	if (vsi->info.pvid) {
-		vf->port_vlan_id = le16_to_cpu(vsi->info.pvid);
-		if (vf->port_vlan_id) {
-			ret = i40e_config_vf_promiscuous_mode(vf,
-							      vsi->id,
-							      allmulti,
-							      alluni);
-			if (ret) {
-				dev_err(&pf->pdev->dev, "Unable to config vf promiscuous mode\n");
-				goto error_pvid;
-			}
+		ret = i40e_config_vf_promiscuous_mode(vf,
+						      vsi->id,
+						      allmulti,
+						      alluni);
+		if (ret) {
+			dev_err(&pf->pdev->dev, "Unable to config vf promiscuous mode\n");
+			goto error_pvid;
 		}
 	}
 
@@ -5225,156 +5180,6 @@ int i40e_get_vf_stats(struct net_device *netdev, int vf_id,
 #ifdef HAVE_NDO_SET_VF_LINK_STATE
 
 /**
- * i40e_get_vlan_anti_spoof
- * @pdev: PCI device information struct
- * @vf_id: VF identifier
- * @enable: on success, true if enabled, false if not
- *
- * This function queries if VLAN anti spoof is enabled or not
- *
- * Returns 0 on success, negative on failure.
- **/
-static int i40e_get_vlan_anti_spoof(struct pci_dev *pdev, int vf_id,
-				    bool *enable)
-{
-	struct i40e_pf *pf = pci_get_drvdata(pdev);
-	struct i40e_vsi *vsi;
-	struct i40e_vf *vf;
-	int ret;
-
-	if (test_and_set_bit(__I40E_VIRTCHNL_OP_PENDING, pf->state)) {
-		dev_warn(&pdev->dev, "Unable to configure VFs, other operation is pending.\n");
-		return -EAGAIN;
-	}
-
-	/* validate the request */
-	ret = i40e_validate_vf(pf, vf_id);
-	if (ret)
-		goto out;
-	vf = &pf->vf[vf_id];
-	vsi = pf->vsi[vf->lan_vsi_idx];
-	if ((vsi->info.valid_sections &
-	    CPU_TO_LE16(I40E_AQ_VSI_PROP_SECURITY_VALID)) &&
-	    (vsi->info.sec_flags & I40E_AQ_VSI_SEC_FLAG_ENABLE_VLAN_CHK))
-		*enable = true;
-	else
-		*enable = false;
-out:
-	clear_bit(__I40E_VIRTCHNL_OP_PENDING, pf->state);
-	return ret;
-}
-
-/**
- * i40e_set_vlan_anti_spoof
- * @pdev: PCI device information struct
- * @vf_id: VF identifier
- * @enable: enable/disable
- *
- * This function enables or disables VLAN anti-spoof
- *
- * Returns 0 on success, negative on failure
- **/
-static int i40e_set_vlan_anti_spoof(struct pci_dev *pdev, int vf_id,
-				    const bool enable)
-{
-	struct i40e_pf *pf = pci_get_drvdata(pdev);
-	struct i40e_vsi *vsi;
-	struct i40e_vf *vf;
-	u8 sec_flag;
-	int ret;
-
-	if (test_and_set_bit(__I40E_VIRTCHNL_OP_PENDING, pf->state)) {
-		dev_warn(&pdev->dev, "Unable to configure VFs, other operation is pending.\n");
-		return -EAGAIN;
-	}
-	/* validate the request */
-	ret = i40e_validate_vf(pf, vf_id);
-	if (ret)
-		goto out;
-	vf = &pf->vf[vf_id];
-	vsi = pf->vsi[vf->lan_vsi_idx];
-	sec_flag = I40E_AQ_VSI_SEC_FLAG_ENABLE_VLAN_CHK;
-	ret = i40e_set_spoof_settings(vsi, sec_flag, enable);
-	if (!ret)
-		vf->vlan_anti_spoof = enable;
-out:
-	clear_bit(__I40E_VIRTCHNL_OP_PENDING, pf->state);
-	return ret;
-}
-
-/**
- * i40e_get_mac_anti_spoof
- * @pdev: PCI device information struct
- * @vf_id: VF identifier
- * @enable: on success, true if enabled, false if not
- *
- * This function queries if MAC anti spoof is enabled or not.
- *
- * Returns 0 on success, negative error on failure.
- **/
-static int i40e_get_mac_anti_spoof(struct pci_dev *pdev, int vf_id,
-				   bool *enable)
-{
-	struct i40e_pf *pf = pci_get_drvdata(pdev);
-	struct i40e_vf *vf;
-	int ret;
-
-	if (test_and_set_bit(__I40E_VIRTCHNL_OP_PENDING, pf->state)) {
-		dev_warn(&pdev->dev, "Unable to configure VFs, other operation is pending.\n");
-		return -EAGAIN;
-	}
-
-	/* validate the request */
-	ret = i40e_validate_vf(pf, vf_id);
-	if (ret)
-		goto out;
-	vf = &pf->vf[vf_id];
-	*enable = vf->mac_anti_spoof;
-out:
-	clear_bit(__I40E_VIRTCHNL_OP_PENDING, pf->state);
-	return ret;
-}
-
-/**
- * i40e_set_mac_anti_spoof
- * @pdev: PCI device information struct
- * @vf_id: VF identifier
- * @enable: enable/disable
- *
- * This function enables or disables MAC anti-spoof
- *
- * Returns 0 on success, negative on failure
- **/
-static int i40e_set_mac_anti_spoof(struct pci_dev *pdev, int vf_id,
-				   const bool enable)
-{
-	struct i40e_pf *pf = pci_get_drvdata(pdev);
-	struct i40e_vsi *vsi;
-	struct i40e_vf *vf;
-	u8 sec_flag;
-	int ret;
-
-	if (test_and_set_bit(__I40E_VIRTCHNL_OP_PENDING, pf->state)) {
-		dev_warn(&pdev->dev, "Unable to configure VFs, other operation is pending.\n");
-		return -EAGAIN;
-	}
-
-	/* validate the request */
-	ret = i40e_validate_vf(pf, vf_id);
-	if (ret)
-		goto out;
-	vf = &pf->vf[vf_id];
-	vsi = pf->vsi[vf->lan_vsi_idx];
-	sec_flag = I40E_AQ_VSI_SEC_FLAG_ENABLE_MAC_CHK;
-	ret = i40e_set_spoof_settings(vsi, sec_flag, enable);
-	if (!ret)
-		vf->mac_anti_spoof = enable;
-out:
-	clear_bit(__I40E_VIRTCHNL_OP_PENDING, pf->state);
-	return ret;
-}
-
-/**
  * i40e_get_trunk - Gets the configured VLAN filters
  * @pdev: PCI device information struct
  * @vf_id: VF identifier
@@ -5406,12 +5211,13 @@ static int i40e_get_trunk(struct pci_dev *pdev, int vf_id,
 	/* checking if pvid has been set through netdev */
 	vsi = pf->vsi[vf->lan_vsi_idx];
 	if (vsi->info.pvid) {
-		memset(vf->trunk_vlans, 0,
+		memset(trunk_vlans, 0,
 		       BITS_TO_LONGS(VLAN_N_VID) * sizeof(long));
-		set_bit(vsi->info.pvid, vf->trunk_vlans);
+		set_bit(vsi->info.pvid, trunk_vlans);
+	} else {
+		bitmap_copy(trunk_vlans, vf->trunk_vlans, VLAN_N_VID);
 	}
 
-	bitmap_copy(trunk_vlans, vf->trunk_vlans, VLAN_N_VID);
 	ret = bitmap_weight(trunk_vlans, VLAN_N_VID);
 out:
 	clear_bit(__I40E_VIRTCHNL_OP_PENDING, pf->state);
@@ -5435,7 +5241,7 @@ static int i40e_set_trunk(struct pci_dev *pdev, int vf_id,
 	struct i40e_vsi *vsi;
 	struct i40e_vf *vf;
 	int ret;
-	u16 vid;
+	u16 vid = 0, pvid = 0;
 
 	if (test_and_set_bit(__I40E_VIRTCHNL_OP_PENDING, pf->state)) {
 		dev_warn(&pdev->dev, "Unable to configure VFs, other operation is pending.\n");
@@ -5451,8 +5257,8 @@ static int i40e_set_trunk(struct pci_dev *pdev, int vf_id,
 	i40e_vlan_stripping_enable(vsi);
 
 	/* checking if pvid has been set through netdev */
-	vid = vsi->info.pvid;
-	if (vid) {
+	pvid = vsi->info.pvid;
+	if (pvid) {
 		struct i40e_vsi *pf_vsi = pf->vsi[pf->lan_vsi];
 
 		clear_bit(__I40E_VIRTCHNL_OP_PENDING, pf->state);
@@ -5476,10 +5282,6 @@ static int i40e_set_trunk(struct pci_dev *pdev, int vf_id,
 		if (test_and_set_bit(__I40E_VIRTCHNL_OP_PENDING, pf->state)) {
 			dev_warn(&pdev->dev, "Unable to configure VFs, other operation is pending.\n");
 			return -EAGAIN;
-		}
-		if (i40e_vsi_add_vlan(vsi, vid)) {
-			dev_warn(&pdev->dev, "Unable to restore Port VLAN for trunking.\n");
-			goto out;
 		}
 	}
 
@@ -5513,6 +5315,15 @@ static int i40e_set_trunk(struct pci_dev *pdev, int vf_id,
 	}
 	/* Copy over the updated bitmap */
 	bitmap_copy(vf->trunk_vlans, vlan_bitmap, VLAN_N_VID);
+	/* back fill port vlan set by netdev */
+	if (pvid) {
+		if (i40e_vsi_add_vlan(vsi, pvid)) {
+			dev_warn(&pdev->dev, "Unable to restore Port VLAN for trunking.\n");
+			goto out;
+		}
+		set_bit(pvid, vf->trunk_vlans);
+	}
+
 	/* When trunk is empty allow must be set */
 	if (!bitmap_weight(vf->trunk_vlans, VLAN_N_VID))
 		vf->allow_untagged = true;
@@ -7217,10 +7028,6 @@ const struct vfd_ops i40e_vfd_ops = {
 	.set_trunk		= i40e_set_trunk,
 	.get_vlan_mirror	= i40e_get_mirror,
 	.set_vlan_mirror	= i40e_set_mirror,
-	.get_mac_anti_spoof	= i40e_get_mac_anti_spoof,
-	.set_mac_anti_spoof	= i40e_set_mac_anti_spoof,
-	.get_vlan_anti_spoof	= i40e_get_vlan_anti_spoof,
-	.set_vlan_anti_spoof	= i40e_set_vlan_anti_spoof,
 	.set_allow_untagged	= i40e_set_allow_untagged,
 	.get_allow_untagged	= i40e_get_allow_untagged,
 	.get_loopback		= i40e_get_loopback,
