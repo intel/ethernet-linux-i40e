@@ -101,7 +101,7 @@ struct i40e_vf {
 	bool link_up;		/* only valid if VF link is forced */
 #endif
 	bool queues_enabled;	/* true if the VF queues are enabled */
-	bool spoofchk;
+	bool mac_anti_spoof;
 	u16 num_vlan;
 	DECLARE_BITMAP(mirror_vlans, VLAN_N_VID);
 	u16 vlan_rule_id;

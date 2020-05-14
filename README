@@ -2,7 +2,7 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet Controller 700 Series
 ===============================================================================
 
-March 16, 2020
+April 10, 2020
 Copyright(c) 2014 - 2020 Intel Corporation.
 
 Contents
@@ -56,6 +56,7 @@ The driver in this release is compatible with devices based on the following:
   * Intel(R) Ethernet Controller XL710
   * Intel(R) Ethernet Network Connection X722
   * Intel(R) Ethernet Controller XXV710
+  * Intel(R) Ethernet Controller V710
 
 For the best performance, make sure the latest NVM/FW is installed on your
 device and that you are using the newest drivers.
@@ -388,7 +389,7 @@ is loaded or the VM is booted. The VF is not aware of the VLAN tag being
 inserted on transmit and removed on received frames (sometimes called "port
 VLAN" mode).
 
-# ip link set dev <PF netdev id> vf <id> vlan <vlan id>
+# ip link set dev <ethX> vf <id> vlan <vlan id>
 
 For example, the following will configure PF eth0 and the first VF on VLAN 10:
 
@@ -421,7 +422,7 @@ trusted VF to request selective promiscuous mode on the Physical Function (PF).
 To set a VF as trusted or untrusted, enter the following command in the
 Hypervisor:
 
-# ip link set dev eth0 vf 1 trust [on|off]
+# ip link set dev <ethX> vf 1 trust [on|off]
 
 NOTE: It's important to set the VF to trusted before setting promiscuous mode.
 If the VM is not trusted, the PF will ignore promiscuous mode requests from the
@@ -431,20 +432,20 @@ new request to set the VF to promiscuous.
 Once the VF is designated as trusted, use the following commands in the VM to
 set the VF to promiscuous mode. For promiscuous all:
 
-# ip link set eth2 promisc on
-    Where eth2 is a VF interface in the VM
+# ip link set <ethX> promisc on
+    Where <ethX> is a VF interface in the VM
 
 For promiscuous Multicast:
 
-# ip link set eth2 allmulticast on
-    Where eth2 is a VF interface in the VM
+# ip link set <ethX> allmulticast on
+    Where <ethX> is a VF interface in the VM
 
 NOTE: By default, the ethtool private flag vf-true-promisc-support is set to
 "off," meaning that promiscuous mode for the VF will be limited. To set the
 promiscuous mode for the VF to true promiscuous and allow the VF to see all
 ingress traffic, use the following command:
 
-# ethtool --set-priv-flags p261p1 vf-true-promisc-support on
+# ethtool --set-priv-flags <ethX> vf-true-promisc-support on
 
 The vf-true-promisc-support private flag does not enable promiscuous mode;
 rather, it designates which type of promiscuous mode (limited or true) you will
@@ -454,7 +455,7 @@ vf-true-promisc-support private flag is only exposed to the first PF of the
 device. The PF remains in limited promiscuous mode (unless it is in MFP mode)
 regardless of the vf-true-promisc-support setting.
 
-Next, add a VLAN interface on the VF interface.
+Next, add a VLAN interface on the VF interface. For example:
 
 # ip link add link eth2 name eth2.100 type vlan id 100
 
@@ -492,7 +493,7 @@ spoofed packet, it is dropped by the hardware and not transmitted.
 
 NOTE: This feature can be disabled for a specific VF:
 
-# ip link set <pf dev> vf <vf id> spoofchk {off|on}
+# ip link set <ethX> vf <vf id> spoofchk {off|on}
 
 
 Intel(R) Ethernet Flow Director
@@ -981,7 +982,7 @@ Example:
 Setting the link-down-on-close Private Flag
 -------------------------------------------
 When the link-down-on-close private flag is set to "on", the port's link will
-go down when the interface is brought down using the ifconfig <ethX> down
+go down when the interface is brought down using the 'ifconfig <ethX> down'
 command.
 
 Use ethtool to view and set link-down-on-close, as follows:
@@ -1283,25 +1284,39 @@ The sysfs file structure below supports the SR-IOV hypervisor management
 interface.
 
 /sys/class/net/<ethX>/device/sriov (see 1 below)
++-- egress_mirror
++-- ingress_mirror
++-- tpid
++-- qos
+| +-- apply
 +-- [VF-id, 0 .. 255] (see 2 below)
 | +-- trunk
 | +-- vlan_mirror
 | +-- egress_mirror
 | +-- ingress_mirror
-| +-- mac_anti_spoof
-| +-- vlan_anti_spoof
 | +-- loopback
 | +-- mac
 | +-- mac_list
 | +-- promisc
 | +-- vlan_strip
 | +-- stats
+|| +-- rx_bytes
+|| +-- rx_packets
+|| +-- rx_dropped
+|| +-- tx_bytes
+|| +-- tx_packets
+|| +-- tx_dropped
+|| +-- tx_errors
+| +-- reset_stats
 | +-- link_state
 | +-- max_tx_rate
-| +-- min_tx_rate
-| +-- spoofcheck
 | +-- trust
-| +-- vlan
+| +-- enable
+| +-- num_queues
+| +-- allow_untagged
+| +-- qos
+|| +-- share
+
 *1: kobject started from "sriov" is not available from existing kernel
 sysfs, and it requires device driver to implement this interface.
 *2: maximum number of SR-IOV instances is 256. The actual number of instances
@@ -1310,17 +1325,45 @@ address>/sriov_numvfs
 
 SR-IOV hypervisor functions:
 
+- egress_mirror
+  Mirrors egress traffic from the PF to the specified VF on the same PF.
+  Example 1: add egress traffic mirroring on PF p1p2 to VF 7.
+  # echo add 7 > /sys/class/net/p1p2/device/sriov/egress_mirror
+  Example 2: remove egress traffic mirroring on PF p1p2 to VF 7.
+  # echo rem 7 > /sys/class/net/p1p2/device/sriov/egress_mirror
+
+- ingress_mirror
+  Mirrors ingress traffic from the PF to the specified VF on the same PF.
+  Example 1: add ingress traffic mirroring on PF p1p2 to VF 7.
+  # echo add 7 > /sys/class/net/p1p2/device/sriov/ingress_mirror
+  Example 2: remove ingress traffic mirroring on PF p1p2 to VF 7.
+  # echo rem 7 > /sys/class/net/p1p2/device/sriov/inress_mirror
+
+- tpid
+  Specifies the TPID of the outer VLAN tag (S-tag). Can be set to 0x88A8 or
+  0x8100. This setting affects all VFs configured on the specified PF.
+  Note: This setting is not supported on Intel(R) Ethernet Network Connection
+  X722 based devices.
+  Example 1: set TPID to 0x88A8.
+  # echo 0x88a8 > /sys/class/net/p1p2/device/sriov/tpid
+  Example 2: show the configured value.
+  # cat /sys/class/net/p1p2/device/sriov/tpid
+
+- qos/apply
+  Applies the VF bandwidth configuration for the port. See "qos/share" below
+  for more information.
+
 - trunk
   Supports two operations: add and rem.
-  - add: adds one or more VLAN id into VF VLAN filtering.
-  - rem: removes VLAN ids from the VF VLAN filtering list.
+  - add: adds one or more VLAN IDs into VF VLAN filtering.
+  - rem: removes VLAN IDs from the VF VLAN filtering list.
   Example 1: add multiple VLAN tags, VLANs 2,4,5,10-20, by PF, p1p2, on
   a selected VF, 1, for filtering, with the sysfs support:
   # echo add 2,4,5,10-20 > /sys/class/net/p1p2/device/sriov/1/trunk
   Example 2: remove VLANs 5, 11-13 from PF p1p2 VF 1 with sysfs:
   # echo rem 5,11-13 > /sys/class/net/p1p2/device/sriov/1/trunk
-  Note: for rem, if VLAN id is not on the VLAN filtering list, the
-  VLAN id will be ignored.
+  Note: for rem, if VLAN ID is not on the VLAN filtering list, the
+  VLAN ID will be ignored.
 
 - vlan_mirror
   Supports both ingress and egress traffic mirroring.
@@ -1332,37 +1375,18 @@ SR-IOV hypervisor functions:
   # echo rem 0 - 4095> /sys/class/net/p1p1/device/sriov/3/vlan_mirror
 
 - egress_mirror
-  Supports egress traffic mirroring.
+  Supports egress traffic mirroring from this VF to the specified VF.
   Example 1: add egress traffic mirroring on PF p1p2 VF 1 to VF 7.
   # echo add 7 > /sys/class/net/p1p2/device/sriov/1/egress_mirror
   Example 2: remove egress traffic mirroring on PF p1p2 VF 1 to VF 7.
   # echo rem 7 > /sys/class/net/p1p2/device/sriov/1/egress_mirror
 
 - ingress_mirror
-  Supports ingress traffic mirroring.
+  Supports ingress traffic mirroring from this VF to the specified VF.
   Example 1: mirror ingress traffic on PF p1p2 VF 1 to VF 7.
   # echo add 7 > /sys/class/net/p1p2/device/sriov/1/ingress_mirror
-  Example 2: show current ingress mirroring configuration.
+  Example 2: show current ingress mirroring configuration for VF 1.
   # cat /sys/class/net/p1p2/device/sriov/1/ingress_mirror
-
-- mac_anti_spoof
-  Supports Enable/Disable MAC anti-spoof. Allows VFs to transmit packets with
-  any SRC MAC, which is needed for some L2 applications as well as vNIC bonding
-  within VMs if set to OFF.
-  Example 1: enable MAC anti-spoof for PF p2p1 VF 1.
-  # echo ON /sys/class/net/p1p2/device/sriov/1/mac_anti_spoof
-  Example 2: disable MAC anti-spoof for PF p2p1 VF 1.
-  # echo OFF /sys/class/net/p1p2/device/sriov/1/mac_anti_spoof
-
-- vlan_anti_spoof
-  Supports Enable/Disable VLAN anti-spoof. Allows VFs to transmit packets only
-  with VLAN tag specified in "trunk" settings, also will not allow to transmit
-  "untagged" packets if set to ON. Violation have to increment tx_spoof stats
-  counter.
-  Example 1: enable VLAN anti-spoof for PF p2p1 VF 1.
-  # echo ON /sys/class/net/p1p2/device/sriov/1/vlan_anti_spoof
-  Example 2: disable VLAN anti-spoof for PF p2p1 VF 1.
-  # echo OFF /sys/class/net/p1p2/device/sriov/1/vlan_anti_spoof
 
 - loopback
   Supports Enable/Disable VEB/VEPA (Local loopback).
@@ -1407,25 +1431,81 @@ SR-IOV hypervisor functions:
   # cat /sys/class/net/p1p2/device/sriov/1/promisc
 
 - vlan_strip
-  Supports enabling/disabling VF device outer VLAN stripping
+  Supports enabling/disabling VF device outer VLAN stripping.
   Example 1: enable VLAN strip on VF 3.
   # echo ON > /sys/class/net/p1p1/device/sriov/3/vlan_strip
   Example 2: disable VLAN striping VF 3.
   # echo OFF > /sys/class/net/p1p1/device/sriov/3/vlan_strip
 
 - stats
-  Supports getting VF statistics
-  Example 1: display stats of VF 1.
-  # cat /sys/class/net/p1p2/device/sriov/1/stats
+  Supports getting VF statistics:
+    rx_bytes
+    rx_dropped
+    rx_packets
+    tx_bytes
+    tx_dropped
+    tx_packets
+    tx_errors
+  Example 1: display anti-spoofing violations counter for VF 1.
+  # cat /sys/class/net/p1p2/device/sriov/1/stats/tx_error
+
+- reset_stats
+  Resets the VF's stats counters.
+  Example 1: reset stats for VF 1.
+  # echo 1 > /sys/class/net/p1p2/device/sriov/1/stats/reset_stats
 
 - link_state
   Sets/displays link status.
   Example 1: display link status on link speed.
   # cat /sys/class/net/p1p2/device/sriov/1/link_state
-  Example 2 set VF 1 to track status of PF link.
+  Example 2: set VF 1 to track status of PF link.
   # echo auto > /sys/class/net/p1p2/device/sriov/1/link_state
   Example 3: disable VF 1.
   # echo disable > /sys/class/net/p1p2/device/sriov/1/link_state
+
+- enable
+  Enables or disables the VF device.
+  Notes:
+  - Enabling a VF will trigger a VF reset.
+  - Enabling a VF does not start any queues in the hardware.
+  - Disabling a VF will forcibly stop the queues and may lead to Tx timeouts
+    on the VF or VM.
+  - This feature is not designed to manage traffic flow. It's intended to
+    help prevent or handle error conditions.
+  Example 1: enable VF 3.
+  # echo on > /sys/class/net/p1p1/device/sriov/3/enable
+  Example 2: disable VF 3.
+  # echo off > /sys/class/net/p1p1/device/sriov/3/enable
+  Example 3: show VF 3 enable state.
+  # cat /sys/class/net/p1p1/device/sriov/3/enable
+
+- num_queues
+  Sets the number of queues allocated for the VF. To change the number of
+  queues, queue_type must be RSS.
+  Note: Changing this value will trigger a VF reset, which may disrupt
+  traffic. We recommend configuring this setting before traffic starts, not
+  during runtime.
+  Example 1: set 8 queues for VF 5 if queue_type is RSS.
+  # echo 8 > /sys/class/net/p1p1/device/sriov/5/num_queues
+  Example 2: show VF 5 number of queues for VF 5 type.
+  # cat /sys/class/net/p1p1/device/sriov/5/num_queues
+
+- qos/share
+  Sets the share of bandwidth for the specified VF(s).
+  Note: This feature is limited to TC0 only. You cannot revert the share back
+  to 0 once it has been set. You need to apply a change to hardware using
+  the related sysfs node qos/apply.
+  Example 1: allocate 10% of bandwidth to VF 0, 20% to VF 1, and the remaining
+  70% of bandwidth shared equally among the other VFs plus PF. Note: For all
+  the unspecified VFs (or PFs), the default value for "share" is 0.
+  # echo 10 > /sys/class/net/p1p1/device/sriov/0/qos/share
+  # echo 20 > /sys/class/net/p1p1/device/sriov/1/qos/share
+  # echo 1 > /sys/class/net/p1p1/device/sriov/qos/apply (kicks off a
+      recalculation based upon bandwidth distribution parameters specified
+      through qos/share sysfs)
+  Example 2: display current bandwidth allocation for each VF.
+  # cat /sys/class/net/p1p1/device/sriov/0/qos/share (return 10)
+  # cat /sys/class/net/p1p1/device/sriov/1/qos/share (return 20)
 
 
 Performance Optimization
@@ -1642,12 +1722,11 @@ are informational only; no user action is required. The installation should
 complete successfully.
 
 
-Error: <ifname> selects TX queue XX but real number of TX queues is YY
+Error: "<ethX> selects TX queue XX but real number of TX queues is YY"
 ----------------------------------------------------------------------
 When configuring the number of queues under heavy traffic load, you may see an
-error message stating "<ifname> selects TX queue XX, but real number of TX
-queues is YY." This message is informational only and does not affect
-functionality.
+error message stating "<ethX> selects TX queue XX, but real number of TX queues
+is YY." This message is informational only and does not affect functionality.
 
 
 Windows Server 2016 Does Not Work as a Guest OS on Older RHEL and SLES KVMs
@@ -1683,15 +1762,6 @@ eventually lead to the device no longer passing traffic. You must reboot the
 system to resolve this issue.
 
 
-Incomplete messages in the system log
--------------------------------------
-The NVMUpdate utility may write several incomplete messages in the system log.
-These messages take the form:
-  in the driver Pci Ex config function byte index 114
-  in the driver Pci Ex config function byte index 115
-These messages can be ignored.
-
-
 Bad checksum counter incorrectly increments when using VXLAN
 ------------------------------------------------------------
 When passing non-UDP traffic over a VXLAN interface, the port.rx_csum_bad
@@ -1702,17 +1772,6 @@ Statistic counters reset when promiscuous mode is changed
 ---------------------------------------------------------
 Changing promiscuous mode triggers a reset of the physical function driver.
 This will reset the statistic counters.
-
-
-Virtual machine does not get link
----------------------------------
-If the virtual machine has more than one virtual port assigned to it, and those
-virtual ports are bound to different physical ports, you may not get link on
-all of the virtual ports. The following command may work around the issue:
-
-# ethtool -r <ethX>
-Where <ethX> is the PF interface in the host, for example: p5p1. You may need
-to run the command more than once to get link on all virtual ports.
 
 
 MAC address of Virtual Function changes unexpectedly
@@ -1732,15 +1791,6 @@ first to avoid the issue. For example:
 
 # ip link set <ethX> down
 # ethtool -L <ethX> combined 4
-
-
-Adding an Intel Ethernet Flow Director Sideband rule fails incorrectly
-----------------------------------------------------------------------
-If you try to add an Intel Ethernet Flow Director rule when no more sideband
-rule space is available, i40e logs an error that the rule could not be added,
-but ethtool returns success. You can remove rules to free up space. In
-addition, remove the rule that failed. This will evict it from the driver's
-cache.
 
 
 Intel Ethernet Flow Director Sideband Logic adds duplicate filter
@@ -1826,6 +1876,14 @@ Due to kernel limitations, port type can only be correctly displayed on kernel
 2.6.33 or greater.
 
 
+Fiber optics and auto-negotiation
+---------------------------------
+Modules based on 40GBASE-SR4, 25GBASE-SR, active optical cable (AOC), and
+active copper cable (ACC) do not support auto-negotiation per the IEEE
+specification. To obtain link with these modules, you must turn off
+auto-negotiation on the link partner's switch ports.
+
+
 Running ethtool -t <ethX> command causes break between PF and test client
 -----------------------------------------------------------------------
 When there are active VFs, "ethtool -t" performs a full diagnostic. In the
@@ -1859,8 +1917,8 @@ In this case add "rd.net.timeout.carrier=30" at the kernel command line.
 
 NOTE: Link time can vary. Adjust LINKDELAY value accordingly.
 
-Alternatively, NetworkManager can be used to configure the interfaces, which
-avoids the set timeout. For configuration instructions of NetworkManager refer
+Alternatively, you can use NetworkManager to configure the interfaces, which
+avoids the set timeout. For configuration instructions of NetworkManager, refer
 to the documentation provided by your distribution.
 
 

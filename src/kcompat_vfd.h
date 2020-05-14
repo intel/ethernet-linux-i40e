@@ -68,6 +68,12 @@ struct vfd_ops {
 	int (*get_ingress_mirror)(struct pci_dev *pdev, int vf_id, int *data);
 	int (*set_ingress_mirror)(struct pci_dev *pdev, int vf_id,
 				  const int data);
+	int (*get_mac_anti_spoof)(struct pci_dev *pdev, int vf_id, bool *data);
+	int (*set_mac_anti_spoof)(struct pci_dev *pdev, int vf_id,
+				  const bool data);
+	int (*get_vlan_anti_spoof)(struct pci_dev *pdev, int vf_id, bool *data);
+	int (*set_vlan_anti_spoof)(struct pci_dev *pdev, int vf_id,
+				   const bool data);
 	int (*get_allow_untagged)(struct pci_dev *pdev, int vf_id, bool *data);
 	int (*set_allow_untagged)(struct pci_dev *pdev, int vf_id,
 				  const bool data);

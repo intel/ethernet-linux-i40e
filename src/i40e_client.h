@@ -82,7 +82,6 @@ struct i40e_params {
 
 /* Structure to hold Lan device info for a client device */
 struct i40e_info {
-	struct platform_device platform_dev;
 	struct i40e_client_version version;
 	u8 lanmac[6];
 	struct net_device *netdev;
@@ -100,7 +99,6 @@ struct i40e_info {
 	struct i40e_qvlist_info *qvlist_info;
 	struct i40e_params params;
 	struct i40e_ops *ops;
-	struct i40e_client *client;
 
 	u16 msix_count;	 /* number of msix vectors*/
 	/* Array down below will be dynamically allocated based on msix_count */
@@ -109,6 +107,9 @@ struct i40e_info {
 	u16 fw_maj_ver;                 /* firmware major version */
 	u16 fw_min_ver;                 /* firmware minor version */
 	u32 fw_build;                   /* firmware build number */
+
+	struct platform_device platform_dev;
+	struct i40e_client *client;
 };
 
 #define I40E_CLIENT_RESET_LEVEL_PF   1

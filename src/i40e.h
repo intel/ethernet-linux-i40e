@@ -173,6 +173,7 @@ enum i40e_state_t {
 	__I40E_CLIENT_L2_CHANGE,
 	__I40E_CLIENT_RESET,
 	__I40E_VIRTCHNL_OP_PENDING,
+	__I40E_VFS_RELEASING,
 	/* This must be last as it determines the size of the BITMAP */
 	__I40E_STATE_SIZE__,
 };
@@ -187,6 +188,7 @@ enum i40e_vsi_state_t {
 	__I40E_VSI_OVERFLOW_PROMISC,
 	__I40E_VSI_REINIT_REQUESTED,
 	__I40E_VSI_DOWN_REQUESTED,
+	__I40E_VSI_RELEASING,
 	/* This must be last as it determines the size of the BITMAP */
 	__I40E_VSI_STATE_SIZE__,
 };
@@ -232,6 +234,11 @@ enum i40e_fd_stat_idx {
 			(I40E_FD_STAT_PF_IDX(pf_id) + I40E_FD_STAT_SB)
 #define I40E_FD_ATR_TUNNEL_STAT_IDX(pf_id) \
 			(I40E_FD_STAT_PF_IDX(pf_id) + I40E_FD_STAT_ATR_TUNNEL)
+
+/* get PTP pins for ioctl */
+#define SIOCGPINS	(SIOCDEVPRIVATE + 0)
+/* set PTP pins for ioctl */
+#define SIOCSPINS	(SIOCDEVPRIVATE + 1)
 
 /* The following structure contains the data parsed from the user-defined
  * field of the ethtool_rx_flow_spec structure.
@@ -484,6 +491,10 @@ struct i40e_channel {
 	struct i40e_vsi *parent_vsi;
 };
 
+#ifdef HAVE_PTP_1588_CLOCK
+struct i40e_ptp_pins_settings;
+#endif /* HAVE_PTP_1588_CLOCK */
+
 /* struct that defines the Ethernet device */
 struct i40e_pf {
 	struct pci_dev *pdev;
@@ -604,6 +615,39 @@ struct i40e_pf {
 #define I40E_FLAG_RS_FEC			BIT(25)
 #define I40E_FLAG_BASE_R_FEC			BIT(26)
 #define I40E_FLAG_TOTAL_PORT_SHUTDOWN		BIT(27)
+
+/* GPIO defines used by PTP */
+#define I40E_SDP3_2			18
+#define I40E_SDP3_3			19
+#define I40E_GPIO_4			20
+#define I40E_LED2_0			26
+#define I40E_LED2_1			27
+#define I40E_LED3_0			28
+#define I40E_LED3_1			29
+#define I40E_GPIO_SET_HIGH		BIT(5)
+#define I40E_GPIO_SET_LOW		0
+#define I40E_DRIVE_SDP_ON		BIT(6)
+#define I40E_DRIVE_SDP_OFF		0
+#define I40E_GPIO_PRT_NUM_0		0
+#define I40E_GPIO_PRT_NUM_1		1
+#define I40E_GPIO_PRT_NUM_2		2
+#define I40E_GPIO_PRT_NUM_3		3
+#define I40E_GPIO_RESERVED_2		BIT(2)
+#define I40E_GPIO_PIN_DIR_OUT		BIT(4)
+#define I40E_GPIO_PIN_DIR_IN		0
+#define I40E_GPIO_TRI_CTL_OFF		BIT(5)
+#define I40E_GPIO_CTL_OUT_HIGH		BIT(6)
+#define I40E_GPIO_TIMESYNC_0		3 << 7
+#define I40E_GPIO_TIMESYNC_1		4 << 7
+#define I40E_GPIO_PHY_PIN_NA_ME_NO_SDP	0x3F << 20
+#define I40E_PORT_0_TIMESYNC_1		0x3F00184
+#define I40E_PORT_1_TIMESYNC_1		0x3F00185
+#define I40E_PORT_0_OUT_HIGH_TIMESYNC_0	0x3F00274
+#define I40E_PORT_1_OUT_HIGH_TIMESYNC_1	0x3F00275
+#define I40E_PTP_HALF_SECOND		500000000LL /* nano seconds */
+#define I40E_PRTTSYN_CTL0_FFFB_MASK	0xFFFFFFFB
+#define I40E_PTP_2_SEC_DELAY		2
+
 	/* flag to enable/disable vf base mode support */
 	bool vf_base_mode_only;
 
@@ -671,6 +715,9 @@ struct i40e_pf {
 	unsigned long ptp_tx_start;
 	struct hwtstamp_config tstamp_config;
 	struct timespec64 ptp_prev_hw_time;
+	struct work_struct ptp_pps_work;
+	struct work_struct ptp_extts0_work;
+	struct work_struct ptp_extts1_work;
 	ktime_t ptp_reset_start;
 	struct mutex tmreg_lock; /* Used to protect the SYSTIME registers. */
 	u32 ptp_adj_mult;
@@ -678,10 +725,15 @@ struct i40e_pf {
 	u32 tx_hwtstamp_skipped;
 	u32 rx_hwtstamp_cleared;
 	u32 latch_event_flags;
+	u64 ptp_pps_start;
+	u32 pps_delay;
 	spinlock_t ptp_rx_lock; /* Used to protect Rx timestamp registers. */
+	struct ptp_pin_desc ptp_pin[3];
 	unsigned long latch_events[4];
 	bool ptp_tx;
 	bool ptp_rx;
+	struct i40e_ptp_pins_settings *ptp_pins;
+	struct kobject *ptp_kobj;
 #endif /* HAVE_PTP_1588_CLOCK */
 #ifdef I40E_ADD_PROBES
 	u64 tcp_segs;
@@ -1191,6 +1243,7 @@ static inline void i40e_irq_dynamic_enable(struct i40e_vsi *vsi, int vector)
 void i40e_irq_dynamic_disable_icr0(struct i40e_pf *pf);
 void i40e_irq_dynamic_enable_icr0(struct i40e_pf *pf);
 int i40e_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd);
+int i40e_ptp_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd);
 int i40e_open(struct net_device *netdev);
 int i40e_close(struct net_device *netdev);
 int i40e_vsi_open(struct i40e_vsi *vsi);
@@ -1226,10 +1279,13 @@ void i40e_ptp_rx_hwtstamp(struct i40e_pf *pf, struct sk_buff *skb, u8 index);
 void i40e_ptp_set_increment(struct i40e_pf *pf);
 int i40e_ptp_set_ts_config(struct i40e_pf *pf, struct ifreq *ifr);
 int i40e_ptp_get_ts_config(struct i40e_pf *pf, struct ifreq *ifr);
+int i40e_ptp_set_pins_ioctl(struct i40e_pf *pf, struct ifreq *ifr);
+int i40e_ptp_get_pins(struct i40e_pf *pf, struct ifreq *ifr);
 void i40e_ptp_save_hw_time(struct i40e_pf *pf);
 void i40e_ptp_restore_hw_time(struct i40e_pf *pf);
 void i40e_ptp_init(struct i40e_pf *pf);
 void i40e_ptp_stop(struct i40e_pf *pf);
+int i40e_ptp_alloc_pins(struct i40e_pf *pf);
 #endif /* HAVE_PTP_1588_CLOCK */
 u8 i40e_pf_get_num_tc(struct i40e_pf *pf);
 int i40e_is_vsi_uplink_mode_veb(struct i40e_vsi *vsi);

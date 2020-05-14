@@ -43,7 +43,7 @@ static const char i40e_driver_string[] =
 
 #define DRV_VERSION_MAJOR 2
 #define DRV_VERSION_MINOR 11
-#define DRV_VERSION_BUILD 25
+#define DRV_VERSION_BUILD 29
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
 	__stringify(DRV_VERSION_BUILD) \
@@ -89,6 +89,7 @@ static const struct pci_device_id i40e_pci_tbl[] = {
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_QSFP_A), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_QSFP_B), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_QSFP_C), 0},
+	{PCI_VDEVICE(INTEL, I40E_DEV_ID_5G_BASE_T_BC), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_10G_BASE_T), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_10G_BASE_T4), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_10G_BASE_T_BC), 0},
@@ -282,12 +283,18 @@ void i40e_service_event_schedule(struct i40e_pf *pf)
 /**
  * i40e_tx_timeout - Respond to a Tx Hang
  * @netdev: network interface device structure
+ * @txqueue: stuck queue
  *
  * If any port has noticed a Tx timeout, it is likely that the whole
  * device is munged, not just the one netdev port, so go for the full
  * reset.
  **/
+#ifdef HAVE_TX_TIMEOUT_TXQUEUE
+static void
+i40e_tx_timeout(struct net_device *netdev, __always_unused unsigned int txqueue)
+#else
 static void i40e_tx_timeout(struct net_device *netdev)
+#endif
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_vsi *vsi = np->vsi;
@@ -2705,7 +2712,8 @@ static void i40e_sync_filters_subtask(struct i40e_pf *pf)
 
 	for (v = 0; v < pf->num_alloc_vsi; v++) {
 		if (pf->vsi[v] &&
-		    (pf->vsi[v]->flags & I40E_VSI_FLAG_FILTER_CHANGED)) {
+		    (pf->vsi[v]->flags & I40E_VSI_FLAG_FILTER_CHANGED) &&
+		    !test_bit(__I40E_VSI_RELEASING, pf->vsi[v]->state)) {
 			int ret = i40e_sync_vsi_filters(pf->vsi[v]);
 			if (ret) {
 				/* come back and try again later */
@@ -2805,7 +2813,15 @@ int i40e_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd)
 		return i40e_ptp_get_ts_config(pf, ifr);
 #endif
 	case SIOCSHWTSTAMP:
+		if (!capable(CAP_SYS_ADMIN))
+			return -EACCES;
 		return i40e_ptp_set_ts_config(pf, ifr);
+	case SIOCSPINS:
+		if (!capable(CAP_SYS_ADMIN))
+			return -EACCES;
+		return i40e_ptp_set_pins_ioctl(pf, ifr);
+	case SIOCGPINS:
+		return i40e_ptp_get_pins(pf, ifr);
 #endif /* HAVE_PTP_1588_CLOCK */
 	default:
 		return -EOPNOTSUPP;
@@ -4482,10 +4498,13 @@ static irqreturn_t i40e_intr(int irq, void *data)
 	if (icr0 & I40E_PFINT_ICR0_TIMESYNC_MASK) {
 		u32 prttsyn_stat = rd32(hw, I40E_PRTTSYN_STAT_0);
 
-		if (prttsyn_stat & I40E_PRTTSYN_STAT_0_TXTIME_MASK) {
-			icr0 &= ~I40E_PFINT_ICR0_ENA_TIMESYNC_MASK;
+		if (prttsyn_stat & I40E_PRTTSYN_STAT_0_EVENT0_MASK)
+			schedule_work(&pf->ptp_extts0_work);
+
+		if (prttsyn_stat & I40E_PRTTSYN_STAT_0_TXTIME_MASK)
 			i40e_ptp_tx_hwtstamp(pf);
-		}
+
+		icr0 &= ~I40E_PFINT_ICR0_ENA_TIMESYNC_MASK;
 	}
 
 #endif /* HAVE_PTP_1588_CLOCK */
@@ -7755,6 +7774,8 @@ config_tc:
 		netdev_info(netdev,
 			    "Failed to create channel. Override queues (%u) not power of 2\n",
 			    vsi->tc_config.tc_info[0].qcount);
+		pf->flags &= ~I40E_FLAG_TC_MQPRIO;
+		vsi->num_queue_pairs = old_queue_pairs;
 		ret = -EINVAL;
 		need_reset = true;
 		goto exit;
@@ -8367,6 +8388,8 @@ int i40e_vsi_open(struct i40e_vsi *vsi)
 	struct i40e_pf *pf = vsi->back;
 	char int_name[I40E_INT_NAME_STR_LEN];
 	int err;
+	int i;
+	u8 enabled_tc = 0;
 
 	/* allocate descriptors */
 	err = i40e_vsi_setup_tx_resources(vsi);
@@ -8386,6 +8409,19 @@ int i40e_vsi_open(struct i40e_vsi *vsi)
 		err = i40e_vsi_request_irq(vsi, int_name);
 		if (err)
 			goto err_setup_rx;
+
+		/* If real_num_tx_queues is changed the tc mapping may no
+		 * longer be valid. Run tc reset function with new value
+		 * of queues.
+		 */
+#ifdef __TC_MQPRIO_MODE_MAX
+		for (i = 0; i < vsi->mqprio_qopt.qopt.num_tc; i++)
+#else
+		for (i = 0; i < vsi->tc_config.numtc; i++)
+#endif
+			enabled_tc |= BIT(i);
+		if (!enabled_tc)
+			netdev_reset_tc(vsi->netdev);
 
 		/* Notify the stack of the actual queue counts. */
 		err = netif_set_real_num_tx_queues(vsi->netdev,
@@ -8729,7 +8765,7 @@ static int i40e_handle_lldp_event(struct i40e_pf *pf,
 	u8 type;
 
 	/* X710-T*L 2.5G and 5G speeds don't support DCB */
-	if (hw->device_id == I40E_DEV_ID_10G_BASE_T_BC &&
+	if (I40E_IS_X710TL_DEVICE(hw->device_id) &&
 	    (hw->phy.link_info.link_speed &
 	     ~(I40E_LINK_SPEED_2_5GB | I40E_LINK_SPEED_5GB)) &&
 	     !(pf->flags & I40E_FLAG_DCB_CAPABLE))
@@ -8768,7 +8804,7 @@ static int i40e_handle_lldp_event(struct i40e_pf *pf,
 	ret = i40e_get_dcb_config(&pf->hw);
 	if (ret) {
 		/* X710-T*L 2.5G and 5G speeds don't support DCB */
-		if (hw->device_id == I40E_DEV_ID_10G_BASE_T_BC &&
+		if (I40E_IS_X710TL_DEVICE(hw->device_id) &&
 		    (hw->phy.link_info.link_speed &
 		     (I40E_LINK_SPEED_2_5GB | I40E_LINK_SPEED_5GB))) {
 			dev_warn(&pf->pdev->dev,
@@ -9917,7 +9953,7 @@ static void i40e_get_oem_version(struct i40e_hw *hw)
 
 	/* Check if pointer to OEM version block is valid. */
 	i40e_read_nvm_word(hw, I40E_SR_NVM_OEM_VERSION_PTR, &block_offset);
-	if (block_offset == 0xffff)
+	if ((block_offset & 0x7fff) == 0x7fff)
 		return;
 
 	/* Check if OEM version block has correct length. */
@@ -12208,6 +12244,11 @@ static int i40e_sw_init(struct i40e_pf *pf)
 		dev_info(&pf->pdev->dev,
 			 "Total Port Shutdown is enabled, link-down-on-close forced on\n");
 	}
+
+	/* Add default values for ingress and egress vlan */
+	pf->ingress_vlan = I40E_NO_VF_MIRROR;
+	pf->egress_vlan = I40E_NO_VF_MIRROR;
+
 	mutex_init(&pf->switch_mutex);
 
 sw_init_done:
@@ -13860,12 +13901,11 @@ static int i40e_add_vsi(struct i40e_vsi *vsi)
 
 		ctxt.info.valid_sections |= cpu_to_le16(I40E_AQ_VSI_PROP_VLAN_VALID);
 		ctxt.info.port_vlan_flags |= I40E_AQ_VSI_PVLAN_MODE_ALL;
-		if (pf->vf[vsi->vf_id].spoofchk) {
+		if (pf->vf[vsi->vf_id].mac_anti_spoof) {
 			ctxt.info.valid_sections |=
 				cpu_to_le16(I40E_AQ_VSI_PROP_SECURITY_VALID);
 			ctxt.info.sec_flags |=
-				(I40E_AQ_VSI_SEC_FLAG_ENABLE_VLAN_CHK |
-				 I40E_AQ_VSI_SEC_FLAG_ENABLE_MAC_CHK);
+				I40E_AQ_VSI_SEC_FLAG_ENABLE_MAC_CHK;
 		}
 		/* Setup the VSI tx/rx queue map for TC0 only for now */
 		i40e_vsi_setup_queue_map(vsi, &ctxt, enabled_tc, true);
@@ -13959,6 +13999,7 @@ int i40e_vsi_release(struct i40e_vsi *vsi)
 		return -ENODEV;
 	}
 
+	set_bit(__I40E_VSI_RELEASING, vsi->state);
 	uplink_seid = vsi->uplink_seid;
 	if (vsi->type != I40E_VSI_SRIOV) {
 		if (vsi->netdev_registered) {
@@ -15655,6 +15696,9 @@ static int i40e_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	i40e_get_port_mac_addr(hw, hw->mac.port_addr);
 	if (is_valid_ether_addr(hw->mac.port_addr))
 		pf->hw_features |= I40E_HW_PORT_ID_VALID;
+#ifdef HAVE_PTP_1588_CLOCK
+	i40e_ptp_alloc_pins(pf);
+#endif /* HAVE_PTP_1588_CLOCK */
 
 #ifdef HAVE_PCI_ERS
 	pci_save_state(pdev);
@@ -15996,10 +16040,7 @@ err_init_lan_hmc:
 err_sw_init:
 err_adminq_setup:
 err_pf_reset:
-	dev_warn(&pdev->dev, "previous errors forcing module to load in debug mode\n");
-	i40e_dbg_pf_init(pf);
-	set_bit(__I40E_DEBUG_MODE, pf->state);
-	return err;
+	iounmap(hw->hw_addr);
 err_ioremap:
 	kfree(pf);
 err_pf_alloc:

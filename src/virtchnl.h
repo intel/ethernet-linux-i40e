@@ -246,9 +246,7 @@ VIRTCHNL_CHECK_STRUCT_LEN(16, virtchnl_vsi_resource);
 	/* 0X80000000 is reserved */
 
 /* Define below the capability flags that are not offloads */
-#ifndef NO_VF_CAP_ADV_LINK_SPEED
 #define VIRTCHNL_VF_CAP_ADV_LINK_SPEED		0x00000080
-#endif
 #define VF_BASE_MODE_OFFLOADS (VIRTCHNL_VF_OFFLOAD_L2 | \
 			       VIRTCHNL_VF_OFFLOAD_VLAN | \
 			       VIRTCHNL_VF_OFFLOAD_RSS_PF)

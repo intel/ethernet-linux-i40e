@@ -925,6 +925,10 @@ struct _kc_ethtool_pauseparam {
        SLE_LOCALVERSION_CODE >= KERNEL_VERSION(25,23,0))
 /* SLES15 SP1 Beta1 is 4.12.14-25.23 */
 #define SLE_VERSION_CODE SLE_VERSION(15,1,0)
+#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(5,3,13))
+/* SLES15 SP2 Beta1 is 5.3.13 */
+#define SLE_VERSION_CODE SLE_VERSION(15,2,0)
+
 /* new SLES kernels must be added here with >= based on kernel
  * the idea is to order from newest to oldest and just catch all
  * of them using the >=
@@ -2168,10 +2172,6 @@ static inline unsigned _kc_compare_ether_addr(const u8 *addr1, const u8 *addr2)
 
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(x) (sizeof(x) / sizeof((x)[0]))
-#endif
-
-#ifndef FIELD_SIZEOF
-#define FIELD_SIZEOF(t, f) (sizeof(((t*)0)->f))
 #endif
 
 #ifndef skb_is_gso
@@ -5402,8 +5402,13 @@ void __kc_skb_complete_tx_timestamp(struct sk_buff *skb,
 #define skb_clone_sk __kc_skb_clone_sk
 #define skb_complete_tx_timestamp __kc_skb_complete_tx_timestamp
 #endif
+#if (!(RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,2))))
 u32 __kc_eth_get_headlen(const struct net_device *dev, unsigned char *data,
 			 unsigned int max_len);
+#else
+unsigned int __kc_eth_get_headlen(unsigned char *data, unsigned int max_len);
+#endif /* !RHEL >= 8.2 */
+
 #define eth_get_headlen __kc_eth_get_headlen
 #ifndef ETH_P_XDSA
 #define ETH_P_XDSA 0x00F8
@@ -6600,6 +6605,9 @@ ptp_read_system_postts(struct ptp_system_timestamp __always_unused *sts)
 #if (RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,1)))
 #define HAVE_NDO_BRIDGE_SETLINK_EXTACK
 #endif /* RHEL 8.1 */
+#if (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,2))
+#define HAVE_TC_INDIR_BLOCK
+#endif /* RHEL 8.2 */
 #else /* >= 5.0.0 */
 #define HAVE_PTP_SYS_OFFSET_EXTENDED_IOCTL
 #define HAVE_NDO_BRIDGE_SETLINK_EXTACK
@@ -6724,12 +6732,14 @@ static inline bool flow_rule_match_key(const struct flow_rule *rule,
 
 /*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5,2,0))
-#ifdef HAVE_SKB_XMIT_MORE
+#if (defined HAVE_SKB_XMIT_MORE) && \
+(!(RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,2))))
 #define netdev_xmit_more()	(skb->xmit_more)
 #else
 #define netdev_xmit_more()	(0)
 #endif
 
+#if (!(RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,2))))
 #ifndef eth_get_headlen
 static inline u32
 __kc_eth_get_headlen(const struct net_device __always_unused *dev, void *data,
@@ -6740,6 +6750,7 @@ __kc_eth_get_headlen(const struct net_device __always_unused *dev, void *data,
 
 #define eth_get_headlen(dev, data, len) __kc_eth_get_headlen(dev, data, len)
 #endif /* !eth_get_headlen */
+#endif /* !RHEL >= 8.2 */
 
 #ifndef mmiowb
 #ifdef CONFIG_IA64
@@ -6756,10 +6767,11 @@ __kc_eth_get_headlen(const struct net_device __always_unused *dev, void *data,
 
 /*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5,3,0))
+#if (!(RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,2)))
 #define flow_block_offload tc_block_offload
 #define flow_block_command tc_block_command
-#define flow_block_binder_type tcf_block_binder_type
 #define flow_cls_offload tc_cls_flower_offload
+#define flow_block_binder_type tcf_block_binder_type
 #define flow_cls_common_offload tc_cls_common_offload
 #define flow_cls_offload_flow_rule tc_cls_flower_offload_flow_rule
 #define FLOW_CLS_REPLACE TC_CLSFLOWER_REPLACE
@@ -6786,6 +6798,9 @@ int _kc_flow_block_cb_setup_simple(struct flow_block_offload *f,
 	_kc_flow_block_cb_setup_simple(f, driver_list, cb, cb_ident, cb_priv, \
 				       ingress_only)
 #endif /* HAVE_TC_CB_AND_SETUP_QDISC_MQPRIO */
+#else /* RHEL >= 8.2 */
+#define HAVE_FLOW_BLOCK_API
+#endif /* RHEL >= 8.2 */
 #else /* >= 5.3.0 */
 #define XSK_UMEM_RETURNS_XDP_DESC
 #define HAVE_FLOW_BLOCK_API
@@ -6793,6 +6808,8 @@ int _kc_flow_block_cb_setup_simple(struct flow_block_offload *f,
 
 /*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5,4,0))
+#if (!(RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,2)) && \
+     !(SLE_VERSION_CODE >= SLE_VERSION(15,2,0)))
 static inline unsigned int skb_frag_off(const skb_frag_t *frag)
 {
 	return frag->page_offset;
@@ -6802,11 +6819,20 @@ static inline void skb_frag_off_add(skb_frag_t *frag, int delta)
 {
 	frag->page_offset += delta;
 }
-
 #define __flow_indr_block_cb_register __tc_indr_block_cb_register
 #define __flow_indr_block_cb_unregister __tc_indr_block_cb_unregister
+#endif /* !(RHEL >= 8.2) && !(SLES >= 15sp2) */
+#if (SLE_VERSION_CODE >= SLE_VERSION(15,2,0))
+#define HAVE_NDO_XSK_WAKEUP
+#endif /* SLES15sp2 */
 #else /* >= 5.4.0 */
 #define HAVE_NDO_XSK_WAKEUP
 #endif /* 5.4.0 */
+
+/*****************************************************************************/
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5,6,0))
+#else /* >= 5.6.0 */
+#define HAVE_TX_TIMEOUT_TXQUEUE
+#endif /* 5.6.0 */
 
 #endif /* _KCOMPAT_H_ */
