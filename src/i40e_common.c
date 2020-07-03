@@ -3285,6 +3285,36 @@ i40e_status i40e_aq_write_nvm_config(struct i40e_hw *hw,
 }
 
 /**
+ * i40e_aq_nvm_update_in_process
+ * @hw: pointer to the hw struct
+ * @update_flow_state: True indicates that update flow starts, false that ends
+ * @cmd_details: pointer to command details structure or NULL
+ *
+ * Indicate NVM update in process.
+ **/
+i40e_status i40e_aq_nvm_update_in_process(struct i40e_hw *hw,
+				bool update_flow_state,
+				struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aq_desc desc;
+	struct i40e_aqc_nvm_update_in_process *cmd =
+		(struct i40e_aqc_nvm_update_in_process *)&desc.params.raw;
+	i40e_status status;
+
+	i40e_fill_default_direct_cmd_desc(&desc,
+					  i40e_aqc_opc_nvm_update_in_process);
+
+	cmd->command = I40E_AQ_UPDATE_FLOW_END;
+
+	if (update_flow_state)
+		cmd->command |= I40E_AQ_UPDATE_FLOW_START;
+
+	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
+
+	return status;
+}
+
+/**
  * i40e_aq_oem_post_update - triggers an OEM specific flow after update
  * @hw: pointer to the hw struct
  * @buff: buffer for result
@@ -3616,6 +3646,12 @@ static void i40e_parse_discover_capabilities(struct i40e_hw *hw, void *buff,
 				   "HW Capability: wr_csr_prot = 0x%llX\n\n",
 				   (p->wr_csr_prot & 0xffff));
 			break;
+		case I40E_AQ_CAP_ID_DIS_UNUSED_PORTS:
+			p->dis_unused_ports = (bool)number;
+			i40e_debug(hw, I40E_DEBUG_INIT,
+				   "HW Capability: dis_unused_ports = %d\n\n",
+				   p->dis_unused_ports);
+			break;
 		case I40E_AQ_CAP_ID_NVM_MGMT:
 			if (number & I40E_NVM_MGMT_SEC_REV_DISABLED)
 				p->sec_rev_disabled = true;
@@ -3839,26 +3875,6 @@ i40e_status i40e_aq_rearrange_nvm(struct i40e_hw *hw,
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 
 i40e_aq_rearrange_nvm_exit:
-	return status;
-}
-
-/**
- * i40e_aq_nvm_progress
- * @hw: pointer to the hw struct
- * @progress: pointer to progress returned from AQ
- * @cmd_details: pointer to command details structure or NULL
- *
- * Gets progress of flash rearrangement process
- **/
-i40e_status i40e_aq_nvm_progress(struct i40e_hw *hw, u8 *progress,
-				struct i40e_asq_cmd_details *cmd_details)
-{
-	i40e_status status;
-	struct i40e_aq_desc desc;
-
-	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_nvm_progress);
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
-	*progress = desc.params.raw[0];
 	return status;
 }
 
@@ -5936,7 +5952,7 @@ i40e_status i40e_get_lpi_counters(struct i40e_hw *hw,
 				I40E_AQ_RUN_PHY_ACT_DNL_OPCODE_GET_EEE_STAT,
 				&cmd_status, tx_counter, rx_counter, NULL);
 
-		if (cmd_status != I40E_AQ_RUN_PHY_ACT_CMD_STAT_SUCC)
+		if (!retval && cmd_status != I40E_AQ_RUN_PHY_ACT_CMD_STAT_SUCC)
 			retval = I40E_ERR_ADMIN_QUEUE_ERROR;
 
 		return retval;
@@ -6288,7 +6304,8 @@ i40e_aq_get_phy_register_ext(struct i40e_hw *hw,
 
 	i40e_mdio_if_number_selection(hw, set_mdio, mdio_num, cmd);
 
-	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
+	status = i40e_asq_send_command_atomic(hw, &desc, NULL, 0,
+					      cmd_details, false);
 	if (!status)
 		*reg_val = LE32_TO_CPU(cmd->reg_value);
 

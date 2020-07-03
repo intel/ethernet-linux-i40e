@@ -223,7 +223,8 @@ i40e_status i40e_aq_update_nvm(struct i40e_hw *hw, u8 module_pointer,
 i40e_status i40e_aq_rearrange_nvm(struct i40e_hw *hw,
 				u8 rearrange_nvm,
 				struct i40e_asq_cmd_details *cmd_details);
-i40e_status i40e_aq_nvm_progress(struct i40e_hw *hw, u8 *progress,
+i40e_status i40e_aq_nvm_update_in_process(struct i40e_hw *hw,
+				bool update_flow_state,
 				struct i40e_asq_cmd_details *cmd_details);
 i40e_status i40e_aq_get_lldp_mib(struct i40e_hw *hw, u8 bridge_type,
 				u8 mib_type, void *buff, u16 buff_size,

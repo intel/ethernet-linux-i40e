@@ -1,6 +1,6 @@
 Name: i40e
 Summary: Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
-Version: 2.11.29
+Version: 2.12.6
 Release: 1
 Source: %{name}-%{version}.tar.gz
 Vendor: Intel Corporation
@@ -17,7 +17,7 @@ BuildRoot: %{_tmppath}/%{name}-%{version}-root
 %define _pcitable /usr/share/kudzu/pcitable /usr/share/hwdata/pcitable /dev/null
 %define pciids    %find %{_pciids}
 %define pcitable  %find %{_pcitable}
-Requires: kernel, fileutils, findutils, gawk, bash
+Requires: kernel, findutils, gawk, bash
 
 # Check for existence of %kernel_module_package_buildreqs ...
 %if 0%{?!kernel_module_package_buildreqs:1}

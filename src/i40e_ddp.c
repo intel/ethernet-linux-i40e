@@ -87,7 +87,7 @@ static bool i40e_ddp_profiles_overlap(struct i40e_profile_info *new,
  * Returns <0 if error.
  **/
 static int i40e_ddp_does_profile_overlap(struct i40e_hw *hw,
-				         struct i40e_profile_info *pinfo)
+					 struct i40e_profile_info *pinfo)
 {
 	struct i40e_ddp_profile_list *profile_list;
 	u8 buff[I40E_PROFILE_LIST_SIZE];
@@ -108,7 +108,6 @@ static int i40e_ddp_does_profile_overlap(struct i40e_hw *hw,
 	return 0;
 }
 
-
 /**
  * i40e_add_pinfo
  * @hw: pointer to the hardware structure
@@ -117,7 +116,7 @@ static int i40e_ddp_does_profile_overlap(struct i40e_hw *hw,
  * @track_id: package tracking id
  *
  * Register a profile to the list of loaded profiles.
- */
+ **/
 static enum i40e_status_code
 i40e_add_pinfo(struct i40e_hw *hw, struct i40e_profile_segment *profile,
 	       u8 *profile_info_sec, u32 track_id)
@@ -213,8 +212,9 @@ static bool i40e_ddp_is_pkg_hdr_valid(struct net_device *netdev,
 
 	if (pkg_hdr->version.major > 0) {
 		struct i40e_ddp_version ver = pkg_hdr->version;
+
 		netdev_err(netdev, "Unsupported DDP profile version %u.%u.%u.%u",
-				   ver.major, ver.minor, ver.update, ver.draft);
+			   ver.major, ver.minor, ver.update, ver.draft);
 		return false;
 	}
 	if (size_huge > size) {
@@ -236,11 +236,13 @@ static bool i40e_ddp_is_pkg_hdr_valid(struct net_device *netdev,
 		u32 offset = pkg_hdr->segment_offset[segment];
 
 		if (0xFU & offset) {
-			netdev_err(netdev, "Invalid DDP profile %u segment alignment", segment);
+			netdev_err(netdev, "Invalid DDP profile %u segment alignment",
+				   segment);
 			return false;
 		}
 		if (pkg_hdr_size > offset || offset >= size) {
-			netdev_err(netdev, "Invalid DDP profile %u segment offset", segment);
+			netdev_err(netdev, "Invalid DDP profile %u segment offset",
+				   segment);
 			return false;
 		}
 	}
@@ -342,8 +344,8 @@ int i40e_ddp_load(struct net_device *netdev, const u8 *data, size_t size,
 		status = i40e_write_profile(&pf->hw, profile_hdr, track_id);
 		if (status) {
 			if (status == I40E_ERR_DEVICE_NOT_SUPPORTED) {
-			    netdev_err(netdev, "Profile is not supported by the device.");
-			    return -EPERM;
+				netdev_err(netdev, "Profile is not supported by the device.");
+				return -EPERM;
 			}
 			netdev_err(netdev, "Failed to write DDP profile.");
 			return -EIO;
@@ -436,8 +438,9 @@ int i40e_ddp_flash(struct net_device *netdev, struct ethtool_flash *flash)
 		struct i40e_ddp_old_profile_list *list_entry;
 		char profile_name[I40E_DDP_PROFILE_NAME_MAX];
 
-		profile_name[sizeof(profile_name)-1]=0;
-		strncpy(profile_name, I40E_DDP_PROFILE_PATH, sizeof(profile_name)-1);
+		profile_name[sizeof(profile_name) - 1] = 0;
+		strncpy(profile_name, I40E_DDP_PROFILE_PATH,
+			sizeof(profile_name) - 1);
 		strncat(profile_name, flash->data, ETHTOOL_FLASH_MAX_FILENAME);
 		/* Load DDP recipe. */
 		status = request_firmware(&ddp_config, profile_name,
@@ -451,12 +454,10 @@ int i40e_ddp_flash(struct net_device *netdev, struct ethtool_flash *flash)
 				       ddp_config->size, true);
 
 		if (!status) {
-			list_entry = kzalloc(
-				sizeof(struct i40e_ddp_old_profile_list) +
-				ddp_config->size, GFP_KERNEL);
+			list_entry = kzalloc(sizeof(*list_entry) +
+					     ddp_config->size, GFP_KERNEL);
 			if (!list_entry) {
-				netdev_info(netdev, "Failed to allocate memory for previous DDP profile data.");
-				netdev_info(netdev, "New profile loaded but roll-back will be impossible.");
+				netdev_info(netdev, "Failed to allocate memory for previous DDP profile data. New profile loaded but roll-back will be impossible.");
 			} else {
 				memcpy(list_entry->old_ddp_buf,
 				       ddp_config->data, ddp_config->size);

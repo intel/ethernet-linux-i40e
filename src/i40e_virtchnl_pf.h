@@ -19,6 +19,9 @@
 
 #define I40E_MAX_VF_PROMISC_FLAGS	3
 
+#define I40E_VF_STATE_WAIT_COUNT	20
+#define I40E_VFR_WAIT_COUNT		100
+
 /* Various queue ctrls */
 enum i40e_queue_ctrl {
 	I40E_QUEUE_CTRL_UNKNOWN = 0,
@@ -58,6 +61,13 @@ struct i40evf_channel {
 	u16 vsi_id; /* VSI ID used by firmware */
 	u16 num_qps; /* number of queue pairs requested by user */
 	u64 max_tx_rate; /* bandwidth rate allocation for VSIs */
+};
+
+/* used for VLAN list 'vm_vlan_list' by VM for trusted and untrusted VF */
+struct i40e_vm_vlan {
+	struct list_head list;
+	s16 vlan;
+	u16 vsi_id;
 };
 
 /* VF information structure */
@@ -113,14 +123,18 @@ struct i40e_vf {
 	u16 egress_rule_id;
 	int egress_vlan;
 	DECLARE_BITMAP(trunk_vlans, VLAN_N_VID);
+	bool trunk_set_by_pf;
 	bool allow_untagged;
 	bool loopback;
 	bool vlan_stripping;
 	u8 promisc_mode;
 	u8 bw_share;
 	bool bw_share_applied; /* true if config is applied to the device */
-	bool pf_ctrl_disable; /* tracking bool for PF ctrl of VF enable/disable */
-
+	bool pf_ctrl_disable; /* bool for PF ctrl of VF enable/disable */
+	u8 queue_type;
+	bool allow_bcast;
+	/* VLAN list created by VM for trusted and untrusted VF */
+	struct list_head vm_vlan_list;
 	/* ADq related variables */
 	bool adq_enabled; /* flag to enable adq */
 	u8 num_tc;
@@ -173,6 +187,7 @@ int i40e_ndo_set_vf_spoofchk(struct net_device *netdev, int vf_id, bool enable);
 
 void i40e_vc_notify_link_state(struct i40e_pf *pf);
 void i40e_vc_notify_reset(struct i40e_pf *pf);
+void i40e_restore_all_vfs_msi_state(struct pci_dev *pdev);
 #ifdef HAVE_VF_STATS
 int i40e_get_vf_stats(struct net_device *netdev, int vf_id,
 		      struct ifla_vf_stats *vf_stats);

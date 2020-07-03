@@ -201,7 +201,6 @@ enum i40e_interrupt_policy {
 
 struct i40e_lump_tracking {
 	u16 num_entries;
-	u16 search_hint;
 	u16 list[0];
 #define I40E_PILE_VALID_BIT  0x8000
 #define I40E_IWARP_IRQ_PILE_ID  (I40E_PILE_VALID_BIT - 2)
@@ -210,9 +209,13 @@ struct i40e_lump_tracking {
 #define I40E_DEFAULT_ATR_SAMPLE_RATE	20
 #define I40E_FDIR_MAX_RAW_PACKET_SIZE	512
 #define I40E_TCPIP_DUMMY_PACKET_LEN	54
+#define I40E_TCPIP6_DUMMY_PACKET_LEN	74
 #define I40E_SCTPIP_DUMMY_PACKET_LEN	46
+#define I40E_SCTPIP6_DUMMY_PACKET_LEN	66
 #define I40E_UDPIP_DUMMY_PACKET_LEN	42
+#define I40E_UDPIP6_DUMMY_PACKET_LEN	62
 #define I40E_IP_DUMMY_PACKET_LEN	34
+#define I40E_IP6_DUMMY_PACKET_LEN	54
 #define I40E_FDIR_BUFFER_FULL_MARGIN	10
 #define I40E_FDIR_BUFFER_HEAD_ROOM	32
 #define I40E_FDIR_BUFFER_HEAD_ROOM_FOR_ATR (I40E_FDIR_BUFFER_HEAD_ROOM * 4)
@@ -252,16 +255,20 @@ struct i40e_rx_flow_userdef {
 	bool flex_filter;
 	u16 flex_word;
 	u16 flex_offset;
+	bool outer_ip;
 };
 
 struct i40e_fdir_filter {
 	struct hlist_node fdir_node;
 	/* filter input set */
 	u8 flow_type;
-	u8 ip4_proto;
+	u8 ipl4_proto;
 	/* TX packet view of src and dst */
 	__be32 dst_ip;
 	__be32 src_ip;
+	__be32 dst_ip6[4];
+	__be32 src_ip6[4];
+
 	__be16 src_port;
 	__be16 dst_port;
 	__be32 sctp_v_tag;
@@ -286,6 +293,8 @@ struct i40e_fdir_filter {
 #define I40E_CLOUD_FIELD_IVLAN		BIT(2)
 #define I40E_CLOUD_FIELD_TEN_ID		BIT(3)
 #define I40E_CLOUD_FIELD_IIP		BIT(4)
+#define I40E_CLOUD_FIELD_OIP1		BIT(5)
+#define I40E_CLOUD_FIELD_OIP2		BIT(6)
 
 #define I40E_CLOUD_FILTER_FLAGS_OMAC I40E_CLOUD_FIELD_OMAC
 #define I40E_CLOUD_FILTER_FLAGS_IMAC I40E_CLOUD_FIELD_IMAC
@@ -300,6 +309,8 @@ struct i40e_fdir_filter {
 						   I40E_CLOUD_FIELD_IVLAN | \
 						   I40E_CLOUD_FIELD_TEN_ID)
 #define I40E_CLOUD_FILTER_FLAGS_IIP  I40E_CLOUD_FIELD_IIP
+#define I40E_CLOUD_FILTER_FLAGS_OIP1 I40E_CLOUD_FIELD_OIP1
+#define I40E_CLOUD_FILTER_FLAGS_OIP2 I40E_CLOUD_FIELD_OIP2
 
 struct i40e_cloud_filter {
 	struct hlist_node cloud_node;
@@ -538,6 +549,11 @@ struct i40e_pf {
 	u16 fd_sctp4_filter_cnt;
 	u16 fd_ip4_filter_cnt;
 
+	u16 fd_tcp6_filter_cnt;
+	u16 fd_udp6_filter_cnt;
+	u16 fd_sctp6_filter_cnt;
+	u16 fd_ip6_filter_cnt;
+
 	/* Flexible filter table values that need to be programmed into
 	 * hardware, which expects L3 and L4 to be programmed separately. We
 	 * need to ensure that the values are in ascended order and don't have
@@ -551,6 +567,9 @@ struct i40e_pf {
 
 	struct hlist_head cloud_filter_list;
 	u16 num_cloud_filters;
+
+	/* Array of count of outerip cloud filters */
+	u16 outerip_filters[2];
 
 	enum i40e_interrupt_policy int_policy;
 	u16 rx_itr_default;
@@ -616,38 +635,6 @@ struct i40e_pf {
 #define I40E_FLAG_BASE_R_FEC			BIT(26)
 #define I40E_FLAG_TOTAL_PORT_SHUTDOWN		BIT(27)
 
-/* GPIO defines used by PTP */
-#define I40E_SDP3_2			18
-#define I40E_SDP3_3			19
-#define I40E_GPIO_4			20
-#define I40E_LED2_0			26
-#define I40E_LED2_1			27
-#define I40E_LED3_0			28
-#define I40E_LED3_1			29
-#define I40E_GPIO_SET_HIGH		BIT(5)
-#define I40E_GPIO_SET_LOW		0
-#define I40E_DRIVE_SDP_ON		BIT(6)
-#define I40E_DRIVE_SDP_OFF		0
-#define I40E_GPIO_PRT_NUM_0		0
-#define I40E_GPIO_PRT_NUM_1		1
-#define I40E_GPIO_PRT_NUM_2		2
-#define I40E_GPIO_PRT_NUM_3		3
-#define I40E_GPIO_RESERVED_2		BIT(2)
-#define I40E_GPIO_PIN_DIR_OUT		BIT(4)
-#define I40E_GPIO_PIN_DIR_IN		0
-#define I40E_GPIO_TRI_CTL_OFF		BIT(5)
-#define I40E_GPIO_CTL_OUT_HIGH		BIT(6)
-#define I40E_GPIO_TIMESYNC_0		3 << 7
-#define I40E_GPIO_TIMESYNC_1		4 << 7
-#define I40E_GPIO_PHY_PIN_NA_ME_NO_SDP	0x3F << 20
-#define I40E_PORT_0_TIMESYNC_1		0x3F00184
-#define I40E_PORT_1_TIMESYNC_1		0x3F00185
-#define I40E_PORT_0_OUT_HIGH_TIMESYNC_0	0x3F00274
-#define I40E_PORT_1_OUT_HIGH_TIMESYNC_1	0x3F00275
-#define I40E_PTP_HALF_SECOND		500000000LL /* nano seconds */
-#define I40E_PRTTSYN_CTL0_FFFB_MASK	0xFFFFFFFB
-#define I40E_PTP_2_SEC_DELAY		2
-
 	/* flag to enable/disable vf base mode support */
 	bool vf_base_mode_only;
 
@@ -708,6 +695,62 @@ struct i40e_pf {
 
 	struct i40e_filter_control_settings filter_settings;
 #ifdef HAVE_PTP_1588_CLOCK
+/* GPIO defines used by PTP */
+#define I40E_SDP3_2			18
+#define I40E_SDP3_3			19
+#define I40E_GPIO_4			20
+#define I40E_LED2_0			26
+#define I40E_LED2_1			27
+#define I40E_LED3_0			28
+#define I40E_LED3_1			29
+#define I40E_GLGEN_GPIO_SET_SDP_DATA_HI \
+	(1 << I40E_GLGEN_GPIO_SET_SDP_DATA_SHIFT)
+#define I40E_GLGEN_GPIO_SET_DRV_SDP_DATA \
+	(1 << I40E_GLGEN_GPIO_SET_DRIVE_SDP_SHIFT)
+#define I40E_GLGEN_GPIO_CTL_PRT_NUM_0 \
+	(0 << I40E_GLGEN_GPIO_CTL_PRT_NUM_SHIFT)
+#define I40E_GLGEN_GPIO_CTL_PRT_NUM_1 \
+	(1 << I40E_GLGEN_GPIO_CTL_PRT_NUM_SHIFT)
+#define I40E_GLGEN_GPIO_CTL_RESERVED	BIT(2)
+#define I40E_GLGEN_GPIO_CTL_DIR_OUT \
+	(1 << I40E_GLGEN_GPIO_CTL_PIN_DIR_SHIFT)
+#define I40E_GLGEN_GPIO_CTL_TRI_DRV_HI \
+	(1 << I40E_GLGEN_GPIO_CTL_TRI_CTL_SHIFT)
+#define I40E_GLGEN_GPIO_CTL_OUT_HI_RST \
+	(1 << I40E_GLGEN_GPIO_CTL_OUT_CTL_SHIFT)
+#define I40E_GLGEN_GPIO_CTL_TIMESYNC_0 \
+	(3 << I40E_GLGEN_GPIO_CTL_PIN_FUNC_SHIFT)
+#define I40E_GLGEN_GPIO_CTL_TIMESYNC_1 \
+	(4 << I40E_GLGEN_GPIO_CTL_PIN_FUNC_SHIFT)
+#define I40E_GLGEN_GPIO_CTL_NOT_FOR_PHY_CONN \
+	(0x3F << I40E_GLGEN_GPIO_CTL_PHY_PIN_NAME_SHIFT)
+#define I40E_GLGEN_GPIO_CTL_PORT_0_IN_TIMESYNC_0 \
+	(I40E_GLGEN_GPIO_CTL_NOT_FOR_PHY_CONN | \
+	 I40E_GLGEN_GPIO_CTL_TIMESYNC_0 | \
+	 I40E_GLGEN_GPIO_CTL_RESERVED | I40E_GLGEN_GPIO_CTL_PRT_NUM_0)
+#define I40E_GLGEN_GPIO_CTL_PORT_1_IN_TIMESYNC_0 \
+	(I40E_GLGEN_GPIO_CTL_NOT_FOR_PHY_CONN | \
+	 I40E_GLGEN_GPIO_CTL_TIMESYNC_0 | \
+	 I40E_GLGEN_GPIO_CTL_RESERVED | I40E_GLGEN_GPIO_CTL_PRT_NUM_1)
+#define I40E_GLGEN_GPIO_CTL_PORT_0_OUT_TIMESYNC_1 \
+	(I40E_GLGEN_GPIO_CTL_NOT_FOR_PHY_CONN | \
+	 I40E_GLGEN_GPIO_CTL_TIMESYNC_1 | I40E_GLGEN_GPIO_CTL_OUT_HI_RST | \
+	 I40E_GLGEN_GPIO_CTL_TRI_DRV_HI | I40E_GLGEN_GPIO_CTL_DIR_OUT | \
+	 I40E_GLGEN_GPIO_CTL_RESERVED | I40E_GLGEN_GPIO_CTL_PRT_NUM_0)
+#define I40E_GLGEN_GPIO_CTL_PORT_1_OUT_TIMESYNC_1 \
+	(I40E_GLGEN_GPIO_CTL_NOT_FOR_PHY_CONN | \
+	 I40E_GLGEN_GPIO_CTL_TIMESYNC_1 | I40E_GLGEN_GPIO_CTL_OUT_HI_RST | \
+	 I40E_GLGEN_GPIO_CTL_TRI_DRV_HI | I40E_GLGEN_GPIO_CTL_DIR_OUT | \
+	 I40E_GLGEN_GPIO_CTL_RESERVED | I40E_GLGEN_GPIO_CTL_PRT_NUM_1)
+#define I40E_PRTTSYN_AUX_1_INSTNT \
+	(1 << I40E_PRTTSYN_AUX_1_INSTNT_SHIFT)
+#define I40E_PRTTSYN_AUX_0_OUT_ENABLE \
+	(1 << I40E_PRTTSYN_AUX_0_OUT_ENA_SHIFT)
+#define I40E_PRTTSYN_AUX_0_OUT_CLK_MOD	(3 << I40E_PRTTSYN_AUX_0_OUTMOD_SHIFT)
+#define I40E_PRTTSYN_AUX_0_OUT_ENABLE_CLK_MOD \
+	(I40E_PRTTSYN_AUX_0_OUT_ENABLE | I40E_PRTTSYN_AUX_0_OUT_CLK_MOD)
+#define I40E_PTP_HALF_SECOND		500000000LL /* nano seconds */
+#define I40E_PTP_2_SEC_DELAY		2
 
 	struct ptp_clock *ptp_clock;
 	struct ptp_clock_info ptp_caps;
@@ -768,8 +811,12 @@ struct i40e_pf {
 	u16 egress_rule_id;
 	int egress_vlan;
 	bool vf_bw_applied;
+	struct list_head *mac_list;	/* for backup vfs mac list */
 	/* List to keep previous DDP profiles to be rolled back in the future */
 	struct list_head ddp_old_prof;
+#if IS_ENABLED(CONFIG_MFD_CORE)
+	int peer_idx;
+#endif
 };
 
 /**
@@ -1194,10 +1241,15 @@ int i40e_reconfig_rss_queues(struct i40e_pf *pf, int queue_count);
 struct i40e_veb *i40e_veb_setup(struct i40e_pf *pf, u16 flags, u16 uplink_seid,
 				u16 downlink_seid, u8 enabled_tc);
 void i40e_veb_release(struct i40e_veb *veb);
+int i40e_max_lump_qp(struct i40e_pf *pf);
 
 int i40e_veb_config_tc(struct i40e_veb *veb, u8 enabled_tc);
 int i40e_vsi_add_pvid(struct i40e_vsi *vsi, u16 vid);
 void i40e_vsi_remove_pvid(struct i40e_vsi *vsi);
+int i40e_get_custom_cloud_filter_type(u8 flags, u16 *type);
+int i40e_add_del_custom_cloud_filter(struct i40e_vsi *vsi,
+				     struct i40e_cloud_filter *filter,
+				     bool add);
 int i40e_get_cloud_filter_type(u8 flags, u16 *type);
 void i40e_vsi_reset_stats(struct i40e_vsi *vsi);
 void i40e_pf_reset_stats(struct i40e_pf *pf);
@@ -1317,7 +1369,8 @@ static inline bool i40e_enabled_xdp_vsi(struct i40e_vsi *vsi)
 {
 	return !!vsi->xdp_prog;
 }
-int i40e_restore_ingress_egress_mirror(struct i40e_vsi *src_vsi, int mirror, u16 rule_type,
-				       u16 *rule_id);
+
+int i40e_restore_ingress_egress_mirror(struct i40e_vsi *src_vsi, int mirror,
+				       u16 rule_type, u16 *rule_id);
 
 #endif /* _I40E_H_ */

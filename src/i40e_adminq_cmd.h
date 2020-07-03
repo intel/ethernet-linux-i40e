@@ -11,8 +11,8 @@
  */
 
 #define I40E_FW_API_VERSION_MAJOR	0x0001
-#define I40E_FW_API_VERSION_MINOR_X722	0x0009
-#define I40E_FW_API_VERSION_MINOR_X710	0x000A
+#define I40E_FW_API_VERSION_MINOR_X722	0x000A
+#define I40E_FW_API_VERSION_MINOR_X710	0x000B
 
 #define I40E_FW_MINOR_VERSION(_h) ((_h)->mac.type == I40E_MAC_XL710 ? \
 					I40E_FW_API_VERSION_MINOR_X710 : \
@@ -24,6 +24,8 @@
 #define I40E_MINOR_VER_GET_LINK_INFO_X722 0x0009
 /* API version 1.6 for X722 devices adds ability to stop FW LLDP agent */
 #define I40E_MINOR_VER_FW_LLDP_STOPPABLE_X722 0x0006
+/* API version 1.10 for X722 devices adds ability to request FEC encoding */
+#define I40E_MINOR_VER_FW_REQUEST_FEC_X722 0x000A
 
 struct i40e_aq_desc {
 	__le16 flags;
@@ -239,7 +241,7 @@ enum i40e_admin_queue_opc {
 	i40e_aqc_opc_nvm_update			= 0x0703,
 	i40e_aqc_opc_nvm_config_read		= 0x0704,
 	i40e_aqc_opc_nvm_config_write		= 0x0705,
-	i40e_aqc_opc_nvm_progress		= 0x0706,
+	i40e_aqc_opc_nvm_update_in_process	= 0x0706,
 	i40e_aqc_opc_oem_post_update		= 0x0720,
 	i40e_aqc_opc_thermal_sensor		= 0x0721,
 
@@ -439,6 +441,7 @@ struct i40e_aqc_list_capabilities_element_resp {
 #define I40E_AQ_CAP_ID_SDP		0x0062
 #define I40E_AQ_CAP_ID_MDIO		0x0063
 #define I40E_AQ_CAP_ID_WSR_PROT		0x0064
+#define I40E_AQ_CAP_ID_DIS_UNUSED_PORTS	0x0067
 #define I40E_AQ_CAP_ID_NVM_MGMT		0x0080
 #define I40E_AQ_CAP_ID_FLEX10		0x00F1
 #define I40E_AQ_CAP_ID_CEM		0x00F2
@@ -1405,6 +1408,8 @@ struct i40e_aqc_cloud_filters_element_data {
 #define I40E_AQC_ADD_CLOUD_FILTER_IMAC			0x000A
 #define I40E_AQC_ADD_CLOUD_FILTER_OMAC_TEN_ID_IMAC	0x000B
 #define I40E_AQC_ADD_CLOUD_FILTER_IIP			0x000C
+#define I40E_AQC_ADD_CLOUD_FILTER_OIP1			0x0010
+#define I40E_AQC_ADD_CLOUD_FILTER_OIP2			0x0012
 /* 0x000D reserved */
 /* 0x000E reserved */
 /* 0x000F reserved */
@@ -2412,6 +2417,16 @@ struct i40e_aqc_nvm_config_data_feature {
 };
 
 I40E_CHECK_STRUCT_LEN(0x6, i40e_aqc_nvm_config_data_feature);
+
+/* NVM Update in Process (direct 0x0706) */
+struct i40e_aqc_nvm_update_in_process {
+	u8	command;
+#define I40E_AQ_UPDATE_FLOW_END			0x0
+#define I40E_AQ_UPDATE_FLOW_START		0x1
+	u8	reserved[15];
+};
+
+I40E_CHECK_CMD_LENGTH(i40e_aqc_nvm_update_in_process);
 
 struct i40e_aqc_nvm_config_data_immediate_field {
 	__le32 field_id;

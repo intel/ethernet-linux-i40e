@@ -799,6 +799,9 @@ static void i40e_get_settings_link_up(struct i40e_hw *hw,
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
 			ethtool_link_ksettings_add_link_mode(ks, advertising,
 							     10000baseT_Full);
+#ifdef ETHTOOL_GFECPARAM
+		i40e_get_settings_link_up_fec(hw_link_info->req_fec_info, ks);
+#endif /* ETHTOOL_GFECPARAM */
 		break;
 	case I40E_PHY_TYPE_SGMII:
 		ethtool_link_ksettings_add_link_mode(ks, supported, Autoneg);
@@ -1663,9 +1666,21 @@ static int i40e_set_fec_param(struct net_device *netdev,
 	int err = 0;
 
 	if (hw->device_id != I40E_DEV_ID_25G_SFP28 &&
-	    hw->device_id != I40E_DEV_ID_25G_B) {
+	    hw->device_id != I40E_DEV_ID_25G_B &&
+	    hw->device_id != I40E_DEV_ID_KX_X722 &&
+	    hw->device_id != I40E_DEV_ID_QSFP_X722 &&
+	    hw->device_id != I40E_DEV_ID_SFP_X722 &&
+	    hw->device_id != I40E_DEV_ID_1G_BASE_T_X722 &&
+	    hw->device_id != I40E_DEV_ID_10G_BASE_T_X722 &&
+	    hw->device_id != I40E_DEV_ID_SFP_I_X722) {
 		err = -EPERM;
 		goto done;
+	}
+
+	if (hw->mac.type == I40E_MAC_X722 &&
+	    !(hw->flags & I40E_HW_FLAG_X722_FEC_REQUEST_CAPABLE)) {
+		netdev_err(netdev, "Setting FEC encoding not supported by firmware. Please update the NVM image.\n");
+		return -EINVAL;
 	}
 
 	switch (fecparam->fec) {
@@ -3617,8 +3632,44 @@ static int i40e_check_mask(u64 mask, u64 field)
 		return -1;
 }
 
+#define I40E_CUSTOM_CF_DDP_PACKAGE 0x8000000e
+
+/**
+ * i40e_check_custom_cf_package - Check presence of DDP package
+ * @pf: pointer to physical function struct
+ *
+ * Returns 0 on success, negative on failure
+ **/
+static int i40e_check_custom_cf_package(struct i40e_pf *pf)
+{
+	struct i40e_ddp_profile_list *profile_list = NULL;
+	struct i40e_profile_info *profile_info = NULL;
+	u8 buf[I40E_PROFILE_LIST_SIZE];
+	int i = 0, aq_ret;
+
+	aq_ret = i40e_aq_get_ddp_list(&pf->hw, buf, I40E_PROFILE_LIST_SIZE, 0,
+				      NULL);
+	if (aq_ret != I40E_SUCCESS) {
+		dev_info(&pf->pdev->dev,
+			 "Failed to query loaded DDP packages, err %s aq_err %s\n",
+			 i40e_stat_str(&pf->hw, aq_ret),
+			 i40e_aq_str(&pf->hw, pf->hw.aq.asq_last_status));
+		goto err;
+	}
+
+	profile_list = (struct i40e_ddp_profile_list *)buf;
+	for (i = 0; i < profile_list->p_count; i++) {
+		profile_info = &profile_list->p_info[i];
+		if (profile_info->track_id == I40E_CUSTOM_CF_DDP_PACKAGE)
+			return 0;
+	}
+err:
+	return -ENOENT;
+}
+
 /**
  * i40e_parse_rx_flow_user_data - Deconstruct user-defined data
+ * @pf: pointer to physical function struct
  * @fsp: pointer to rx flow specification
  * @data: pointer to userdef data structure for storage
  *
@@ -3636,7 +3687,8 @@ static int i40e_check_mask(u64 mask, u64 field)
  * modified even if FLOW_EXT is not set.
  *
  **/
-static int i40e_parse_rx_flow_user_data(struct ethtool_rx_flow_spec *fsp,
+static int i40e_parse_rx_flow_user_data(struct i40e_pf *pf,
+					struct ethtool_rx_flow_spec *fsp,
 					struct i40e_rx_flow_userdef *data)
 {
 	u64 value, mask;
@@ -3652,6 +3704,7 @@ static int i40e_parse_rx_flow_user_data(struct ethtool_rx_flow_spec *fsp,
 	mask = be64_to_cpu(*((__be64 *)fsp->m_ext.data));
 
 #define I40E_USERDEF_CLOUD_FILTER	BIT_ULL(63)
+#define I40E_USERDEF_CLOUD_OUTERIP	BIT_ULL(62)
 
 #define I40E_USERDEF_CLOUD_RESERVED	GENMASK_ULL(62, 32)
 #define I40E_USERDEF_TUNNEL_TYPE	GENMASK_ULL(31, 24)
@@ -3668,6 +3721,21 @@ static int i40e_parse_rx_flow_user_data(struct ethtool_rx_flow_spec *fsp,
 		data->cloud_filter = true;
 
 	if (data->cloud_filter) {
+		/* Reject OUTER IP cloud filters if bit 62 is set and
+		 * DDP package 0x80000000e is not loaded
+		 */
+		if ((mask & I40E_USERDEF_CLOUD_OUTERIP) &&
+		    (value & I40E_USERDEF_CLOUD_OUTERIP)) {
+			if (!i40e_check_custom_cf_package(pf)) {
+				data->outer_ip = true;
+				return 0;
+			} else {
+				dev_warn(&pf->pdev->dev,
+					 "Load the appropriate DDP package for Outer IP cloud filters\n");
+				return -ENOPKG;
+			}
+		}
+
 		/* Make sure that the reserved bits are not set */
 		valid = i40e_check_mask(mask, I40E_USERDEF_CLOUD_RESERVED);
 		if (valid < 0) {
@@ -3744,6 +3812,11 @@ static void i40e_fill_rx_flow_user_data(struct ethtool_rx_flow_spec *fsp,
 		if (data->tunnel_type_valid) {
 			value |= (u64)data->tunnel_type << 24;
 			mask |= I40E_USERDEF_TUNNEL_TYPE;
+		}
+
+		if (data->outer_ip) {
+			value |= I40E_USERDEF_CLOUD_OUTERIP;
+			mask |= I40E_USERDEF_CLOUD_OUTERIP;
 		}
 	} else {
 		if (data->flex_filter) {
@@ -3843,14 +3916,41 @@ static int i40e_get_ethtool_fdir_entry(struct i40e_pf *pf,
 		fsp->h_u.usr_ip4_spec.proto = 0;
 		fsp->m_u.usr_ip4_spec.proto = 0;
 	}
-
-	/* Reverse the src and dest notion, since the HW views them from
-	 * Tx perspective where as the user expects it from Rx filter view.
+#ifdef HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC
+	if (fsp->flow_type == IPV6_USER_FLOW ||
+	    fsp->flow_type == UDP_V6_FLOW ||
+	    fsp->flow_type == TCP_V6_FLOW ||
+	    fsp->flow_type == SCTP_V6_FLOW) {
+		/* Reverse the src and dest notion, since the HW views them
+		 * from Tx perspective where as the user expects it from
+		 * Rx filter view.
+		 */
+		fsp->h_u.tcp_ip6_spec.psrc = rule->dst_port;
+		fsp->h_u.tcp_ip6_spec.pdst = rule->src_port;
+		memcpy(fsp->h_u.tcp_ip6_spec.ip6dst, rule->src_ip6,
+		       sizeof(__be32) * 4);
+		memcpy(fsp->h_u.tcp_ip6_spec.ip6src, rule->dst_ip6,
+		       sizeof(__be32) * 4);
+	} else {
+		/* Reverse the src and dest notion, since the HW views them
+		 * from Tx perspective where as the user expects it from
+		 * Rx filter view.
+		 */
+		fsp->h_u.tcp_ip4_spec.psrc = rule->dst_port;
+		fsp->h_u.tcp_ip4_spec.pdst = rule->src_port;
+		fsp->h_u.tcp_ip4_spec.ip4src = rule->dst_ip;
+		fsp->h_u.tcp_ip4_spec.ip4dst = rule->src_ip;
+	}
+#else /* !HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC */
+	/* Reverse the src and dest notion, since the HW views them
+	 * from Tx perspective where as the user expects it from
+	 * Rx filter view.
 	 */
 	fsp->h_u.tcp_ip4_spec.psrc = rule->dst_port;
 	fsp->h_u.tcp_ip4_spec.pdst = rule->src_port;
 	fsp->h_u.tcp_ip4_spec.ip4src = rule->dst_ip;
 	fsp->h_u.tcp_ip4_spec.ip4dst = rule->src_ip;
+#endif /* HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC */
 
 	switch (rule->flow_type) {
 	case SCTP_V4_FLOW:
@@ -3862,9 +3962,24 @@ static int i40e_get_ethtool_fdir_entry(struct i40e_pf *pf,
 	case UDP_V4_FLOW:
 		index = I40E_FILTER_PCTYPE_NONF_IPV4_UDP;
 		break;
+	case SCTP_V6_FLOW:
+		index = I40E_FILTER_PCTYPE_NONF_IPV6_SCTP;
+		break;
+	case TCP_V6_FLOW:
+		index = I40E_FILTER_PCTYPE_NONF_IPV6_TCP;
+		break;
+	case UDP_V6_FLOW:
+		index = I40E_FILTER_PCTYPE_NONF_IPV6_UDP;
+		break;
+
 	case IP_USER_FLOW:
 		index = I40E_FILTER_PCTYPE_NONF_IPV4_OTHER;
 		break;
+#ifdef HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC
+	case IPV6_USER_FLOW:
+		index = I40E_FILTER_PCTYPE_NONF_IPV6_OTHER;
+		break;
+#endif /* HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC */
 	default:
 		/* If we have stored a filter with a flow type not listed here
 		 * it is almost certainly a driver bug. WARN(), and then
@@ -3880,6 +3995,21 @@ static int i40e_get_ethtool_fdir_entry(struct i40e_pf *pf,
 	input_set = i40e_read_fd_input_set(pf, index);
 
 no_input_set:
+#ifdef HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC
+	if (input_set & I40E_L3_V6_SRC_MASK) {
+		fsp->m_u.tcp_ip6_spec.ip6src[0] = htonl(0xFFFFFFFF);
+		fsp->m_u.tcp_ip6_spec.ip6src[1] = htonl(0xFFFFFFFF);
+		fsp->m_u.tcp_ip6_spec.ip6src[2] = htonl(0xFFFFFFFF);
+		fsp->m_u.tcp_ip6_spec.ip6src[3] = htonl(0xFFFFFFFF);
+	}
+
+	if (input_set & I40E_L3_V6_DST_MASK) {
+		fsp->m_u.tcp_ip6_spec.ip6dst[0] = htonl(0xFFFFFFFF);
+		fsp->m_u.tcp_ip6_spec.ip6dst[1] = htonl(0xFFFFFFFF);
+		fsp->m_u.tcp_ip6_spec.ip6dst[2] = htonl(0xFFFFFFFF);
+		fsp->m_u.tcp_ip6_spec.ip6dst[3] = htonl(0xFFFFFFFF);
+	}
+#endif /* HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC */
 	if (input_set & I40E_L3_SRC_MASK)
 		fsp->m_u.tcp_ip4_spec.ip4src = htonl(0xFFFFFFFF);
 
@@ -4008,6 +4138,14 @@ static int i40e_get_cloud_filter_entry(struct i40e_pf *pf,
 		fsp->h_u.usr_ip4_spec.ip_ver = ETH_RX_NFC_IP4;
 	} else {
 		fsp->flow_type = ETHER_FLOW;
+	}
+
+	if (filter->flags & I40E_CLOUD_FIELD_OIP1 ||
+	    filter->flags & I40E_CLOUD_FIELD_OIP2) {
+		fsp->flow_type = IP_USER_FLOW;
+		fsp->h_u.usr_ip4_spec.ip_ver = ETH_RX_NFC_IP4;
+		fsp->h_u.usr_ip4_spec.ip4dst = filter->dst_ipv4;
+		userdef.outer_ip = true;
 	}
 
 	i40e_fill_rx_flow_user_data(fsp, &userdef);
@@ -4230,6 +4368,28 @@ static int i40e_set_rss_hash_opt(struct i40e_pf *pf, struct ethtool_rxnfc *nfc)
 }
 
 /**
+ * i40e_get_cloud_ip_field - Identify the IP cloud filter flag
+ * @pf: pointer to the physical function struct
+ * @userdef: pointer to the userdef field data
+ *
+ * This function identifies which IP cloud filter to set when the
+ * flow type if IP.
+ *
+ * Returns a flag of type u8
+ **/
+static u8 i40e_get_cloud_ip_field(struct i40e_pf *pf,
+				  struct i40e_rx_flow_userdef *userdef)
+{
+	u8 flag;
+
+	if (userdef->outer_ip)
+		flag = I40E_CLOUD_FIELD_OIP1;
+	else
+		flag = I40E_CLOUD_FIELD_IIP;
+	return flag;
+}
+
+/**
  * i40e_cloud_filter_mask2flags- Convert cloud filter details to filter type
  * @pf: pointer to the physical function struct
  * @fsp: RX flow classification rules
@@ -4248,6 +4408,7 @@ static int i40e_cloud_filter_mask2flags(struct i40e_pf *pf,
 					u8 *flags)
 {
 	u8 i = 0;
+	int ret;
 
 	*flags = 0;
 
@@ -4281,9 +4442,10 @@ static int i40e_cloud_filter_mask2flags(struct i40e_pf *pf,
 			return I40E_ERR_CONFIG;
 		}
 		if (fsp->m_u.usr_ip4_spec.ip4dst == cpu_to_be32(0xffffffff)) {
-			i |= I40E_CLOUD_FIELD_IIP;
+			i |= i40e_get_cloud_ip_field(pf, userdef);
 		} else if (!fsp->m_u.usr_ip4_spec.ip4dst) {
-			i &= ~I40E_CLOUD_FIELD_IIP;
+			i &= ~(I40E_CLOUD_FIELD_IIP | I40E_CLOUD_FIELD_OIP1 |
+			       I40E_CLOUD_FIELD_OIP2);
 		} else {
 			dev_info(&pf->pdev->dev, "Bad ip dst mask 0x%08x\n",
 				 be32_to_cpu(fsp->m_u.usr_ip4_spec.ip4dst));
@@ -4334,7 +4496,12 @@ static int i40e_cloud_filter_mask2flags(struct i40e_pf *pf,
 	}
 
 	/* Make sure the flags produce a valid type */
-	if (i40e_get_cloud_filter_type(i, NULL)) {
+	if (userdef->outer_ip)
+		ret = i40e_get_custom_cloud_filter_type(i, NULL);
+	else
+		ret = i40e_get_cloud_filter_type(i, NULL);
+
+	if (ret) {
 		dev_info(&pf->pdev->dev, "Invalid mask config, flags = %d\n",
 			 i);
 		return I40E_ERR_CONFIG;
@@ -4348,6 +4515,80 @@ static int i40e_cloud_filter_mask2flags(struct i40e_pf *pf,
 static int i40e_del_fdir_entry(struct i40e_vsi *vsi,
 			       struct ethtool_rxnfc *cmd);
 
+/**
+ * i40e_add_del_custom_cloud_filter - Add custom cloud filter
+ * @vsi: pointer to the VSI structure
+ * @filter: cloud filter rule
+ * @add: if true, add, if false, delete
+ *
+ * Returns 0 on success, negative on failure
+ **/
+int i40e_add_del_custom_cloud_filter(struct i40e_vsi *vsi,
+				     struct i40e_cloud_filter *filter,
+				     bool add)
+{
+	struct i40e_aqc_cloud_filters_element_bb cld_filter;
+	struct i40e_pf *pf = vsi->back;
+	u32 ip_addr;
+	int ret = 0;
+	static const u16 flag_table[128] = {
+		[I40E_CLOUD_FILTER_FLAGS_OIP1] =
+			I40E_AQC_ADD_CLOUD_FILTER_OIP1,
+		[I40E_CLOUD_FILTER_FLAGS_OIP2] =
+			I40E_AQC_ADD_CLOUD_FILTER_OIP2,
+	};
+
+	if (filter->flags >= ARRAY_SIZE(flag_table))
+		return I40E_ERR_CONFIG;
+
+	memset(&cld_filter, 0, sizeof(cld_filter));
+
+	cld_filter.element.flags |= cpu_to_le16(flag_table[filter->flags] |
+				I40E_AQC_ADD_CLOUD_FLAGS_IPV4);
+	ip_addr = be32_to_cpu(filter->dst_ipv4);
+
+	if (filter->flags == I40E_CLOUD_FILTER_FLAGS_OIP1) {
+		/* Copy the ip addr to bytes 64-67, 0 to 68-69 */
+		memcpy(&cld_filter.general_fields
+				[I40E_AQC_ADD_CLOUD_FV_FLU_0X10_WORD0],
+		       &ip_addr, sizeof(ip_addr));
+	} else if (filter->flags == I40E_CLOUD_FILTER_FLAGS_OIP2) {
+		/* Copy the ip addr to bytes 76-79, 0 to 80-81 */
+		memcpy(&cld_filter.general_fields
+				[I40E_AQC_ADD_CLOUD_FV_FLU_0X12_WORD0],
+		       &ip_addr, sizeof(ip_addr));
+	}
+
+	if (add)
+		ret = i40e_aq_add_cloud_filters_bb(&pf->hw, filter->seid,
+						   &cld_filter, 1);
+	else
+		ret = i40e_aq_rem_cloud_filters_bb(&pf->hw, filter->seid,
+						   &cld_filter, 1);
+	if (ret) {
+		dev_info(&pf->pdev->dev,
+			 "Failed to %s cloud filters(big buffer) err %d aq_err %d\n",
+			 add ? "add" : "delete", ret,
+			 pf->hw.aq.asq_last_status);
+	} else {
+		/* Filter add/remove successful */
+		dev_dbg(&pf->pdev->dev,
+			"%s cloud filter for VSI: %d, dst IP: %pI4\n",
+			add ? "add" : "delete",
+			vsi->seid, &filter->dst_ipv4);
+		if (filter->flags == I40E_CLOUD_FILTER_FLAGS_OIP1)
+			pf->outerip_filters[0] =
+			add ? (pf->outerip_filters[0] + 1) :
+			(pf->outerip_filters[0] - 1);
+		else if (filter->flags == I40E_CLOUD_FILTER_FLAGS_OIP2)
+			pf->outerip_filters[1] =
+			add ? (pf->outerip_filters[1] + 1) :
+			(pf->outerip_filters[1] - 1);
+	}
+	return ret;
+}
+
+#define I40E_CLOUD_FILTER_ANY_QUEUE 0xFFFF
 /**
  * i40e_add_cloud_filter_ethtool - Add cloud filter
  * @vsi: pointer to the VSI structure
@@ -4403,9 +4644,19 @@ static int i40e_add_cloud_filter_ethtool(struct i40e_vsi *vsi,
 
 		if (vf >= pf->num_alloc_vfs)
 			return -EINVAL;
-		if (!i40e_is_l4mode_enabled() &&
-		    ring >= pf->vf[vf].num_queue_pairs)
+
+		if (ring >= pf->vf[vf].num_queue_pairs &&
+		    ring != I40E_CLOUD_FILTER_ANY_QUEUE)
 			return -EINVAL;
+
+		/* l4mode disallows any filter, do not apply this check if
+		 * custom ddp package was applied.
+		 */
+		if (!i40e_is_l4mode_enabled() &&
+		    ring >= pf->vf[vf].num_queue_pairs &&
+		    !userdef->outer_ip)
+			return -EINVAL;
+
 		dest_seid = pf->vsi[pf->vf[vf].lan_vsi_idx]->seid;
 	}
 	q_index = ring;
@@ -4422,6 +4673,15 @@ static int i40e_add_cloud_filter_ethtool(struct i40e_vsi *vsi,
 		if (rule->id == fsp->location)
 			filter = rule;
 
+		/* Abort now if we're trying to add an outer IP filter and it
+		 * already exists in the device. We must detect this condition
+		 * here since we can't rely on the firmware return code to tell
+		 * us this later.
+		 */
+		if (userdef->outer_ip && fsp->h_u.usr_ip4_spec.ip4dst ==
+		    rule->dst_ipv4)
+			return -EEXIST;
+
 		/* bail out if we've passed the likely location in the list */
 		if (rule->id >= fsp->location)
 			break;
@@ -4429,9 +4689,23 @@ static int i40e_add_cloud_filter_ethtool(struct i40e_vsi *vsi,
 		/* track where we left off */
 		parent = rule;
 	}
+
+	/* Continue searching for duplicates if we're dealing with outer IP
+	 * filters and haven't reached the end of the list yet.
+	 */
+	if (rule && userdef->outer_ip)
+		hlist_for_each_entry_continue(rule, cloud_node)
+			if (fsp->h_u.usr_ip4_spec.ip4dst == rule->dst_ipv4)
+				return -EEXIST;
+
 	if (filter && (filter->id == fsp->location)) {
 		/* found it in the cloud list, so remove it */
-		ret = i40e_add_del_cloud_filter_ex(pf, filter, false);
+		if (filter->flags & I40E_CLOUD_FIELD_OIP1 ||
+		    filter->flags & I40E_CLOUD_FIELD_OIP2)
+			ret = i40e_add_del_custom_cloud_filter(vsi, filter,
+							       false);
+		else
+			ret = i40e_add_del_cloud_filter_ex(pf, filter, false);
 		if (ret && pf->hw.aq.asq_last_status != I40E_AQ_RC_ENOENT)
 			return ret;
 		hlist_del(&filter->cloud_node);
@@ -4460,7 +4734,12 @@ static int i40e_add_cloud_filter_ethtool(struct i40e_vsi *vsi,
 			kfree(filter);
 			return I40E_ERR_CONFIG;
 		}
-		filter->inner_ip[0] = fsp->h_u.usr_ip4_spec.ip4dst;
+		if (userdef->outer_ip) {
+			filter->dst_ipv4 = fsp->h_u.usr_ip4_spec.ip4dst;
+			filter->n_proto = ETH_P_IP;
+		} else {
+			filter->inner_ip[0] = fsp->h_u.usr_ip4_spec.ip4dst;
+		}
 		break;
 
 	case UDP_V4_FLOW:
@@ -4489,7 +4768,23 @@ static int i40e_add_cloud_filter_ethtool(struct i40e_vsi *vsi,
 	filter->flags = flags;
 	filter->inner_vlan = fsp->h_ext.vlan_tci;
 
-	ret = i40e_add_del_cloud_filter_ex(pf, filter, true);
+	if (userdef->outer_ip) {
+		/* Assign the filter to a specific table and program it */
+		if (pf->outerip_filters[0] < 512) {
+			filter->flags = I40E_CLOUD_FIELD_OIP1;
+		} else if (pf->outerip_filters[1] < 1024) {
+			filter->flags = I40E_CLOUD_FIELD_OIP2;
+		} else {
+			dev_info(&pf->pdev->dev, "Too many Outer IP filters in device\n");
+			kfree(filter);
+			return -ENOSPC;
+		}
+
+		ret = i40e_add_del_custom_cloud_filter(vsi, filter, true);
+	} else {
+		ret = i40e_add_del_cloud_filter_ex(pf, filter, true);
+	}
+
 	if (ret) {
 		kfree(filter);
 		return ret;
@@ -4520,6 +4815,7 @@ static int i40e_del_cloud_filter_ethtool(struct i40e_pf *pf,
 	struct i40e_cloud_filter *rule, *filter = NULL;
 	struct ethtool_rx_flow_spec *fsp;
 	struct hlist_node *node2;
+	struct i40e_vsi *vsi = pf->vsi[pf->lan_vsi];
 
 	fsp = (struct ethtool_rx_flow_spec *)&cmd->fs;
 	hlist_for_each_entry_safe(rule, node2,
@@ -4536,7 +4832,11 @@ static int i40e_del_cloud_filter_ethtool(struct i40e_pf *pf,
 		return -ENOENT;
 
 	/* remove filter from the list even if failed to remove from device */
-	(void)i40e_add_del_cloud_filter_ex(pf, filter, false);
+	if (filter->flags & I40E_CLOUD_FIELD_OIP1 ||
+	    filter->flags & I40E_CLOUD_FIELD_OIP2)
+		(void)i40e_add_del_custom_cloud_filter(vsi, filter, false);
+	else
+		(void)i40e_add_del_cloud_filter_ex(pf, filter, false);
 	hlist_del(&filter->cloud_node);
 	kfree(filter);
 	pf->num_cloud_filters--;
@@ -4961,6 +5261,16 @@ static const char *i40e_flow_str(struct ethtool_rx_flow_spec *fsp)
 		return "sctp4";
 	case IP_USER_FLOW:
 		return "ip4";
+	case TCP_V6_FLOW:
+		return "tcp6";
+	case UDP_V6_FLOW:
+		return "udp6";
+	case SCTP_V6_FLOW:
+		return "sctp6";
+#ifdef HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC
+	case IPV6_USER_FLOW:
+		return "ip6";
+#endif /* HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC */
 	default:
 		return "unknown";
 	}
@@ -5096,9 +5406,15 @@ static int i40e_check_fdir_input_set(struct i40e_vsi *vsi,
 				     struct ethtool_rx_flow_spec *fsp,
 				     struct i40e_rx_flow_userdef *userdef)
 {
-	struct i40e_pf *pf = vsi->back;
+#ifdef HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC
+	static const __be32 ipv6_full_mask[4] = {0xffffffff, 0xffffffff,
+		0xffffffff, 0xffffffff};
+	struct ethtool_tcpip6_spec *tcp_ip6_spec;
+	struct ethtool_usrip6_spec *usr_ip6_spec;
+#endif /* HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC */
 	struct ethtool_tcpip4_spec *tcp_ip4_spec;
 	struct ethtool_usrip4_spec *usr_ip4_spec;
+	struct i40e_pf *pf = vsi->back;
 	u64 current_mask, new_mask;
 	bool new_flex_offset = false;
 	bool flex_l3 = false;
@@ -5120,11 +5436,30 @@ static int i40e_check_fdir_input_set(struct i40e_vsi *vsi,
 		index = I40E_FILTER_PCTYPE_NONF_IPV4_UDP;
 		fdir_filter_count = &pf->fd_udp4_filter_cnt;
 		break;
+	case SCTP_V6_FLOW:
+		index = I40E_FILTER_PCTYPE_NONF_IPV6_SCTP;
+		fdir_filter_count = &pf->fd_sctp6_filter_cnt;
+		break;
+	case TCP_V6_FLOW:
+		index = I40E_FILTER_PCTYPE_NONF_IPV6_TCP;
+		fdir_filter_count = &pf->fd_tcp6_filter_cnt;
+		break;
+	case UDP_V6_FLOW:
+		index = I40E_FILTER_PCTYPE_NONF_IPV6_UDP;
+		fdir_filter_count = &pf->fd_udp6_filter_cnt;
+		break;
 	case IP_USER_FLOW:
 		index = I40E_FILTER_PCTYPE_NONF_IPV4_OTHER;
 		fdir_filter_count = &pf->fd_ip4_filter_cnt;
 		flex_l3 = true;
 		break;
+#ifdef HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC
+	case IPV6_USER_FLOW:
+		index = I40E_FILTER_PCTYPE_NONF_IPV6_OTHER;
+		fdir_filter_count = &pf->fd_ip6_filter_cnt;
+		flex_l3 = true;
+		break;
+#endif /* HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC */
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -5187,6 +5522,57 @@ static int i40e_check_fdir_input_set(struct i40e_vsi *vsi,
 			return -EOPNOTSUPP;
 
 		break;
+	case SCTP_V6_FLOW:
+		new_mask &= ~I40E_VERIFY_TAG_MASK;
+		/* Fall through */
+	case TCP_V6_FLOW:
+	case UDP_V6_FLOW:
+#ifdef HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC
+		tcp_ip6_spec = &fsp->m_u.tcp_ip6_spec;
+
+		/* Check if user provided IPv6 source address. */
+		if (ipv6_addr_equal((struct in6_addr *)&tcp_ip6_spec->ip6src,
+				    (struct in6_addr *)&ipv6_full_mask))
+			new_mask |= I40E_L3_V6_SRC_MASK;
+		else if (ipv6_addr_any((struct in6_addr *)
+				       &tcp_ip6_spec->ip6src))
+			new_mask &= ~I40E_L3_V6_SRC_MASK;
+		else
+			return -EOPNOTSUPP;
+
+		/* Check if user provided destination address. */
+		if (ipv6_addr_equal((struct in6_addr *)&tcp_ip6_spec->ip6dst,
+				    (struct in6_addr *)&ipv6_full_mask))
+			new_mask |= I40E_L3_V6_DST_MASK;
+		else if (ipv6_addr_any((struct in6_addr *)
+				       &tcp_ip6_spec->ip6src))
+			new_mask &= ~I40E_L3_V6_DST_MASK;
+		else
+			return -EOPNOTSUPP;
+
+		/* L4 source port */
+		if (tcp_ip6_spec->psrc == htons(0xFFFF))
+			new_mask |= I40E_L4_SRC_MASK;
+		else if (!tcp_ip6_spec->psrc)
+			new_mask &= ~I40E_L4_SRC_MASK;
+		else
+			return -EOPNOTSUPP;
+
+		/* L4 destination port */
+		if (tcp_ip6_spec->pdst == htons(0xFFFF))
+			new_mask |= I40E_L4_DST_MASK;
+		else if (!tcp_ip6_spec->pdst)
+			new_mask &= ~I40E_L4_DST_MASK;
+		else
+			return -EOPNOTSUPP;
+
+		/* Filtering on Traffic Classes is not supported. */
+		if (tcp_ip6_spec->tclass)
+			return -EOPNOTSUPP;
+#else /* !HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC */
+		return -EOPNOTSUPP;
+#endif /* HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC */
+		break;
 	case IP_USER_FLOW:
 		usr_ip4_spec = &fsp->m_u.usr_ip4_spec;
 
@@ -5227,6 +5613,47 @@ static int i40e_check_fdir_input_set(struct i40e_vsi *vsi,
 			return -EINVAL;
 
 		break;
+#ifdef HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC
+	case IPV6_USER_FLOW:
+		usr_ip6_spec = &fsp->m_u.usr_ip6_spec;
+
+		/* Check if user provided IPv6 source address. */
+		if (ipv6_addr_equal((struct in6_addr *)&usr_ip6_spec->ip6src,
+				    (struct in6_addr *)&ipv6_full_mask))
+			new_mask |= I40E_L3_V6_SRC_MASK;
+		else if (ipv6_addr_any((struct in6_addr *)
+				       &usr_ip6_spec->ip6src))
+			new_mask &= ~I40E_L3_V6_SRC_MASK;
+		else
+			return -EOPNOTSUPP;
+
+		/* Check if user provided destination address. */
+		if (ipv6_addr_equal((struct in6_addr *)&usr_ip6_spec->ip6dst,
+				    (struct in6_addr *)&ipv6_full_mask))
+			new_mask |= I40E_L3_V6_DST_MASK;
+		else if (ipv6_addr_any((struct in6_addr *)
+				       &usr_ip6_spec->ip6src))
+			new_mask &= ~I40E_L3_V6_DST_MASK;
+		else
+			return -EOPNOTSUPP;
+
+		if (usr_ip6_spec->l4_4_bytes == htonl(0xFFFFFFFF))
+			new_mask |= I40E_L4_SRC_MASK | I40E_L4_DST_MASK;
+		else if (!usr_ip6_spec->l4_4_bytes)
+			new_mask &= ~(I40E_L4_SRC_MASK | I40E_L4_DST_MASK);
+		else
+			return -EOPNOTSUPP;
+
+		/* Filtering on Traffic class is not supported. */
+		if (usr_ip6_spec->tclass)
+			return -EOPNOTSUPP;
+
+		/* Filtering on L4 protocol is not supported */
+		if (usr_ip6_spec->l4_proto)
+			return -EINVAL;
+
+		break;
+#endif /* HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC */
 	default:
 		return -EOPNOTSUPP;
 	}
@@ -5410,7 +5837,7 @@ static bool i40e_match_fdir_filter(struct i40e_fdir_filter *a,
 	    a->dst_port != b->dst_port ||
 	    a->src_port != b->src_port ||
 	    a->flow_type != b->flow_type ||
-	    a->ip4_proto != b->ip4_proto)
+	    a->ipl4_proto != b->ipl4_proto)
 		return false;
 
 	return true;
@@ -5511,7 +5938,7 @@ static int i40e_add_fdir_ethtool(struct i40e_vsi *vsi,
 	fsp = (struct ethtool_rx_flow_spec *)&cmd->fs;
 
 	/* Parse the user-defined field */
-	if (i40e_parse_rx_flow_user_data(fsp, &userdef))
+	if (i40e_parse_rx_flow_user_data(pf, fsp, &userdef))
 		return -EINVAL;
 
 	if (userdef.cloud_filter)
@@ -5568,15 +5995,41 @@ static int i40e_add_fdir_ethtool(struct i40e_vsi *vsi,
 	input->fd_status = I40E_FILTER_PROGRAM_DESC_FD_STATUS_FD_ID;
 	input->cnt_index  = I40E_FD_SB_STAT_IDX(pf->hw.pf_id);
 	input->flow_type = fsp->flow_type & ~FLOW_EXT;
-	input->ip4_proto = fsp->h_u.usr_ip4_spec.proto;
 
-	/* Reverse the src and dest notion, since the HW expects them to be from
-	 * Tx perspective where as the input from user is from Rx filter view.
-	 */
+#ifdef HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC
+	if (input->flow_type == IPV6_USER_FLOW ||
+	    input->flow_type == UDP_V6_FLOW ||
+	    input->flow_type == TCP_V6_FLOW ||
+	    input->flow_type == SCTP_V6_FLOW) {
+		/* Reverse the src and dest notion, since the HW expects them
+		 * to be from Tx perspective where as the input from user is
+		 * from Rx filter view.
+		 */
+		input->ipl4_proto = fsp->h_u.usr_ip6_spec.l4_proto;
+		input->dst_port = fsp->h_u.tcp_ip6_spec.psrc;
+		input->src_port = fsp->h_u.tcp_ip6_spec.pdst;
+		memcpy(input->dst_ip6, fsp->h_u.ah_ip6_spec.ip6src,
+		       sizeof(__be32) * 4);
+		memcpy(input->src_ip6, fsp->h_u.ah_ip6_spec.ip6dst,
+		       sizeof(__be32) * 4);
+	} else {
+		/* Reverse the src and dest notion, since the HW expects them
+		 * to be from Tx perspective where as the input from user is
+		 * from Rx filter view.
+		 */
+		input->ipl4_proto = fsp->h_u.usr_ip4_spec.proto;
+		input->dst_port = fsp->h_u.tcp_ip4_spec.psrc;
+		input->src_port = fsp->h_u.tcp_ip4_spec.pdst;
+		input->dst_ip = fsp->h_u.tcp_ip4_spec.ip4src;
+		input->src_ip = fsp->h_u.tcp_ip4_spec.ip4dst;
+	}
+#else /* !HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC */
+	input->ipl4_proto = fsp->h_u.usr_ip4_spec.proto;
 	input->dst_port = fsp->h_u.tcp_ip4_spec.psrc;
 	input->src_port = fsp->h_u.tcp_ip4_spec.pdst;
 	input->dst_ip = fsp->h_u.tcp_ip4_spec.ip4src;
 	input->src_ip = fsp->h_u.tcp_ip4_spec.ip4dst;
+#endif /* HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC */
 
 	if (userdef.flex_filter) {
 		input->flex_filter = true;
@@ -6033,8 +6486,7 @@ flags_complete:
 		}
 	}
 
-	if (((changed_flags & I40E_FLAG_RS_FEC) ||
-	     (changed_flags & I40E_FLAG_BASE_R_FEC)) &&
+	if (changed_flags & I40E_FLAG_RS_FEC &&
 	    pf->hw.device_id != I40E_DEV_ID_25G_SFP28 &&
 	    pf->hw.device_id != I40E_DEV_ID_25G_B) {
 		dev_warn(&pf->pdev->dev,
@@ -6042,6 +6494,19 @@ flags_complete:
 		return -EOPNOTSUPP;
 	}
 
+	if (changed_flags & I40E_FLAG_BASE_R_FEC &&
+	    pf->hw.device_id != I40E_DEV_ID_25G_SFP28 &&
+	    pf->hw.device_id != I40E_DEV_ID_25G_B &&
+	    pf->hw.device_id != I40E_DEV_ID_KX_X722 &&
+	    pf->hw.device_id != I40E_DEV_ID_QSFP_X722 &&
+	    pf->hw.device_id != I40E_DEV_ID_SFP_X722 &&
+	    pf->hw.device_id != I40E_DEV_ID_1G_BASE_T_X722 &&
+	    pf->hw.device_id != I40E_DEV_ID_10G_BASE_T_X722 &&
+	    pf->hw.device_id != I40E_DEV_ID_SFP_I_X722) {
+		dev_warn(&pf->pdev->dev,
+			 "Device does not support changing FEC configuration\n");
+		return -EOPNOTSUPP;
+	}
 	/* Process any additional changes needed as a result of flag changes.
 	 * The changed_flags value reflects the list of bits that were
 	 * changed in the code above.
@@ -6262,7 +6727,7 @@ static int i40e_get_module_info(struct net_device *netdev,
 		modinfo->eeprom_len = I40E_MODULE_QSFP_MAX_LEN;
 		break;
 	default:
-		netdev_err(vsi->netdev, "Module type unrecognized\n");
+		netdev_err(vsi->netdev, "SFP module type unrecognized or no SFP connector.\n");
 		return -EINVAL;
 	}
 	return 0;
@@ -6531,6 +6996,13 @@ static const struct ethtool_ops i40e_ethtool_ops = {
 	.get_ethtool_stats	= i40e_get_ethtool_stats,
 #ifdef HAVE_ETHTOOL_GET_PERM_ADDR
 	.get_perm_addr		= ethtool_op_get_perm_addr,
+#endif
+#ifdef HAVE_ETHTOOL_COALESCE_PARAMS_SUPPORT
+	.supported_coalesce_params = ETHTOOL_COALESCE_USECS |
+				     ETHTOOL_COALESCE_MAX_FRAMES_IRQ |
+				     ETHTOOL_COALESCE_USE_ADAPTIVE |
+				     ETHTOOL_COALESCE_RX_USECS_HIGH |
+				     ETHTOOL_COALESCE_TX_USECS_HIGH,
 #endif
 	.get_coalesce		= i40e_get_coalesce,
 	.set_coalesce		= i40e_set_coalesce,

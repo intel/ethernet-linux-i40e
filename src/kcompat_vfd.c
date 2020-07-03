@@ -567,150 +567,6 @@ static ssize_t vfd_ingress_mirror_store(struct kobject *kobj,
 }
 
 /**
- * vfd_mac_anti_spoof_show - handler for mac_anti_spoof show function
- * @kobj:	kobject being called
- * @attr:	struct kobj_attribute
- * @buff:	buffer for data
- **/
-static ssize_t vfd_mac_anti_spoof_show(struct kobject *kobj,
-				       struct kobj_attribute *attr,
-				       char *buff)
-{
-	struct pci_dev *pdev;
-	int vf_id, ret = 0;
-	bool data;
-
-	if (!vfd_ops->get_mac_anti_spoof)
-		return -EOPNOTSUPP;
-
-	ret = __get_pdev_and_vfid(kobj, &pdev, &vf_id);
-	if (ret)
-		return ret;
-
-	ret = vfd_ops->get_mac_anti_spoof(pdev, vf_id, &data);
-	if (ret < 0)
-		return ret;
-
-	if (data)
-		ret = scnprintf(buff, PAGE_SIZE, "on\n");
-	else
-		ret = scnprintf(buff, PAGE_SIZE, "off\n");
-
-	return ret;
-}
-
-/**
- * vfd_mac_anti_spoof_store - handler for mac_anti_spoof store function
- * @kobj:	kobject being called
- * @attr:	struct kobj_attribute
- * @buff:	buffer with input data
- * @count:	size of buff
- *
- * On success return count, indicating that we used the whole buffer. On
- * failure return a negative error condition.
- **/
-static ssize_t vfd_mac_anti_spoof_store(struct kobject *kobj,
-					struct kobj_attribute *attr,
-					const char *buff, size_t count)
-{
-	struct pci_dev *pdev;
-	int vf_id, ret = 0;
-	bool data_new, data_old;
-
-	if (!vfd_ops->set_mac_anti_spoof || !vfd_ops->get_mac_anti_spoof)
-		return -EOPNOTSUPP;
-
-	ret = __get_pdev_and_vfid(kobj, &pdev, &vf_id);
-	if (ret)
-		return ret;
-
-	ret = vfd_ops->get_mac_anti_spoof(pdev, vf_id, &data_old);
-	if (ret < 0)
-		return ret;
-
-	ret = __parse_bool_data(pdev, buff, "mac_anti_spoof", &data_new);
-	if (ret)
-		return ret;
-
-	if (data_new != data_old)
-		ret = vfd_ops->set_mac_anti_spoof(pdev, vf_id, data_new);
-
-	return ret ? ret : count;
-}
-
-/**
- * vfd_vlan_anti_spoof_show - handler for vlan_anti_spoof show function
- * @kobj:	kobject being called
- * @attr:	struct kobj_attribute
- * @buff:	buffer for data
- **/
-static ssize_t vfd_vlan_anti_spoof_show(struct kobject *kobj,
-					struct kobj_attribute *attr,
-					char *buff)
-{
-	struct pci_dev *pdev;
-	int vf_id, ret = 0;
-	bool data;
-
-	if (!vfd_ops->get_vlan_anti_spoof)
-		return -EOPNOTSUPP;
-
-	ret = __get_pdev_and_vfid(kobj, &pdev, &vf_id);
-	if (ret)
-		return ret;
-
-	ret = vfd_ops->get_vlan_anti_spoof(pdev, vf_id, &data);
-	if (ret < 0)
-		return ret;
-
-	if (data)
-		ret = scnprintf(buff, PAGE_SIZE, "on\n");
-	else
-		ret = scnprintf(buff, PAGE_SIZE, "off\n");
-
-	return ret;
-}
-
-/**
- * vfd_vlan_anti_spoof_store - handler for vlan_anti_spoof store function
- * @kobj:	kobject being called
- * @attr:	struct kobj_attribute
- * @buff:	buffer with input data
- * @count:	size of buff
- *
- * On success return count, indicating that we used the whole buffer. On
- * failure return a negative error condition.
- **/
-static ssize_t vfd_vlan_anti_spoof_store(struct kobject *kobj,
-					 struct kobj_attribute *attr,
-					 const char *buff, size_t count)
-{
-	struct pci_dev *pdev;
-	int vf_id, ret = 0;
-	bool data_new, data_old;
-
-	if (!vfd_ops->set_vlan_anti_spoof || !vfd_ops->get_vlan_anti_spoof)
-		return -EOPNOTSUPP;
-
-	ret = __get_pdev_and_vfid(kobj, &pdev, &vf_id);
-	if (ret)
-		return ret;
-
-	ret = vfd_ops->get_vlan_anti_spoof(pdev, vf_id, &data_old);
-	if (ret < 0)
-		return ret;
-
-	ret = __parse_bool_data(pdev, buff, "vlan_anti_spoof", &data_new);
-	if (ret)
-		return ret;
-
-	if (data_new != data_old)
-		ret = vfd_ops->set_vlan_anti_spoof(pdev, vf_id, data_new);
-
-	return ret ? ret : count;
-}
-
-/**
  * vfd_allow_untagged_show - handler for allow_untagged show function
  * @kobj:	kobject being called
  * @attr:	struct kobj_attribute
@@ -1521,38 +1377,6 @@ static ssize_t vfd_min_tx_rate_store(struct kobject *kobj,
 }
 
 /**
- * vfd_spoofcheck_show - handler for spoofcheck show function
- * @kobj:	kobject being called
- * @attr:	struct kobj_attribute
- * @buff:	buffer for data
- **/
-static ssize_t vfd_spoofcheck_show(struct kobject *kobj,
-				   struct kobj_attribute *attr, char *buff)
-{
-	if (!vfd_ops->get_spoofcheck)
-		return -EOPNOTSUPP;
-
-	return vfd_ops->get_spoofcheck(kobj, attr, buff);
-}
-
-/**
- * vfd_spoofcheck_store - handler for spoofcheck store function
- * @kobj:	kobject being called
- * @attr:	struct kobj_attribute
- * @buff:	buffer with input data
- * @count:	size of buff
- **/
-static ssize_t vfd_spoofcheck_store(struct kobject *kobj,
-				    struct kobj_attribute *attr,
-				    const char *buff, size_t count)
-{
-	if (!vfd_ops->set_spoofcheck)
-		return -EOPNOTSUPP;
-
-	return vfd_ops->set_spoofcheck(kobj, attr, buff, count);
-}
-
-/**
  * vfd_trust_show - handler for trust show function
  * @kobj:	kobject being called
  * @attr:	struct kobj_attribute
@@ -1573,7 +1397,7 @@ static ssize_t vfd_trust_show(struct kobject *kobj,
 		return ret;
 
 	ret = vfd_ops->get_trust_state(pdev, vf_id, &data);
-	if (ret < 0)
+	if (ret)
 		return ret;
 
 	if (data)
@@ -1607,7 +1431,7 @@ static ssize_t vfd_trust_store(struct kobject *kobj,
 		return ret;
 
 	ret = vfd_ops->get_trust_state(pdev, vf_id, &data_old);
-	if (ret < 0)
+	if (ret)
 		return ret;
 
 	ret = __parse_bool_data(pdev, buff, "trust", &data_new);
@@ -1893,7 +1717,7 @@ static ssize_t vfd_tx_errors_show(struct kobject *kobj,
  * @buff:	buffer for data
  **/
 static ssize_t qos_share_show(struct kobject *kobj,
-			  struct kobj_attribute *attr, char *buff)
+			      struct kobj_attribute *attr, char *buff)
 {
 	struct pci_dev *pdev;
 	int vf_id, ret;
@@ -2030,8 +1854,8 @@ static ssize_t pf_ingress_mirror_show(struct kobject *kobj,
  * @count:	size of buff
  **/
 static ssize_t pf_ingress_mirror_store(struct kobject *kobj,
-				      struct kobj_attribute *attr,
-				      const char *buff, size_t count)
+				       struct kobj_attribute *attr,
+				       const char *buff, size_t count)
 {
 	int data_new, data_old;
 	struct pci_dev *pdev;
@@ -2261,6 +2085,122 @@ static ssize_t vfd_num_queues_store(struct kobject *kobj,
 	return ret ? ret : count;
 }
 
+/**
+ * vfd_queue_type_show - handler for queue_type show function
+ * @kobj:	kobject being called
+ * @attr:	struct kobj_attribute
+ * @buff:	buffer for data
+ **/
+static ssize_t vfd_queue_type_show(struct kobject *kobj,
+				   struct kobj_attribute *attr, char *buff)
+{
+	struct pci_dev *pdev;
+	int vf_id, ret = 0;
+	u8 data;
+
+	if (!vfd_ops->get_queue_type)
+		return -EOPNOTSUPP;
+
+	ret = __get_pdev_and_vfid(kobj, &pdev, &vf_id);
+	if (ret)
+		return ret;
+
+	ret = vfd_ops->get_queue_type(pdev, vf_id, &data);
+	if (ret)
+		return ret;
+
+	ret = scnprintf(buff, PAGE_SIZE, "%d\n", data);
+
+	return ret;
+}
+
+/**
+ * vfd_queue_type_store - handler for queue_type store function
+ * @kobj:	kobject being called
+ * @attr:	struct kobj_attribute
+ * @buff:	buffer with input data
+ * @count:	size of buff
+ **/
+static ssize_t vfd_queue_type_store(struct kobject *kobj,
+				    struct kobj_attribute *attr,
+				    const char *buff, size_t count)
+{
+	// the setting will be updated via different sysfs
+	return -EOPNOTSUPP;
+}
+
+/**
+ * vfd_allow_bcast_show - handler for VF allow broadcast show function
+ * @kobj:	kobject being called
+ * @attr:	struct kobj_attribute
+ * @buff:	buffer for data
+ **/
+static ssize_t vfd_allow_bcast_show(struct kobject *kobj,
+				    struct kobj_attribute *attr,
+				    char *buff)
+{
+	struct pci_dev *pdev;
+	int vf_id, ret;
+	bool data;
+
+	if (!vfd_ops->get_allow_bcast)
+		return -EOPNOTSUPP;
+
+	ret = __get_pdev_and_vfid(kobj, &pdev, &vf_id);
+	if (ret)
+		return ret;
+
+	ret = vfd_ops->get_allow_bcast(pdev, vf_id, &data);
+	if (ret < 0)
+		return ret;
+
+	if (data)
+		ret = scnprintf(buff, PAGE_SIZE, "on\n");
+	else
+		ret = scnprintf(buff, PAGE_SIZE, "off\n");
+
+	return ret;
+}
+
+/**
+ * vfd_allow_bcast_store - handler for VF allow broadcast store function
+ * @kobj:	kobject being called
+ * @attr:	struct kobj_attribute
+ * @buff:	buffer with input data
+ * @count:	size of buff
+ *
+ * On success return count, indicating that we used the whole buffer. On
+ * failure return a negative error condition.
+ **/
+static ssize_t vfd_allow_bcast_store(struct kobject *kobj,
+				     struct kobj_attribute *attr,
+				     const char *buff, size_t count)
+{
+	bool data_new, data_old;
+	struct pci_dev *pdev;
+	int vf_id, ret;
+
+	if (!vfd_ops->set_allow_bcast || !vfd_ops->get_allow_bcast)
+		return -EOPNOTSUPP;
+
+	ret = __get_pdev_and_vfid(kobj, &pdev, &vf_id);
+	if (ret)
+		return ret;
+
+	ret = vfd_ops->get_allow_bcast(pdev, vf_id, &data_old);
+	if (ret < 0)
+		return ret;
+
+	ret = __parse_bool_data(pdev, buff, "allow_bcast", &data_new);
+	if (ret)
+		return ret;
+
+	if (data_new != data_old)
+		ret = vfd_ops->set_allow_bcast(pdev, vf_id, data_new);
+
+	return ret ? ret : count;
+}
+
 static struct kobj_attribute trunk_attribute =
 	__ATTR(trunk, 0644, vfd_trunk_show, vfd_trunk_store);
 static struct kobj_attribute vlan_mirror_attribute =
@@ -2271,12 +2211,6 @@ static struct kobj_attribute egress_mirror_attribute =
 static struct kobj_attribute ingress_mirror_attribute =
 	__ATTR(ingress_mirror, 0644,
 	       vfd_ingress_mirror_show, vfd_ingress_mirror_store);
-static struct kobj_attribute mac_anti_spoof_attribute =
-	__ATTR(mac_anti_spoof, 0644,
-	       vfd_mac_anti_spoof_show, vfd_mac_anti_spoof_store);
-static struct kobj_attribute vlan_anti_spoof_attribute =
-	__ATTR(vlan_anti_spoof, 0644,
-	       vfd_vlan_anti_spoof_show, vfd_vlan_anti_spoof_store);
 static struct kobj_attribute allow_untagged_attribute =
 	__ATTR(allow_untagged, 0644,
 	       vfd_allow_untagged_show, vfd_allow_untagged_store);
@@ -2296,8 +2230,6 @@ static struct kobj_attribute max_tx_rate_attribute =
 	__ATTR(max_tx_rate, 0644, vfd_max_tx_rate_show, vfd_max_tx_rate_store);
 static struct kobj_attribute min_tx_rate_attribute =
 	__ATTR(min_tx_rate, 0644, vfd_min_tx_rate_show, vfd_min_tx_rate_store);
-static struct kobj_attribute spoofcheck_attribute =
-	__ATTR(spoofcheck, 0644, vfd_spoofcheck_show, vfd_spoofcheck_store);
 static struct kobj_attribute trust_attribute =
 	__ATTR(trust, 0644, vfd_trust_show, vfd_trust_store);
 static struct kobj_attribute reset_stats_attribute =
@@ -2306,14 +2238,16 @@ static struct kobj_attribute enable_attribute =
 	__ATTR(enable, 0644, vfd_enable_show, vfd_enable_store);
 static struct kobj_attribute num_queues_attribute =
 	__ATTR(num_queues, 0644, vfd_num_queues_show, vfd_num_queues_store);
+static struct kobj_attribute queue_type_attribute =
+	__ATTR(queue_type, 0644, vfd_queue_type_show, vfd_queue_type_store);
+static struct kobj_attribute allow_bcast_attribute =
+	__ATTR(allow_bcast, 0644, vfd_allow_bcast_show, vfd_allow_bcast_store);
 
 static struct attribute *s_attrs[] = {
 	&trunk_attribute.attr,
 	&vlan_mirror_attribute.attr,
 	&egress_mirror_attribute.attr,
 	&ingress_mirror_attribute.attr,
-	&mac_anti_spoof_attribute.attr,
-	&vlan_anti_spoof_attribute.attr,
 	&allow_untagged_attribute.attr,
 	&loopback_attribute.attr,
 	&mac_attribute.attr,
@@ -2323,11 +2257,12 @@ static struct attribute *s_attrs[] = {
 	&link_state_attribute.attr,
 	&max_tx_rate_attribute.attr,
 	&min_tx_rate_attribute.attr,
-	&spoofcheck_attribute.attr,
 	&trust_attribute.attr,
 	&reset_stats_attribute.attr,
 	&enable_attribute.attr,
 	&num_queues_attribute.attr,
+	&queue_type_attribute.attr,
+	&allow_bcast_attribute.attr,
 	NULL,
 };
 

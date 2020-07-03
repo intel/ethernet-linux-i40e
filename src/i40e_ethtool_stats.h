@@ -191,13 +191,12 @@ i40e_add_queue_stats(u64 **data, struct i40e_ring *ring)
 #ifdef HAVE_NDO_GET_STATS64
 	do {
 		start = !ring ? 0 : u64_stats_fetch_begin_irq(&ring->syncp);
-#endif
-		for (i = 0; i < size; i++) {
-			i40e_add_one_ethtool_stat(&(*data)[i], ring,
-						  &stats[i]);
-		}
-#ifdef HAVE_NDO_GET_STATS64
+		for (i = 0; i < size; i++)
+			i40e_add_one_ethtool_stat(&(*data)[i], ring, &stats[i]);
 	} while (ring && u64_stats_fetch_retry_irq(&ring->syncp, start));
+#else
+	for (i = 0; i < size; i++)
+		i40e_add_one_ethtool_stat(&(*data)[i], ring, &stats[i]);
 #endif
 
 	/* Once we successfully copy the stats in, update the data pointer */

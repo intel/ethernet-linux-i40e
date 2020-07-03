@@ -2,7 +2,7 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet Controller 700 Series
 ===============================================================================
 
-April 10, 2020
+June 18, 2020
 Copyright(c) 2014 - 2020 Intel Corporation.
 
 Contents
@@ -516,6 +516,7 @@ NOTE: This driver supports the following flow types:
 - IPv4
 - TCPv4
 - UDPv4
+- SCTPv4
 Each flow type supports valid combinations of IP addresses (source or
 destination) and UDP/TCP ports (source and destination). You can supply only a
 source IP address, a source IP address and a destination port, or any
@@ -574,7 +575,7 @@ To add a new filter:
 action <queue>
   Where:
     <ethX> - the Ethernet device to program
-    <type> - can be ip4, tcp4, udp4, or sctp4
+    <type> - can be ip4, tcp4, udp4, sctp4
     <ip> - the IP address to match on
     <ip_mask> - the IPv4 address to mask on
             NOTE: These filters use inverted masks.
@@ -780,14 +781,12 @@ For regular Intel Ethernet Flow Director filters:
 For L3 filters (non-tunneled packets):
  - "user-def 0x8000000000000000" (no Tenant ID/VNI specified in remaining
    bits of the user-def field)
- - Only L3 parameters (src-IP, dst-IP) are considered
- - For example, to redirect traffic coming from 192.168.42.13 port 12344 with
-   destination 192.168.42.33 port 12344 into VF id 1, and call this "rule 3":
+ - Only L3 parameters (src-IP, dst-IP) are considered.
+ - For example, to redirect traffic coming from 192.168.42.13 with destination
+   192.168.42.33 into VF id 1, and call this "rule 3":
 
-  # ethtool -U enp130s0 flow-type ip4 src-ip 192.168.42.13 dst-ip 192.168.42.33
-/
-  src-port 12344 dst-port 12344 user-def 0x8000000000000000 action /
-  0x200000000 loc 3
+   # ethtool -U enp130s0 flow-type ip4 src-ip 192.168.42.13 dst-ip 192.168.42.33
+   user-def 0x8000000000000000 action 0x200000000 loc 3
 
 For cloud filters (tunneled packets):
  - All other filters, including where Tenant ID/VNI is specified.
@@ -888,10 +887,10 @@ Bridging (DCB), Multiple Functions per Port (MFP), or Sideband Filters.
 - If another driver (for example, DPDK) has set cloud filters, you cannot
 enable ADQ.
 
-To create TCs on the interface:
+To create traffic classes (TCs) on the interface:
 NOTE: Run all TC commands from the ../iproute2/tc/ directory.
-1. Use the tc command to create traffic classes (TCs). You can create a maximum
-   of 8 TCs per interface.
+1. Use the tc command to create traffic classes. You can create a maximum of
+   8 TCs per interface.
 
    # tc qdisc add dev <ethX> root mqprio num_tc <tcs> map <priorities>
      queues <count1@offset1 ...> hw 1 mode channel shaper bw_rlimit
@@ -957,6 +956,19 @@ TC flower filters.
           to tc1 at offset 16
 
 
+RDMA (Remote Direct Memory Access)
+----------------------------------
+Remote Direct Memory Access, or RDMA, allows a network device to transfer data
+directly to and from application memory on another system, increasing
+throughput and lowering latency in certain networking environments.
+
+The i40e driver supports the following RDMA protocols:
+- iWARP (Internet Wide Area RDMA Protocol)
+
+For detailed installation and configuration information, see the README file in
+the RDMA driver tarball.
+
+
 EEE (Energy Efficient Ethernet)
 -------------------------------
 Valid Range: 0-1
@@ -1012,8 +1024,8 @@ permanent by adding 'MTU=9000' to the following file:
       or
   /etc/sysconfig/network/<config_file> for SLES
 
-NOTE: The maximum MTU setting for Jumbo Frames is 9702. This value coincides
-with the maximum Jumbo Frames size of 9728 bytes.
+NOTE: The maximum MTU setting for jumbo frames is 9702. This corresponds to the
+maximum jumbo frame size of 9728 bytes.
 
 NOTE: This driver will attempt to use multiple page sized buffers to receive
 each jumbo packet. This should help to avoid buffer starvation issues when
@@ -1211,6 +1223,12 @@ cables, and backplane channels provide a stable link without FEC.
 NOTE: For devices to benefit from this feature, link partners must have FEC
 enabled.
 
+NOTE:
+- Intel(R) Ethernet Controller XXV710 devices support all FEC modes listed
+below.
+- Intel(R) Ethernet Connection X722 for 10GbE backplane devices only support
+BASE-R FEC mode. They do not support auto FEC or RS-FEC modes.
+
 On kernels older than 4.14, use the following private flags to disable
 FEC modes:
   rs-fec (0 to disable, 1 to enable)
@@ -1219,7 +1237,7 @@ On kernel 4.14 or later, use ethtool to get/set the following FEC modes:
   No FEC
   Auto FEC
   BASE-R FEC
-  RS FEC
+  RS-FEC
 
 
 Dynamic Device Personalization
@@ -1429,6 +1447,12 @@ SR-IOV hypervisor functions:
   # echo rem mcast > /sys/class/net/p1p2/device/sriov/1/promisc
   Example 4: show current promiscuous mode configuration.
   # cat /sys/class/net/p1p2/device/sriov/1/promisc
+
+NOTE: VFs set to promiscuous via this sysfs interface may not receive packets
+addressed to another VF on the same port. For another VF to receive the
+packets, you must enable VF true promiscuous mode via ethtool. See "Trusted VFs
+and VF Promiscuous Mode" in this README for more information on enabling true
+promiscuous mode.
 
 - vlan_strip
   Supports enabling/disabling VF device outer VLAN stripping.
@@ -1884,6 +1908,15 @@ specification. To obtain link with these modules, you must turn off
 auto-negotiation on the link partner's switch ports.
 
 
+'ethtool -a' autonegotiate result may vary between drivers
+----------------------------------------------------------
+For kernel versions 4.6 or higher, 'ethtool -a' will show the advertised and
+negotiated autoneg settings. For the i40e driver and kernel versions below 4.6,
+ethtool will only report the negotiated link status.
+
+The issue is cosmetic and does not affect functionality.
+
+
 Running ethtool -t <ethX> command causes break between PF and test client
 -----------------------------------------------------------------------
 When there are active VFs, "ethtool -t" performs a full diagnostic. In the
@@ -1947,17 +1980,17 @@ not match the ones provided by the installed kernel RPM. This results in
 dependency conflicts that prevent the RPM from compiling and installing.
 
 
-SR-IOV virtual functions have identical MAC addresses in RHEL8
---------------------------------------------------------------
-When you create multiple SR-IOV virtual functions on Red Hat Enterprise
-Linux 8, the VFs may have identical MAC addresses. Only one VF will pass
-traffic, and all traffic on other VFs with identical MAC addresses will fail.
-This is related to the "MACAddressPolicy=persistent" setting in
+SR-IOV virtual functions have identical MAC addresses
+-----------------------------------------------------
+When you create multiple SR-IOV virtual functions, the VFs may have identical
+MAC addresses. Only one VF will pass traffic, and all traffic on other VFs with
+identical MAC addresses will fail. This is related to the
+"MACAddressPolicy=persistent" setting in
 /usr/lib/systemd/network/99-default.link.
 
 To resolve this issue, edit the /usr/lib/systemd/network/99-default.link file
 and change the MACAddressPolicy line to "MACAddressPolicy=none". For more
-information, see the systemd documentation.
+information, see the systemd.link man page.
 
 
 'VF X failed opcode 24' error message in dmesg on host

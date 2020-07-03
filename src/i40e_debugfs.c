@@ -982,8 +982,8 @@ static inline void i40e_dbg_dump_fdir_filter(struct i40e_pf *pf,
 					     struct i40e_fdir_filter *f)
 {
 	dev_info(&pf->pdev->dev, "fdir filter %d:\n", f->fd_id);
-	dev_info(&pf->pdev->dev, "    flow_type=%d ip4_proto=%d\n",
-		 f->flow_type, f->ip4_proto);
+	dev_info(&pf->pdev->dev, "    flow_type=%d ipl4_proto=%d\n",
+		 f->flow_type, f->ipl4_proto);
 	dev_info(&pf->pdev->dev, "    dst_ip= %pi4  dst_port=%d\n",
 		 &f->dst_ip, f->dst_port);
 	dev_info(&pf->pdev->dev, "    src_ip= %pi4  src_port=%d\n",
@@ -1031,6 +1031,7 @@ static ssize_t i40e_dbg_command_write(struct file *filp,
 				      size_t count, loff_t *ppos)
 {
 	struct i40e_pf *pf = filp->private_data;
+	const size_t buf_size_max = 256;
 	char *cmd_buf, *cmd_buf_tmp;
 	int bytes_not_copied;
 	struct i40e_vsi *vsi;
@@ -1042,6 +1043,9 @@ static ssize_t i40e_dbg_command_write(struct file *filp,
 	/* don't allow partial writes */
 	if (*ppos != 0)
 		return 0;
+	/* don't cross maximal possible value */
+	if (count >= buf_size_max)
+		return -ENOSPC;
 
 	cmd_buf = kzalloc(count + 1, GFP_KERNEL);
 	if (!cmd_buf)

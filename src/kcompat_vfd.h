@@ -15,6 +15,9 @@
 #define VFD_EGRESS_MIRROR_OFF	-1
 #define VFD_INGRESS_MIRROR_OFF	-1
 
+#define VFD_QUEUE_TYPE_RSS	0x00
+#define VFD_QUEUE_TYPE_QOS	0x01
+
 /**
  * struct vfd_objects - VF-d kobjects information struct
  * @num_vfs:	number of VFs allocated
@@ -68,12 +71,6 @@ struct vfd_ops {
 	int (*get_ingress_mirror)(struct pci_dev *pdev, int vf_id, int *data);
 	int (*set_ingress_mirror)(struct pci_dev *pdev, int vf_id,
 				  const int data);
-	int (*get_mac_anti_spoof)(struct pci_dev *pdev, int vf_id, bool *data);
-	int (*set_mac_anti_spoof)(struct pci_dev *pdev, int vf_id,
-				  const bool data);
-	int (*get_vlan_anti_spoof)(struct pci_dev *pdev, int vf_id, bool *data);
-	int (*set_vlan_anti_spoof)(struct pci_dev *pdev, int vf_id,
-				   const bool data);
 	int (*get_allow_untagged)(struct pci_dev *pdev, int vf_id, bool *data);
 	int (*set_allow_untagged)(struct pci_dev *pdev, int vf_id,
 				  const bool data);
@@ -134,6 +131,10 @@ struct vfd_ops {
 	int (*set_num_queues)(struct pci_dev *pdev, int vf_id, const int num_queues);
 	int (*get_trust_state)(struct pci_dev *pdev, int vf_id, bool *data);
 	int (*set_trust_state)(struct pci_dev *pdev, int vf_id, bool data);
+	int (*get_queue_type)(struct pci_dev *pdev, int vf_id, u8 *data);
+	int (*set_queue_type)(struct pci_dev *pdev, int vf_id, const u8 data);
+	int (*get_allow_bcast)(struct pci_dev *pdev, int vf_id, bool *data);
+	int (*set_allow_bcast)(struct pci_dev *pdev, int vf_id, const bool data);
 };
 
 extern const struct vfd_ops *vfd_ops;
