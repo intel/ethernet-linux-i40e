@@ -15,11 +15,11 @@
  * of the array using the same _type for calculating the sizeof_stat and
  * stat_offset.
  *
- * The @sizeof_stat is expected to be sizeof(u8), sizeof(u16), sizeof(u32) or
+ * The sizeof_stat is expected to be sizeof(u8), sizeof(u16), sizeof(u32) or
  * sizeof(u64). Other sizes are not expected and will produce a WARN_ONCE from
  * the i40e_add_ethtool_stat() helper function.
  *
- * The @stat_string is interpreted as a format string, allowing formatted
+ * The stat_string is interpreted as a format string, allowing formatted
  * values to be inserted while looping over multiple structures for a given
  * statistics array. Thus, every statistic string in an array should have the
  * same type and number of format specifiers, to be formatted by variadic
@@ -153,7 +153,7 @@ __i40e_add_ethtool_stats(u64 **data, void *pointer,
  * constant stats array and passing the ARRAY_SIZE(). This avoids typos by
  * ensuring that we pass the size associated with the given stats array.
  *
- * The parameter @stats is evaluated twice, so parameters with side effects
+ * The parameter stats is evaluated twice, so parameters with side effects
  * should be avoided.
  **/
 #define i40e_add_ethtool_stats(data, pointer, stats) \
@@ -277,14 +277,14 @@ static void __i40e_add_stat_strings(u8 **p, const struct i40e_stats stats[],
 }
 
 /**
- * 40e_add_stat_strings - copy stat strings into ethtool buffer
+ * i40e_add_stat_strings - copy stat strings into ethtool buffer
  * @p: ethtool supplied buffer
  * @stats: stat definitions array
  *
  * Format and copy the strings described by the const static stats value into
  * the buffer pointed at by p.
  *
- * The parameter @stats is evaluated twice, so parameters with side effects
+ * The parameter stats is evaluated twice, so parameters with side effects
  * should be avoided. Additionally, stats must be an array such that
  * ARRAY_SIZE can be called on it.
  **/

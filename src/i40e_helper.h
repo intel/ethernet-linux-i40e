@@ -10,6 +10,7 @@
  * i40e_allocate_dma_mem_d - OS specific memory alloc for shared code
  * @hw:   pointer to the HW structure
  * @mem:  ptr to mem struct to fill out
+ * @mtype: memory type identifier (unused)
  * @size: size of memory requested
  * @alignment: what to align the allocation to
  **/

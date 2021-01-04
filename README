@@ -2,7 +2,7 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet Controller 700 Series
 ===============================================================================
 
-June 18, 2020
+November 25, 2020
 Copyright(c) 2014 - 2020 Intel Corporation.
 
 Contents
@@ -20,12 +20,14 @@ Contents
 
 Overview
 ========
-This driver supports kernel versions 2.6.32 and newer. The associated Virtual
-Function (VF) driver for this driver is iavf.
+This driver supports kernel versions 2.6.32 and newer. However, some features
+may require a newer kernel version. The associated Virtual Function (VF) driver
+for this driver is iavf.
 
-Driver information can be obtained using ethtool, lspci, and ifconfig.
-Instructions on updating ethtool can be found in the section Additional
-Configurations later in this document.
+Driver information can be obtained using ethtool, lspci, and ip. Instructions
+on updating ethtool can be found in the section Additional Configurations later
+in this document.
+
 This driver is only supported as a loadable module at this time. Intel is not
 supplying patches against the kernel source to allow for static linking of the
 drivers.
@@ -34,9 +36,9 @@ For questions related to hardware requirements, refer to the documentation
 supplied with your Intel adapter. All hardware requirements listed apply to use
 with Linux.
 
-This driver supports XDP (Express Data Path) on kernel 4.14 and later. Note
-that XDP is blocked for frame sizes larger than 3KB. This driver supports
-AF_XDP zero-copy on kernel 4.18 and later.
+This driver supports XDP (Express Data Path) on kernel 4.14 and later and
+AF_XDP zero-copy on kernel 4.18 and later. Note that XDP is blocked for frame
+sizes larger than 3KB.
 
 NOTE: 1 Gb devices based on the Intel(R) Ethernet Network Connection X722 do
 not support the following features:
@@ -51,7 +53,7 @@ not support the following features:
 
 Identifying Your Adapter
 ========================
-The driver in this release is compatible with devices based on the following:
+This driver is compatible with devices based on the following:
   * Intel(R) Ethernet Controller X710
   * Intel(R) Ethernet Controller XL710
   * Intel(R) Ethernet Network Connection X722
@@ -127,9 +129,10 @@ expected and can throttle traffic between the host and the virtual switch,
 reducing performance. To resolve this issue, and to ensure isolation from
 unintended traffic streams, configure all SR-IOV enabled ports for VLAN tagging
 from the administrative interface on the PF. This configuration allows
-unexpected, and potentially malicious, frames to be dropped. See "Configuring
-VLAN Tagging on SR-IOV Enabled Adapter Ports" in this README for configuration
-instructions.
+unexpected, and potentially malicious, frames to be dropped.
+
+See "Configuring VLAN Tagging on SR-IOV Enabled Adapter Ports" later in this
+README for configuration instructions.
 
 
 Firmware Recovery Mode
@@ -229,6 +232,20 @@ To manually build the driver
    that is being tested:
 
    # ping <IP_address>
+
+Note: For certain distributions like (but not limited to) Red Hat Enterprise
+Linux 7, Ubuntu, and SUSE Linux Enterprise Server (SLES) 11, once the driver is
+installed, you may need to update the initrd/initramfs file to prevent the OS
+loading old versions of the i40e driver.
+   For Red Hat distributions:
+	# dracut --force
+
+   For Ubuntu:
+	# update-initramfs -u
+
+   For SLES:
+	# mkinitrd
+
 
 
 Command Line Parameters
@@ -346,19 +363,19 @@ or module name, the name for the Base Driver is i40e.
 
 Displaying VF Statistics on the PF
 ----------------------------------
-Use the following ethtool command to display the statistics for all VFs on the
-PF:
+Use the following command to display the statistics for all VFs on the PF:
 
 # ethtool -S <ethX>
 
-NOTE: The output of this command is very large due to the large number of VF
-statistics and the maximum number of possible VFs.
+NOTE: The output of this command can be very large due to the large number of
+VF statistics and the maximum number of possible VFs.
 
-The PF driver will display a subset of the VF's statistics, as provided by the
-VF driver, for all VFs that are configured. The PF will always print a
-statistics block for each of the possible VFs, and it will show a zero for all
-unconfigured VFs. VF stats are listed in a single block at the end of the PF
-statistics, using the following naming convention:
+The PF driver will display a subset of the statistics for the PF and for all
+VFs that are configured. The PF will always print a statistics block for each
+of the possible VFs, and it will show zero for all unconfigured VFs.
+
+VF stats are listed in a single block at the end of the PF statistics, using
+the following naming convention:
 
   vf<XXX>.<statistic name>
 
@@ -517,6 +534,10 @@ NOTE: This driver supports the following flow types:
 - TCPv4
 - UDPv4
 - SCTPv4
+- IPv6
+- TCPv6
+- UDPv6
+- SCTPv6
 Each flow type supports valid combinations of IP addresses (source or
 destination) and UDP/TCP ports (source and destination). You can supply only a
 source IP address, a source IP address and a destination port, or any
@@ -527,6 +548,33 @@ two-byte pattern and offset by using the ethtool user-def and mask fields. Only
 L3 and L4 flow types are supported for user-defined flexible filters. For a
 given flow type, you must clear all Intel Ethernet Flow Director filters before
 changing the input set (for that flow type).
+
+The following table summarizes supported Intel Ethernet Flow Director features
+across Intel(R) Ethernet controllers.
+
+---------------------------------------------------------------------------
+Feature             500 Series      700 Series         800 Series
+===========================================================================
+VF FLOW DIRECTOR    Supported       Routing to VF      Not supported
+                                    not supported
+---------------------------------------------------------------------------
+IP ADDRESS RANGE    Supported       Not supported      Field masking
+FILTER
+---------------------------------------------------------------------------
+IPv6 SUPPORT        Supported       Supported          Supported
+---------------------------------------------------------------------------
+CONFIGURABLE        Configured      Configured         Configured
+INPUT SET           per port        globally           per port
+---------------------------------------------------------------------------
+ATR                 Supported       Supported          Not supported
+---------------------------------------------------------------------------
+FLEX BYTE FILTER    Starts at       Starts at          Starts at
+                    beginning       beginning of       beginning
+                    of packet       payload            of packet
+---------------------------------------------------------------------------
+TUNNELED PACKETS    Filter matches  Filter matches     Filter matches
+                    outer header    inner header       inner header
+---------------------------------------------------------------------------
 
 
 Application Targeted Routing (ATR) Perfect Filters
@@ -575,13 +623,15 @@ To add a new filter:
 action <queue>
   Where:
     <ethX> - the Ethernet device to program
-    <type> - can be ip4, tcp4, udp4, sctp4
+    <type> - can be ip4, tcp4, udp4, sctp4, ip6, tcp6, udp6, sctp6
     <ip> - the IP address to match on
     <ip_mask> - the IPv4 address to mask on
-            NOTE: These filters use inverted masks.
+              NOTE: These filters use inverted masks. Address masks can be
+              either all 0 (to ignore a match) or all F (for a full match).
     <port> - the port number to match on
     <port_mask> - the 16-bit integer for masking
-            NOTE: These filters use inverted masks.
+              NOTE: These filters use inverted masks. Port masks can be
+              either all 0 (to ignore a match) or all F (for a full match).
     <queue> - the queue to direct traffic toward (-1 discards the
               matched traffic)
 
@@ -814,7 +864,7 @@ For cloud filters (tunneled packets):
    To redirect traffic to L4 destination port 4789 to VF 0, when the l4mode
    module parameter is set to UDP:
 
-   # ethtool -U slave0 flow-type udp4 dst-port 4789 action 0xffffffff00000000
+   # ethtool -U enp130s0 flow-type udp4 dst-port 4789 action 0xffffffff00000000
 
 
 Flow Control
@@ -878,9 +928,15 @@ specific application. This can reduce latency for the specified application,
 and allow Tx traffic to be rate limited per application.
 
 Requirements:
-- Kernel version 4.15 or later
-- The sch_mqprio, act_mirred and cls_flower modules must be loaded
+- Kernel version 4.19.58 or later
+- The sch_mqprio, act_mirred and cls_flower modules must be loaded. For example:
+# modprobe sch_mqprio
+# modprobe act_mirred
+# modprove cls_flower
 - The latest version of iproute2
+# cd iproute2
+# ./configure
+# make DESTDIR=/opt/iproute2 install
 - NVM version 6.01 or later
 - ADQ cannot be enabled when the following features are enabled: Data Center
 Bridging (DCB), Multiple Functions per Port (MFP), or Sideband Filters.
@@ -941,7 +997,7 @@ as it does not match PF address data.
 traffic will be duplicated and sent to all matching TC queues. The hardware
 switch mirrors the packet to a VSI list when multiple filters are matched.
 
-EXAMPLE:
+EXAMPLES:
 See the tc and tc-flower man pages for more information on traffic control and
 TC flower filters.
 
@@ -954,6 +1010,18 @@ TC flower filters.
       map 0 0 0 0 1 1 1 1: Sets priorities 0-3 to use tc0 and 4-7 to use tc1
       queues 16@0 16@16: Assigns 16 queues to tc0 at offset 0 and 16 queues
           to tc1 at offset 16
+
+Multiple filters can be added to the device, using the same recipe (and
+requires no additional recipe resources), either on the same interface or on
+different interfaces. Each filter uses the same fields for matching, but can
+have different match values.
+  tc filter add dev <ethX> protocol ip ingress prio 1 flower ip_proto
+   tcp dst_port $app_port skip_sw hw_tc 1
+
+For example:
+
+  # tc filter add dev <ethX> protocol ip ingress prio 1 flower ip_proto
+     tcp dst_port 5555 skip_sw hw_tc 1
 
 
 RDMA (Remote Direct Memory Access)
@@ -991,10 +1059,10 @@ Example:
 # ethtool --set-eee <ethX> [eee on|off]
 
 
-Setting the link-down-on-close Private Flag
--------------------------------------------
+Disabling physical link when the interface is brought down
+----------------------------------------------------------
 When the link-down-on-close private flag is set to "on", the port's link will
-go down when the interface is brought down using the 'ifconfig <ethX> down'
+go down when the interface is brought down using the 'ip link set <ethX> down'
 command.
 
 Use ethtool to view and set link-down-on-close, as follows:
@@ -1008,18 +1076,15 @@ Jumbo Frames
 Jumbo Frames support is enabled by changing the Maximum Transmission Unit (MTU)
 to a value larger than the default value of 1500.
 
-Use the ifconfig command to increase the MTU size. For example, enter the
-following where <ethX> is the interface number:
-
-# ifconfig <ethX> mtu 9000 up
-
-Alternatively, you can use the ip command as follows:
+Use the ip command to increase the MTU size. For example, enter the following
+where <ethX> is the interface number:
 
 # ip link set mtu 9000 dev <ethX>
 # ip link set up dev <ethX>
 
-This setting is not saved across reboots. The setting change can be made
-permanent by adding 'MTU=9000' to the following file:
+This setting is not saved across reboots.
+
+Add 'MTU=9000' to the following file to make the setting change permanent:
   /etc/sysconfig/network-scripts/ifcfg-<ethX> for RHEL
       or
   /etc/sysconfig/network/<config_file> for SLES
@@ -1056,8 +1121,7 @@ NOTE: You cannot set the speed for devices based on the Intel(R) Ethernet
 Network Adapter XXV710 based devices.
 
 Speed, duplex, and autonegotiation advertising are configured through the
-ethtool* utility. ethtool is included with all versions of Red Hat after Red
-Hat 7.2. For the latest version, download and install ethtool from the
+ethtool utility. For the latest version, download and install ethtool from the
 following website:
 
    https://kernel.org/pub/software/network/ethtool/
@@ -1162,34 +1226,36 @@ priority flow control (802.1Qbb) which can limit or eliminate the number of
 dropped packets during network stress. Bandwidth can be allocated to each of
 these priorities, which is enforced at the hardware level (802.1Qaz).
 
-Adapter firmware implements LLDP and DCBX protocol agents as per 802.1AB and
-802.1Qaz respectively. There are potentially two DCBX modes on Linux, depending
-on the underlying PF device:
-- Intel Ethernet Controller 700 Series adapters only support firmware DCBX
-mode. They do not support software DCBX.
+DCB is normally configured on the network using the DCBX protocol (802.1Qaz), a
+specialization of LLDP (802.1AB). The i40e driver supports the following
+mutually exclusive variants of DCBX support:
+1) Firmware-based LLDP Agent
+2) Software-based LLDP Agent
 
-DCB parameters can be established via a firmware LLDP/DCBX agent. Only one
-LLDP/DCBX agent can be active on a single interface at a time. When the
-firmware DCBX agent is active, software agents will not be able to receive or
-transmit LLDP frames.
+In firmware-based mode, firmware intercepts all LLDP traffic and handles DCBX
+negotiation transparently for the user. In this mode, the adapter operates in
+"willing" DCBX mode, receiving DCB settings from the link partner (typically a
+switch). The local user can only query the negotiated DCB configuration. For
+information on configuring DCBX parameters on a switch, please consult the
+switch manufacturer's documentation.
 
-See the "FW-LLDP (Firmware Link Layer Discovery Protocol)" section in this
-README for the ethtool commands to query the status of the firmware LLDP/DCBX
-agent.
+In software-based mode, LLDP traffic is forwarded to the network stack and user
+space, where a software agent can handle it. In this mode, the adapter can
+operate in either "willing" or "nonwilling" DCBX mode and DCB configuration can
+be both queried and set locally. This mode requires the FW-based LLDP Agent to
+be disabled.
 
-When operating in firmware DCBX mode, the adapter is in an "always willing"
-state. DCB settings are applied on the adapter by transmitting a nonwilling
-configuration from the link partner. Typically this is a switch. For
-configuring DCBX parameters on a switch, please consult the switch
-manufacturer's documentation.
-
-NOTES:
-- You can disable the firmware agent using ethtool private flags. For DCB to be
-operational, the firmware LLDP agent is required.
-- Software configuration of DCBX parameters via dcbtool/lldptool is not
-supported.
-- The driver implements the DCB netlink interface layer to allow user-space to
-communicate with the driver and query DCB configuration for the port.
+NOTE:
+- You can enable and disable the firmware-based LLDP Agent using an ethtool
+private flag. Refer to the "FW-LLDP (Firmware Link Layer Discovery Protocol)"
+section in this README for more information.
+- In software-based DCBX mode, you can configure DCB parameters using software
+LLDP/DCBX agents that interface with the Linux kernel's DCB Netlink API. We
+recommend using OpenLLDP as the DCBX agent when running in software mode. For
+more information, see the OpenLLDP man pages and
+https://github.com/intel/openlldp.
+- The driver implements the DCB netlink interface layer to allow the user space
+to communicate with the driver and query DCB configuration for the port.
 
 
 FW-LLDP (Firmware Link Layer Discovery Protocol)
@@ -1302,14 +1368,19 @@ The sysfs file structure below supports the SR-IOV hypervisor management
 interface.
 
 /sys/class/net/<ethX>/device/sriov (see 1 below)
++-- qos
+| +-- [TC, 0-7]
+||  +-- priority
+||  +-- lsp
+||  +-- max_bw
+| +-- apply
 +-- egress_mirror
 +-- ingress_mirror
 +-- tpid
-+-- qos
-| +-- apply
 +-- [VF-id, 0 .. 255] (see 2 below)
-| +-- trunk
 | +-- vlan_mirror
+| +-- trunk
+| +-- allow_untagged
 | +-- egress_mirror
 | +-- ingress_mirror
 | +-- loopback
@@ -1317,23 +1388,26 @@ interface.
 | +-- mac_list
 | +-- promisc
 | +-- vlan_strip
-| +-- stats
-|| +-- rx_bytes
-|| +-- rx_packets
-|| +-- rx_dropped
-|| +-- tx_bytes
-|| +-- tx_packets
-|| +-- tx_dropped
-|| +-- tx_errors
-| +-- reset_stats
-| +-- link_state
-| +-- max_tx_rate
-| +-- trust
 | +-- enable
+| +-- link_state
+| +-- queue_type
 | +-- num_queues
-| +-- allow_untagged
+| +-- max_tx_rate
+| +-- stats
+||  +-- rx_bytes
+||  +-- rx_packets
+||  +-- rx_dropped
+||  +-- tx_bytes
+||  +-- tx_packets
+||  +-- tx_dropped
+||  +-- tx_errors
+| +-- reset_stats
+| +-- trust
 | +-- qos
-|| +-- share
+||  +-- [TC, 0-7]
+||    +-- share
+||    +-- Max_TC_TX_Rate
+||  +-- share
 
 *1: kobject started from "sriov" is not available from existing kernel
 sysfs, and it requires device driver to implement this interface.
@@ -1342,6 +1416,32 @@ created depends on the value set for /sys/bus/devices/<device pci
 address>/sriov_numvfs
 
 SR-IOV hypervisor functions:
+
+- priority
+  Sets the list of priority code point (PCP) values to map to the traffic
+  class.
+  Example 1: set priority 0 and 1 to traffic class 0.
+  # echo 0,1 > /sys/class/net/p1p1/device/sriov/qos/0/priority
+  Example 2: display current setting for TC3.
+  # cat /sys/class/net/p1p1/device/sriov/qos/3/priority
+
+- lsp
+  Sets Link Strict Priority (LSP) for the traffic class.
+  Example 1: set LSP for traffic class 0.
+  # echo on > /sys/class/net/p1p1/device/sriov/qos/0/lsp
+  Example 2: display current LSP setting for TC0.
+  # cat /sys/class/net/p1p1/device/sriov/qos/0/lsp
+
+- max_bw
+  Sets the maximum bandwidth in Mbps for the traffic class on the PF.
+  Example 1: set max bandwidth of 2Gbps for traffic class 2.
+  # echo 2000 > /sys/class/net/p1p1/device/sriov/qos/2/max_bw
+  Example 2: display current setting for TC0.
+  # cat /sys/class/net/p1p1/device/sriov/qos/0/max_bw
+
+- qos/apply
+  Applies the VF bandwidth configuration for the port. See "qos/share" below
+  for more information.
 
 - egress_mirror
   Mirrors egress traffic from the PF to the specified VF on the same PF.
@@ -1367,9 +1467,14 @@ SR-IOV hypervisor functions:
   Example 2: show the configured value.
   # cat /sys/class/net/p1p2/device/sriov/tpid
 
-- qos/apply
-  Applies the VF bandwidth configuration for the port. See "qos/share" below
-  for more information.
+- vlan_mirror
+  Supports both ingress and egress traffic mirroring.
+  Example 1: mirror traffic based upon VLANs 2,4,6,18-22 to VF 3 of PF p1p1.
+  # echo add 2,4,6,18-22 > /sys/class/net/p1p1/device/sriov/3/vlan_mirror
+  Example 2: remove VLAN 4, 15-17 from traffic mirroring at destination VF 3.
+  # echo rem 15-17 > /sys/class/net/p1p1/device/sriov/3/vlan_mirror
+  Example 3: remove all VLANs from mirroring at VF 3.
+  # echo rem 0 - 4095> /sys/class/net/p1p1/device/sriov/3/vlan_mirror
 
 - trunk
   Supports two operations: add and rem.
@@ -1382,15 +1487,6 @@ SR-IOV hypervisor functions:
   # echo rem 5,11-13 > /sys/class/net/p1p2/device/sriov/1/trunk
   Note: for rem, if VLAN ID is not on the VLAN filtering list, the
   VLAN ID will be ignored.
-
-- vlan_mirror
-  Supports both ingress and egress traffic mirroring.
-  Example 1: mirror traffic based upon VLANs 2,4,6,18-22 to VF 3 of PF p1p1.
-  # echo add 2,4,6,18-22 > /sys/class/net/p1p1/device/sriov/3/vlan_mirror
-  Example 2: remove VLAN 4, 15-17 from traffic mirroring at destination VF 3.
-  # echo rem 15-17 > /sys/class/net/p1p1/device/sriov/3/vlan_mirror
-  Example 3: remove all VLANs from mirroring at VF 3.
-  # echo rem 0 - 4095> /sys/class/net/p1p1/device/sriov/3/vlan_mirror
 
 - egress_mirror
   Supports egress traffic mirroring from this VF to the specified VF.
@@ -1461,32 +1557,6 @@ promiscuous mode.
   Example 2: disable VLAN striping VF 3.
   # echo OFF > /sys/class/net/p1p1/device/sriov/3/vlan_strip
 
-- stats
-  Supports getting VF statistics:
-    rx_bytes
-    rx_dropped
-    rx_packets
-    tx_bytes
-    tx_dropped
-    tx_packets
-    tx_errors
-  Example 1: display anti-spoofing violations counter for VF 1.
-  # cat /sys/class/net/p1p2/device/sriov/1/stats/tx_error
-
-- reset_stats
-  Resets the VF's stats counters.
-  Example 1: reset stats for VF 1.
-  # echo 1 > /sys/class/net/p1p2/device/sriov/1/stats/reset_stats
-
-- link_state
-  Sets/displays link status.
-  Example 1: display link status on link speed.
-  # cat /sys/class/net/p1p2/device/sriov/1/link_state
-  Example 2: set VF 1 to track status of PF link.
-  # echo auto > /sys/class/net/p1p2/device/sriov/1/link_state
-  Example 3: disable VF 1.
-  # echo disable > /sys/class/net/p1p2/device/sriov/1/link_state
-
 - enable
   Enables or disables the VF device.
   Notes:
@@ -1503,6 +1573,24 @@ promiscuous mode.
   Example 3: show VF 3 enable state.
   # cat /sys/class/net/p1p1/device/sriov/3/enable
 
+- link_state
+  Sets/displays link status.
+  Example 1: display link status on link speed.
+  # cat /sys/class/net/p1p2/device/sriov/1/link_state
+  Example 2: set VF 1 to track status of PF link.
+  # echo auto > /sys/class/net/p1p2/device/sriov/1/link_state
+  Example 3: disable VF 1.
+  # echo disable > /sys/class/net/p1p2/device/sriov/1/link_state
+
+- queue_type
+  Sets the type of queues (0 RSS, 1 QoS).
+  Example 1: set queue type RSS for VF 3.
+  # echo 0 > /sys/class/net/p1p1/device/sriov/3/queue_type
+  Example 2: set type QoS for VF 3.
+  # echo 1 > /sys/class/net/p1p1/device/sriov/3/queue_type
+  Example 3: show queue type for VF 3.
+  # cat /sys/class/net/p1p1/device/sriov/3/queue_type
+
 - num_queues
   Sets the number of queues allocated for the VF. To change the number of
   queues, queue_type must be RSS.
@@ -1514,11 +1602,45 @@ promiscuous mode.
   Example 2: show VF 5 number of queues for VF 5 type.
   # cat /sys/class/net/p1p1/device/sriov/5/num_queues
 
+- max_tx_rate
+  Sets the maximum transmit rate in Mbps for the VF.
+  Note: This is ignored if TC QoS is in use. The maximum transmit rate limit
+  is cleared and cannot be set once you configure Max_TC_TX_Rate limits for
+  any of the TCs on the VF.
+  Example 1: set 200Mbps limit for VF 3.
+  # echo 200 > /sys/class/net/p1p1/device/sriov/3/max_tx_rate
+  Example 2: show max_tx_rate for VF 3.
+  # cat /sys/class/net/p1p1/device/sriov/3/max_tx_rate
+
+- stats
+  Supports getting VF statistics:
+    rx_bytes
+    rx_packets
+    rx_dropped
+    tx_bytes
+    tx_packets
+    tx_dropped
+    tx_errors
+  Example 1: display anti-spoofing violations counter for VF 1.
+  # cat /sys/class/net/p1p2/device/sriov/1/stats/tx_error
+
+- reset_stats
+  Resets the VF's stats counters.
+  Example 1: reset stats for VF 1.
+  # echo 1 > /sys/class/net/p1p2/device/sriov/1/stats/reset_stats
+
+- Max_TC_TX_Rate
+  Sets the maximum bandwidth in Mbps for the traffic class per VF.
+  Example 1: set max sending rate for VF 0 TC2 to 2000Mbps.
+  # echo 2000 > /sys/class/net/p1p2/device/sriov/0/qos/2/max_tc_tx_rate
+  # cat sys/class/net/p1p2/device/sriov/0/qos/2/max_tc_tx_rate
+
 - qos/share
   Sets the share of bandwidth for the specified VF(s).
   Note: This feature is limited to TC0 only. You cannot revert the share back
-  to 0 once it has been set. You need to apply a change to hardware using
-  the related sysfs node qos/apply.
+  to 0 once it has been set. You need to apply a change to hardware using the
+  related sysfs node qos/apply. The qos/apply PF attribute applies the traffic
+  shares to all VFs and all applicable TCs at once.
   Example 1: allocate 10% of bandwidth to VF 0, 20% to VF 1, and the remaining
   70% of bandwidth shared equally among the other VFs plus PF. Note: For all
   the unspecified VFs (or PFs), the default value for "share" is 0.
@@ -2006,6 +2128,14 @@ Windows guest OSs on a Linux host may not pass traffic across VLANs
 The VF is not aware of the VLAN configuration if you use Load Balancing and
 Failover (LBFO) to configure VLANs in a Windows guest. VLANs configured using
 LBFO on a VF driver may result in failure to pass traffic.
+
+
+Unexpected i40iw error messages in dmesg
+----------------------------------------
+If you install newer i40e drivers over the drivers in your Linux distro, you
+may see i40iw error messages in dmesg. This is because the i40iw drivers must
+be updated at the same time as the i40e drivers. These messages may be ignored
+if you do not use iWARP in your configuration.
 
 
 Support

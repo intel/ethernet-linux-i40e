@@ -1488,6 +1488,24 @@ enum i40e_reset_type {
 	I40E_RESET_EMPR		= 3,
 };
 
+/* EMP Settings Module Header Section */
+struct i40e_emp_settings_module {
+	u16 length;
+	u16 fw_params;
+	u16 reserved;
+	u16 features;
+	u16 oem_cfg;
+	u16 pfalloc_ptr;
+	u16 eee_variables;
+	u16 lldp_cfg_ptr;
+	u16 ltr_max_snoop;
+	u16 ltr_max_no_snoop;
+	u16 ltr_delta;
+	u16 ltr_grade_value;
+	u16 lldp_tlv_ptr;
+	u16 crc8;
+};
+
 /* IEEE 802.1AB LLDP Agent Variables from NVM */
 #define I40E_NVM_LLDP_CFG_PTR   0x06
 #define I40E_SR_LLDP_CFG_PTR    0x31
@@ -1532,6 +1550,8 @@ struct i40e_lldp_variables {
 #define I40E_L4_DST_MASK		(0x1ULL << I40E_L4_DST_SHIFT)
 #define I40E_VERIFY_TAG_SHIFT		31
 #define I40E_VERIFY_TAG_MASK		(0x3ULL << I40E_VERIFY_TAG_SHIFT)
+#define I40E_VLAN_SRC_SHIFT		55
+#define I40E_VLAN_SRC_MASK		(0x1ULL << I40E_VLAN_SRC_SHIFT)
 
 #define I40E_FLEX_50_SHIFT		13
 #define I40E_FLEX_50_MASK		(0x1ULL << I40E_FLEX_50_SHIFT)

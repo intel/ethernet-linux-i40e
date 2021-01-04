@@ -269,7 +269,7 @@ static i40e_status i40e_read_nvm_word_aq(struct i40e_hw *hw, u16 offset,
 	i40e_status ret_code = I40E_ERR_TIMEOUT;
 
 	ret_code = i40e_read_nvm_aq(hw, 0x0, offset, 1, data, true);
-	*data = LE16_TO_CPU(*(__le16 *)data);
+	*data = LE16_TO_CPU(*(__force __le16 *)data);
 
 	return ret_code;
 }
@@ -472,7 +472,7 @@ static i40e_status i40e_read_nvm_buffer_aq(struct i40e_hw *hw, u16 offset,
 	} while (words_read < *words);
 
 	for (i = 0; i < *words; i++)
-		data[i] = LE16_TO_CPU(((__le16 *)data)[i]);
+		data[i] = LE16_TO_CPU(((__force __le16 *)data)[i]);
 
 read_nvm_buffer_aq_exit:
 	*words = words_read;

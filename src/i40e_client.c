@@ -290,7 +290,7 @@ void i40e_client_update_msix_info(struct i40e_pf *pf)
 }
 
 #if IS_ENABLED(CONFIG_MFD_CORE)
-DEFINE_IDA(i40e_peer_index_ida);
+static DEFINE_IDA(i40e_peer_index_ida);
 
 static int i40e_init_peer_mfd_devices(struct i40e_pf *pf)
 {

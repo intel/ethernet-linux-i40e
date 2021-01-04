@@ -209,6 +209,10 @@ i40e_status i40e_aq_write_nvm_config(struct i40e_hw *hw,
 				u8 cmd_flags, void *data, u16 buf_size,
 				u16 element_count,
 				struct i40e_asq_cmd_details *cmd_details);
+enum i40e_status_code
+i40e_aq_min_rollback_rev_update(struct i40e_hw *hw, u8 mode, u8 module,
+				u32 min_rrev,
+				struct i40e_asq_cmd_details *cmd_details);
 i40e_status i40e_aq_oem_post_update(struct i40e_hw *hw,
 				void *buff, u16 buff_size,
 				struct i40e_asq_cmd_details *cmd_details);
@@ -274,6 +278,14 @@ i40e_status i40e_aq_mac_address_write(struct i40e_hw *hw,
 i40e_status i40e_aq_config_vsi_bw_limit(struct i40e_hw *hw,
 				u16 seid, u16 credit, u8 max_credit,
 				struct i40e_asq_cmd_details *cmd_details);
+i40e_status i40e_aq_config_switch_comp_ets_bw_limit(
+	struct i40e_hw *hw, u16 seid,
+	struct i40e_aqc_configure_switching_comp_ets_bw_limit_data *bw_data,
+	struct i40e_asq_cmd_details *cmd_details);
+i40e_status i40e_aq_config_vsi_ets_sla_bw_limit(struct i40e_hw *hw,
+			u16 seid,
+			struct i40e_aqc_configure_vsi_ets_sla_bw_data *bw_data,
+			struct i40e_asq_cmd_details *cmd_details);
 i40e_status i40e_aq_dcb_updated(struct i40e_hw *hw,
 				struct i40e_asq_cmd_details *cmd_details);
 i40e_status i40e_aq_config_switch_comp_bw_limit(struct i40e_hw *hw,
@@ -331,6 +343,8 @@ i40e_aq_rem_cloud_filters_bb(struct i40e_hw *hw, u16 seid,
 			     u8 filter_count);
 i40e_status i40e_read_lldp_cfg(struct i40e_hw *hw,
 					struct i40e_lldp_variables *lldp_cfg);
+i40e_status i40e_aq_suspend_port_tx(struct i40e_hw *hw, u16 seid,
+				struct i40e_asq_cmd_details *cmd_details);
 i40e_status i40e_aq_replace_cloud_filters(struct i40e_hw *hw,
 		struct i40e_aqc_replace_cloud_filters_cmd *filters,
 		struct i40e_aqc_replace_cloud_filters_cmd_buf *cmd_buf);

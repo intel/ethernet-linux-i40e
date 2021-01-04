@@ -130,8 +130,9 @@ enum virtchnl_ops {
 	VIRTCHNL_OP_DEL_CLOUD_FILTER = 33,
 	/* opcode 34 is reserved */
 	/* opcodes 39, 40, 41, 42 and 43 are reserved */
-	/* opcode 44, 45, 46, 47, 48 and 49 are reserved */
-
+	/* opcode 44 is reserved */
+	/* opcode 45, 46, 47, 48 and 49 are reserved */
+	VIRTCHNL_OP_MAX,
 };
 
 /* These macros are used to generate compilation errors if a structure/union
@@ -236,6 +237,7 @@ VIRTCHNL_CHECK_STRUCT_LEN(16, virtchnl_vsi_resource);
 #define VIRTCHNL_VF_OFFLOAD_WB_ON_ITR		0x00000020
 #define VIRTCHNL_VF_OFFLOAD_REQ_QUEUES		0x00000040
 #define VIRTCHNL_VF_OFFLOAD_CRC			0x00000080
+	/* 0X00000100 is reserved */
 #define VIRTCHNL_VF_OFFLOAD_VLAN		0x00010000
 #define VIRTCHNL_VF_OFFLOAD_RX_POLLING		0x00020000
 #define VIRTCHNL_VF_OFFLOAD_RSS_PCTYPE_V2	0x00040000
@@ -246,9 +248,10 @@ VIRTCHNL_CHECK_STRUCT_LEN(16, virtchnl_vsi_resource);
 #define VIRTCHNL_VF_OFFLOAD_ADQ			0X00800000
 #define VIRTCHNL_VF_OFFLOAD_ADQ_V2		0X01000000
 #define VIRTCHNL_VF_OFFLOAD_USO			0X02000000
+	/* 0x04000000 is reserved */
+	/* 0X08000000 and 0X10000000 are reserved */
+	/* 0X20000000 is reserved */
 	/* 0X40000000 is reserved */
-	/* 0X04000000, 0X08000000 and 0X10000000 are reserved */
-	/* 0X80000000 is reserved */
 
 /* Define below the capability flags that are not offloads */
 #define VIRTCHNL_VF_CAP_ADV_LINK_SPEED		0x00000080
@@ -423,9 +426,36 @@ VIRTCHNL_CHECK_STRUCT_LEN(12, virtchnl_queue_select);
  * PF removes the filters and returns status.
  */
 
+/* VIRTCHNL_ETHER_ADDR_LEGACY
+ * Prior to adding the @type member to virtchnl_ether_addr, there were 2 pad
+ * bytes. Moving forward all VF drivers should not set type to
+ * VIRTCHNL_ETHER_ADDR_LEGACY. This is only here to not break previous/legacy
+ * behavior. The control plane function (i.e. PF) can use a best effort method
+ * of tracking the primary/device unicast in this case, but there is no
+ * guarantee and functionality depends on the implementation of the PF.
+ */
+
+/* VIRTCHNL_ETHER_ADDR_PRIMARY
+ * All VF drivers should set @type to VIRTCHNL_ETHER_ADDR_PRIMARY for the
+ * primary/device unicast MAC address filter for VIRTCHNL_OP_ADD_ETH_ADDR and
+ * VIRTCHNL_OP_DEL_ETH_ADDR. This allows for the underlying control plane
+ * function (i.e. PF) to accurately track and use this MAC address for
+ * displaying on the host and for VM/function reset.
+ */
+
+/* VIRTCHNL_ETHER_ADDR_EXTRA
+ * All VF drivers should set @type to VIRTCHNL_ETHER_ADDR_EXTRA for any extra
+ * unicast and/or multicast filters that are being added/deleted via
+ * VIRTCHNL_OP_DEL_ETH_ADDR/VIRTCHNL_OP_ADD_ETH_ADDR respectively.
+ */
 struct virtchnl_ether_addr {
 	u8 addr[ETH_ALEN];
-	u8 pad[2];
+	u8 type;
+#define VIRTCHNL_ETHER_ADDR_LEGACY	0
+#define VIRTCHNL_ETHER_ADDR_PRIMARY	1
+#define VIRTCHNL_ETHER_ADDR_EXTRA	2
+#define VIRTCHNL_ETHER_ADDR_TYPE_MASK	3 /* first two bits of type are valid */
+	u8 pad;
 };
 
 VIRTCHNL_CHECK_STRUCT_LEN(8, virtchnl_ether_addr);

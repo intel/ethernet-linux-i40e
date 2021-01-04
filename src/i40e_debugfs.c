@@ -190,8 +190,7 @@ static void i40e_dbg_dump_vsi_seid(struct i40e_pf *pf, int seid)
 	dev_info(&pf->pdev->dev, "    vlgrp is %s\n",
 		 vsi->vlgrp ? "<valid>" : "<null>");
 #else
-	dev_info(&pf->pdev->dev, "    active_vlans is %s\n",
-		 vsi->active_vlans ? "<valid>" : "<null>");
+	dev_info(&pf->pdev->dev, "    active_vlans is <valid>\n");
 #endif /* HAVE_VLAN_RX_REGISTER */
 	dev_info(&pf->pdev->dev,
 		 "    flags = 0x%016llx, netdev_registered = %i, current_netdev_flags = 0x%04x\n",

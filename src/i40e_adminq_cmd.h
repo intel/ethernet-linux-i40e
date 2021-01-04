@@ -11,8 +11,8 @@
  */
 
 #define I40E_FW_API_VERSION_MAJOR	0x0001
-#define I40E_FW_API_VERSION_MINOR_X722	0x000A
-#define I40E_FW_API_VERSION_MINOR_X710	0x000B
+#define I40E_FW_API_VERSION_MINOR_X722	0x000B
+#define I40E_FW_API_VERSION_MINOR_X710	0x000D
 
 #define I40E_FW_MINOR_VERSION(_h) ((_h)->mac.type == I40E_MAC_XL710 ? \
 					I40E_FW_API_VERSION_MINOR_X710 : \
@@ -242,6 +242,7 @@ enum i40e_admin_queue_opc {
 	i40e_aqc_opc_nvm_config_read		= 0x0704,
 	i40e_aqc_opc_nvm_config_write		= 0x0705,
 	i40e_aqc_opc_nvm_update_in_process	= 0x0706,
+	i40e_aqc_opc_rollback_revision_update	= 0x0707,
 	i40e_aqc_opc_oem_post_update		= 0x0720,
 	i40e_aqc_opc_thermal_sensor		= 0x0721,
 
@@ -1222,7 +1223,7 @@ struct i40e_aqc_set_vsi_promiscuous_modes {
 #define I40E_AQC_SET_VSI_PROMISC_BROADCAST	0x04
 #define I40E_AQC_SET_VSI_DEFAULT		0x08
 #define I40E_AQC_SET_VSI_PROMISC_VLAN		0x10
-#define I40E_AQC_SET_VSI_PROMISC_TX		0x8000
+#define I40E_AQC_SET_VSI_PROMISC_RX_ONLY	0x8000
 	__le16	seid;
 #define I40E_AQC_VSI_PROM_CMD_SEID_MASK		0x3FF
 	__le16	vlan_tag;
@@ -2301,7 +2302,6 @@ enum i40e_aq_phy_reg_type {
 	I40E_AQC_PHY_REG_EXERNAL_MODULE	= 0x3
 };
 
-#pragma pack(1)
 /* Run PHY Activity (0x0626) */
 struct i40e_aqc_run_phy_activity {
 	u8	cmd_flags;
@@ -2325,10 +2325,7 @@ struct i40e_aqc_run_phy_activity {
 			__le32	data1;
 		} resp;
 	} params;
-};
-#pragma pack()
-
-I40E_CHECK_CMD_LENGTH(i40e_aqc_run_phy_activity);
+} __packed;
 
 /* Set PHY Register command (0x0628) */
 /* Get PHY Register command (0x0629) */
@@ -2436,6 +2433,23 @@ struct i40e_aqc_nvm_config_data_immediate_field {
 };
 
 I40E_CHECK_STRUCT_LEN(0xc, i40e_aqc_nvm_config_data_immediate_field);
+
+/* Minimal Rollback Revision Update (direct 0x0707) */
+struct i40e_aqc_rollback_revision_update {
+	u8	optin_mode; /* bool */
+#define I40E_AQ_RREV_OPTIN_MODE			0x01
+	u8	module_selected;
+#define I40E_AQ_RREV_MODULE_PCIE_ANALOG		0
+#define I40E_AQ_RREV_MODULE_PHY_ANALOG		1
+#define I40E_AQ_RREV_MODULE_OPTION_ROM		2
+#define I40E_AQ_RREV_MODULE_EMP_IMAGE		3
+#define I40E_AQ_RREV_MODULE_PE_IMAGE		4
+	u8	reserved1[2];
+	u32	min_rrev;
+	u8	reserved2[8];
+};
+
+I40E_CHECK_CMD_LENGTH(i40e_aqc_rollback_revision_update);
 
 /* OEM Post Update (indirect 0x0720)
  * no command data struct used

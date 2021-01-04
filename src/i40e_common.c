@@ -1983,6 +1983,22 @@ i40e_status i40e_aq_set_phy_debug(struct i40e_hw *hw, u8 cmd_flags,
 }
 
 /**
+ * i40e_hw_ver_ge
+ * @hw: pointer to the hw struct
+ * @maj: api major value
+ * @min: api minor value
+ *
+ * Assert whether current HW api version is greater/equal than provided.
+ **/
+static bool i40e_hw_ver_ge(struct i40e_hw *hw, u16 maj, u16 min)
+{
+	if (hw->aq.api_maj_ver > maj ||
+	    (hw->aq.api_maj_ver == maj && hw->aq.api_min_ver >= min))
+		return true;
+	return false;
+}
+
+/**
  * i40e_aq_add_vsi
  * @hw: pointer to the hw struct
  * @vsi_ctx: pointer to a vsi context struct
@@ -2108,18 +2124,16 @@ i40e_status i40e_aq_set_vsi_unicast_promiscuous(struct i40e_hw *hw,
 
 	if (set) {
 		flags |= I40E_AQC_SET_VSI_PROMISC_UNICAST;
-		if (rx_only_promisc &&
-		    (((hw->aq.api_maj_ver == 1) && (hw->aq.api_min_ver >= 5)) ||
-		     (hw->aq.api_maj_ver > 1)))
-			flags |= I40E_AQC_SET_VSI_PROMISC_TX;
+		if (rx_only_promisc && i40e_hw_ver_ge(hw, 1, 5))
+			flags |= I40E_AQC_SET_VSI_PROMISC_RX_ONLY;
 	}
 
 	cmd->promiscuous_flags = CPU_TO_LE16(flags);
 
 	cmd->valid_flags = CPU_TO_LE16(I40E_AQC_SET_VSI_PROMISC_UNICAST);
-	if (((hw->aq.api_maj_ver >= 1) && (hw->aq.api_min_ver >= 5)) ||
-	     (hw->aq.api_maj_ver > 1))
-		cmd->valid_flags |= CPU_TO_LE16(I40E_AQC_SET_VSI_PROMISC_TX);
+	if (i40e_hw_ver_ge(hw, 1, 5))
+		cmd->valid_flags |=
+			CPU_TO_LE16(I40E_AQC_SET_VSI_PROMISC_RX_ONLY);
 
 	cmd->seid = CPU_TO_LE16(seid);
 	status = i40e_asq_send_command_atomic(hw, &desc, NULL, 0,
@@ -2254,11 +2268,17 @@ i40e_status i40e_aq_set_vsi_uc_promisc_on_vlan(struct i40e_hw *hw,
 	i40e_fill_default_direct_cmd_desc(&desc,
 					i40e_aqc_opc_set_vsi_promiscuous_modes);
 
-	if (enable)
+	if (enable) {
 		flags |= I40E_AQC_SET_VSI_PROMISC_UNICAST;
+		if (i40e_hw_ver_ge(hw, 1, 5))
+			flags |= I40E_AQC_SET_VSI_PROMISC_RX_ONLY;
+	}
 
 	cmd->promiscuous_flags = CPU_TO_LE16(flags);
 	cmd->valid_flags = CPU_TO_LE16(I40E_AQC_SET_VSI_PROMISC_UNICAST);
+	if (i40e_hw_ver_ge(hw, 1, 5))
+		cmd->valid_flags |=
+			CPU_TO_LE16(I40E_AQC_SET_VSI_PROMISC_RX_ONLY);
 	cmd->seid = CPU_TO_LE16(seid);
 	cmd->vlan_tag = CPU_TO_LE16(vid | I40E_AQC_SET_VSI_VLAN_VALID);
 
@@ -3308,6 +3328,34 @@ i40e_status i40e_aq_nvm_update_in_process(struct i40e_hw *hw,
 
 	if (update_flow_state)
 		cmd->command |= I40E_AQ_UPDATE_FLOW_START;
+
+	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
+
+	return status;
+}
+
+/**
+ * i40e_aq_min_rollback_rev_update - triggers an ow after update
+ * @hw: pointer to the hw struct
+ * @mode: opt-in mode, 1b for single module update, 0b for bulk update
+ * @module: module to be updated. Ignored if mode is 0b
+ * @min_rrev: value of the new minimal version. Ignored if mode is 0b
+ * @cmd_details: pointer to command details structure or NULL
+ **/
+enum i40e_status_code
+i40e_aq_min_rollback_rev_update(struct i40e_hw *hw, u8 mode, u8 module,
+				u32 min_rrev,
+				struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aq_desc desc;
+	struct i40e_aqc_rollback_revision_update *cmd =
+		(struct i40e_aqc_rollback_revision_update *)&desc.params.raw;
+	i40e_status status;
+
+	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_rollback_revision_update);
+	cmd->optin_mode = mode;
+	cmd->module_selected = module;
+	cmd->min_rrev = min_rrev;
 
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 
@@ -4443,6 +4491,23 @@ i40e_status i40e_aq_config_vsi_bw_limit(struct i40e_hw *hw,
 }
 
 /**
+ * i40e_aq_config_vsi_ets_sla_bw_limit - Config VSI BW Limit per TC
+ * @hw: pointer to the hw struct
+ * @seid: VSI seid
+ * @bw_data: Buffer holding enabled TCs, per TC BW limit/credits
+ * @cmd_details: pointer to command details structure or NULL
+ **/
+i40e_status i40e_aq_config_vsi_ets_sla_bw_limit(struct i40e_hw *hw,
+			u16 seid,
+			struct i40e_aqc_configure_vsi_ets_sla_bw_data *bw_data,
+			struct i40e_asq_cmd_details *cmd_details)
+{
+	return i40e_aq_tx_sched_cmd(hw, seid, (void *)bw_data, sizeof(*bw_data),
+				    i40e_aqc_opc_configure_vsi_ets_sla_bw_limit,
+				    cmd_details);
+}
+
+/**
  * i40e_aq_config_vsi_tc_bw - Config VSI BW Allocation per TC
  * @hw: pointer to the hw struct
  * @seid: VSI seid
@@ -4491,6 +4556,23 @@ i40e_status i40e_aq_config_switch_comp_bw_config(struct i40e_hw *hw,
 {
 	return i40e_aq_tx_sched_cmd(hw, seid, (void *)bw_data, sizeof(*bw_data),
 			    i40e_aqc_opc_configure_switching_comp_bw_config,
+			    cmd_details);
+}
+
+/**
+ * i40e_aq_config_switch_comp_ets_bw_limit - Config Switch comp BW Limit per TC
+ * @hw: pointer to the hw struct
+ * @seid: seid of the switching component
+ * @bw_data: Buffer holding enabled TCs, per TC BW limit/credits
+ * @cmd_details: pointer to command details structure or NULL
+ **/
+i40e_status i40e_aq_config_switch_comp_ets_bw_limit(
+	struct i40e_hw *hw, u16 seid,
+	struct i40e_aqc_configure_switching_comp_ets_bw_limit_data *bw_data,
+	struct i40e_asq_cmd_details *cmd_details)
+{
+	return i40e_aq_tx_sched_cmd(hw, seid, (void *)bw_data, sizeof(*bw_data),
+			    i40e_aqc_opc_configure_switching_comp_ets_bw_limit,
 			    cmd_details);
 }
 
@@ -5135,6 +5217,31 @@ i40e_status i40e_aq_alternate_read(struct i40e_hw *hw,
 		if (reg_val1 != NULL)
 			*reg_val1 = LE32_TO_CPU(cmd_resp->data1);
 	}
+
+	return status;
+}
+
+/**
+ * i40e_aq_suspend_port_tx
+ * @hw: pointer to the hardware structure
+ * @seid: port seid
+ * @cmd_details: pointer to command details structure or NULL
+ *
+ * Suspend port's Tx traffic
+ **/
+i40e_status i40e_aq_suspend_port_tx(struct i40e_hw *hw, u16 seid,
+				struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aq_desc desc;
+	i40e_status status;
+	struct i40e_aqc_tx_sched_ind *cmd =
+		(struct i40e_aqc_tx_sched_ind *)&desc.params.raw;
+
+	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_suspend_port_tx);
+
+	cmd->vsi_seid = CPU_TO_LE16(seid);
+
+	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 
 	return status;
 }
@@ -5889,15 +5996,23 @@ i40e_status i40e_get_phy_lpi_status(struct i40e_hw *hw,
 					      struct i40e_hw_port_stats *stat)
 {
 	i40e_status ret = I40E_SUCCESS;
+	bool eee_mrvl_phy;
+	bool eee_bcm_phy;
 	u32 val;
 
 	stat->rx_lpi_status = 0;
 	stat->tx_lpi_status = 0;
 
-	if ((hw->device_id == I40E_DEV_ID_10G_BASE_T_BC ||
-	     hw->device_id == I40E_DEV_ID_5G_BASE_T_BC) &&
-	    (hw->phy.link_info.link_speed == I40E_LINK_SPEED_2_5GB ||
-	     hw->phy.link_info.link_speed == I40E_LINK_SPEED_5GB)) {
+	eee_bcm_phy =
+		(hw->device_id == I40E_DEV_ID_10G_BASE_T_BC ||
+		 hw->device_id == I40E_DEV_ID_5G_BASE_T_BC) &&
+		(hw->phy.link_info.link_speed == I40E_LINK_SPEED_2_5GB ||
+		 hw->phy.link_info.link_speed == I40E_LINK_SPEED_5GB);
+	eee_mrvl_phy =
+		hw->device_id == I40E_DEV_ID_1G_BASE_T_X722;
+
+	if (eee_bcm_phy || eee_mrvl_phy) {
+		// read Clause 45 PCS Status 1 register
 		ret = i40e_aq_get_phy_register(hw,
 					       I40E_AQ_PHY_REG_ACCESS_EXTERNAL,
 					       I40E_BCM_PHY_PCS_STATUS1_PAGE,

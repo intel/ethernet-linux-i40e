@@ -302,6 +302,8 @@ static const struct i40e_priv_flags i40e_gstrings_priv_flags[] = {
 	I40E_PRIV_FLAG("disable-fw-lldp", I40E_FLAG_DISABLE_FW_LLDP, 0),
 	I40E_PRIV_FLAG("rs-fec", I40E_FLAG_RS_FEC, 0),
 	I40E_PRIV_FLAG("base-r-fec", I40E_FLAG_BASE_R_FEC, 0),
+	I40E_PRIV_FLAG("multiple-traffic-classes",
+		       I40E_FLAG_MULTIPLE_TRAFFIC_CLASSES, 0),
 };
 
 #define I40E_PRIV_FLAGS_STR_LEN ARRAY_SIZE(i40e_gstrings_priv_flags)
@@ -1175,8 +1177,7 @@ static int i40e_set_link_ksettings(struct net_device *netdev,
 			 */
 			if (ethtool_link_ksettings_test_link_mode(
 				     &safe_ks, supported, Autoneg) &&
-			    hw->phy.link_info.phy_type !=
-			    I40E_PHY_TYPE_10GBASE_T) {
+			    hw->phy.media_type != I40E_MEDIA_TYPE_BASET) {
 				netdev_info(netdev, "Autoneg cannot be disabled on this phy\n");
 				err = -EINVAL;
 				goto done;
@@ -1667,12 +1668,7 @@ static int i40e_set_fec_param(struct net_device *netdev,
 
 	if (hw->device_id != I40E_DEV_ID_25G_SFP28 &&
 	    hw->device_id != I40E_DEV_ID_25G_B &&
-	    hw->device_id != I40E_DEV_ID_KX_X722 &&
-	    hw->device_id != I40E_DEV_ID_QSFP_X722 &&
-	    hw->device_id != I40E_DEV_ID_SFP_X722 &&
-	    hw->device_id != I40E_DEV_ID_1G_BASE_T_X722 &&
-	    hw->device_id != I40E_DEV_ID_10G_BASE_T_X722 &&
-	    hw->device_id != I40E_DEV_ID_SFP_I_X722) {
+	    hw->device_id != I40E_DEV_ID_KX_X722) {
 		err = -EPERM;
 		goto done;
 	}
@@ -1680,16 +1676,28 @@ static int i40e_set_fec_param(struct net_device *netdev,
 	if (hw->mac.type == I40E_MAC_X722 &&
 	    !(hw->flags & I40E_HW_FLAG_X722_FEC_REQUEST_CAPABLE)) {
 		netdev_err(netdev, "Setting FEC encoding not supported by firmware. Please update the NVM image.\n");
-		return -EINVAL;
+		return -EOPNOTSUPP;
 	}
 
 	switch (fecparam->fec) {
 	case ETHTOOL_FEC_AUTO:
-		fec_cfg = I40E_AQ_SET_FEC_AUTO;
+		if (hw->mac.type == I40E_MAC_X722) {
+			dev_warn(&pf->pdev->dev, "Unsupported FEC mode: AUTO");
+			err = -EINVAL;
+			goto done;
+		} else {
+			fec_cfg = I40E_AQ_SET_FEC_AUTO;
+		}
 		break;
 	case ETHTOOL_FEC_RS:
-		fec_cfg = (I40E_AQ_SET_FEC_REQUEST_RS |
-			     I40E_AQ_SET_FEC_ABILITY_RS);
+		if (hw->mac.type == I40E_MAC_X722) {
+			dev_warn(&pf->pdev->dev, "Unsupported FEC mode: RS");
+			err = -EINVAL;
+			goto done;
+		} else {
+			fec_cfg = (I40E_AQ_SET_FEC_REQUEST_RS |
+				   I40E_AQ_SET_FEC_ABILITY_RS);
+		}
 		break;
 	case ETHTOOL_FEC_BASER:
 		fec_cfg = (I40E_AQ_SET_FEC_REQUEST_KR |
@@ -3700,8 +3708,8 @@ static int i40e_parse_rx_flow_user_data(struct i40e_pf *pf,
 	if (!(fsp->flow_type & FLOW_EXT))
 		return 0;
 
-	value = be64_to_cpu(*((__be64 *)fsp->h_ext.data));
-	mask = be64_to_cpu(*((__be64 *)fsp->m_ext.data));
+	value = be64_to_cpu(*((__force __be64 *)fsp->h_ext.data));
+	mask = be64_to_cpu(*((__force __be64 *)fsp->m_ext.data));
 
 #define I40E_USERDEF_CLOUD_FILTER	BIT_ULL(63)
 #define I40E_USERDEF_CLOUD_OUTERIP	BIT_ULL(62)
@@ -3829,8 +3837,8 @@ static void i40e_fill_rx_flow_user_data(struct ethtool_rx_flow_spec *fsp,
 	if (value || mask)
 		fsp->flow_type |= FLOW_EXT;
 
-	*((__be64 *)fsp->h_ext.data) = cpu_to_be64(value);
-	*((__be64 *)fsp->m_ext.data) = cpu_to_be64(mask);
+	*((__force __be64 *)fsp->h_ext.data) = cpu_to_be64(value);
+	*((__force __be64 *)fsp->m_ext.data) = cpu_to_be64(mask);
 }
 
 /**
@@ -4027,6 +4035,14 @@ no_input_set:
 	else
 		fsp->ring_cookie = rule->q_index;
 
+	if (rule->vlan_tag) {
+		fsp->h_ext.vlan_etype = rule->vlan_etype;
+		fsp->m_ext.vlan_etype = htons(0xFFFF);
+		fsp->h_ext.vlan_tci = rule->vlan_tag;
+		fsp->m_ext.vlan_tci = htons(0xFFFF);
+		fsp->flow_type |= FLOW_EXT;
+	}
+
 	if (rule->dest_vsi != pf->vsi[pf->lan_vsi]->id) {
 		struct i40e_vsi *vsi;
 
@@ -4134,7 +4150,7 @@ static int i40e_get_cloud_filter_entry(struct i40e_pf *pf,
 			fsp->flow_type = IP_USER_FLOW;
 		}
 
-		fsp->h_u.usr_ip4_spec.ip4dst = filter->inner_ip[0];
+		fsp->h_u.usr_ip4_spec.ip4dst = filter->dst_ipv4;
 		fsp->h_u.usr_ip4_spec.ip_ver = ETH_RX_NFC_IP4;
 	} else {
 		fsp->flow_type = ETHER_FLOW;
@@ -4458,7 +4474,7 @@ static int i40e_cloud_filter_mask2flags(struct i40e_pf *pf,
 			i |= I40E_CLOUD_FIELD_IIP;
 		} else {
 			dev_info(&pf->pdev->dev, "Bad UDP dst mask 0x%04x\n",
-				 be32_to_cpu(fsp->m_u.udp_ip4_spec.pdst));
+				 be16_to_cpu(fsp->m_u.udp_ip4_spec.pdst));
 			return I40E_ERR_CONFIG;
 		}
 		break;
@@ -4734,12 +4750,8 @@ static int i40e_add_cloud_filter_ethtool(struct i40e_vsi *vsi,
 			kfree(filter);
 			return I40E_ERR_CONFIG;
 		}
-		if (userdef->outer_ip) {
-			filter->dst_ipv4 = fsp->h_u.usr_ip4_spec.ip4dst;
-			filter->n_proto = ETH_P_IP;
-		} else {
-			filter->inner_ip[0] = fsp->h_u.usr_ip4_spec.ip4dst;
-		}
+		filter->dst_ipv4 = fsp->h_u.usr_ip4_spec.ip4dst;
+		filter->n_proto = ETH_P_IP;
 		break;
 
 	case UDP_V4_FLOW:
@@ -5407,8 +5419,9 @@ static int i40e_check_fdir_input_set(struct i40e_vsi *vsi,
 				     struct i40e_rx_flow_userdef *userdef)
 {
 #ifdef HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC
-	static const __be32 ipv6_full_mask[4] = {0xffffffff, 0xffffffff,
-		0xffffffff, 0xffffffff};
+	static const __be32 ipv6_full_mask[4] = {
+		cpu_to_be32(0xffffffff), cpu_to_be32(0xffffffff),
+		cpu_to_be32(0xffffffff), cpu_to_be32(0xffffffff)};
 	struct ethtool_tcpip6_spec *tcp_ip6_spec;
 	struct ethtool_usrip6_spec *usr_ip6_spec;
 #endif /* HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC */
@@ -5658,6 +5671,19 @@ static int i40e_check_fdir_input_set(struct i40e_vsi *vsi,
 		return -EOPNOTSUPP;
 	}
 
+	if (fsp->flow_type & FLOW_EXT) {
+	/* Allow only 802.1Q and no etype defined, as
+	 * later it's modified to 0x8100
+	 */
+		if (fsp->h_ext.vlan_etype != htons(ETH_P_8021Q) &&
+		    fsp->h_ext.vlan_etype != 0)
+			return -EOPNOTSUPP;
+		if (fsp->m_ext.vlan_tci == htons(0xFFFF))
+			new_mask |= I40E_VLAN_SRC_MASK;
+		else
+			new_mask &= ~I40E_VLAN_SRC_MASK;
+	}
+
 	/* First, clear all flexible filter entries */
 	new_mask &= ~I40E_FLEX_INPUT_MASK;
 
@@ -5837,7 +5863,9 @@ static bool i40e_match_fdir_filter(struct i40e_fdir_filter *a,
 	    a->dst_port != b->dst_port ||
 	    a->src_port != b->src_port ||
 	    a->flow_type != b->flow_type ||
-	    a->ipl4_proto != b->ipl4_proto)
+	    a->ipl4_proto != b->ipl4_proto ||
+	    a->vlan_tag != b->vlan_tag ||
+	    a->vlan_etype != b->vlan_etype)
 		return false;
 
 	return true;
@@ -5995,7 +6023,11 @@ static int i40e_add_fdir_ethtool(struct i40e_vsi *vsi,
 	input->fd_status = I40E_FILTER_PROGRAM_DESC_FD_STATUS_FD_ID;
 	input->cnt_index  = I40E_FD_SB_STAT_IDX(pf->hw.pf_id);
 	input->flow_type = fsp->flow_type & ~FLOW_EXT;
-
+	input->vlan_etype = fsp->h_ext.vlan_etype;
+	if (!fsp->m_ext.vlan_etype && fsp->h_ext.vlan_tci)
+		input->vlan_etype = cpu_to_be16(ETH_P_8021Q);
+	if (fsp->m_ext.vlan_tci && input->vlan_etype)
+		input->vlan_tag = fsp->h_ext.vlan_tci;
 #ifdef HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC
 	if (input->flow_type == IPV6_USER_FLOW ||
 	    input->flow_type == UDP_V6_FLOW ||
@@ -6412,7 +6444,7 @@ static int i40e_set_priv_flags(struct net_device *dev, u32 flags)
 	enum i40e_admin_queue_err adq_err;
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_pf *pf = vsi->back;
-	bool is_reset_needed;
+	u32 reset_needed = 0;
 	i40e_status status;
 	u32 i, j;
 
@@ -6457,9 +6489,11 @@ static int i40e_set_priv_flags(struct net_device *dev, u32 flags)
 flags_complete:
 	changed_flags = orig_flags ^ new_flags;
 
-	is_reset_needed = !!(changed_flags & (I40E_FLAG_VEB_STATS_ENABLED |
-		I40E_FLAG_LEGACY_RX | I40E_FLAG_SOURCE_PRUNING_DISABLED |
-		I40E_FLAG_DISABLE_FW_LLDP));
+	if (changed_flags & I40E_FLAG_DISABLE_FW_LLDP)
+		reset_needed = I40E_PF_RESET_AND_REBUILD_FLAG;
+	if (changed_flags & (I40E_FLAG_VEB_STATS_ENABLED |
+	    I40E_FLAG_LEGACY_RX | I40E_FLAG_SOURCE_PRUNING_DISABLED))
+		reset_needed = BIT(__I40E_PF_RESET_REQUESTED);
 
 	/* Before we finalize any flag changes, we need to perform some
 	 * checks to ensure that the changes are supported and safe.
@@ -6478,7 +6512,8 @@ flags_complete:
 	 * disable LLDP, however we _must_ not allow the user to enable/disable
 	 * LLDP with this flag on unsupported FW versions.
 	 */
-	if (changed_flags & I40E_FLAG_DISABLE_FW_LLDP) {
+	if (changed_flags & (I40E_FLAG_DISABLE_FW_LLDP |
+	    I40E_FLAG_MULTIPLE_TRAFFIC_CLASSES)) {
 		if (!(pf->hw.flags & I40E_HW_FLAG_FW_LLDP_STOPPABLE)) {
 			dev_warn(&pf->pdev->dev,
 				 "Device does not support changing FW LLDP\n");
@@ -6497,12 +6532,7 @@ flags_complete:
 	if (changed_flags & I40E_FLAG_BASE_R_FEC &&
 	    pf->hw.device_id != I40E_DEV_ID_25G_SFP28 &&
 	    pf->hw.device_id != I40E_DEV_ID_25G_B &&
-	    pf->hw.device_id != I40E_DEV_ID_KX_X722 &&
-	    pf->hw.device_id != I40E_DEV_ID_QSFP_X722 &&
-	    pf->hw.device_id != I40E_DEV_ID_SFP_X722 &&
-	    pf->hw.device_id != I40E_DEV_ID_1G_BASE_T_X722 &&
-	    pf->hw.device_id != I40E_DEV_ID_10G_BASE_T_X722 &&
-	    pf->hw.device_id != I40E_DEV_ID_SFP_I_X722) {
+	    pf->hw.device_id != I40E_DEV_ID_KX_X722) {
 		dev_warn(&pf->pdev->dev,
 			 "Device does not support changing FEC configuration\n");
 		return -EOPNOTSUPP;
@@ -6569,24 +6599,31 @@ flags_complete:
 		dev_warn(&pf->pdev->dev,
 			 "Turning on link-down-on-close flag may affect other partitions\n");
 
-	if (changed_flags & I40E_FLAG_DISABLE_FW_LLDP) {
-		if (new_flags & I40E_FLAG_DISABLE_FW_LLDP) {
-			struct i40e_dcbx_config *dcbcfg;
+	if ((changed_flags & I40E_FLAG_DISABLE_FW_LLDP) &&
+	    orig_flags & I40E_FLAG_MULTIPLE_TRAFFIC_CLASSES) {
+		dev_warn(&pf->pdev->dev,
+			 "Cannot change FW LLDP setting, disable multiple-traffic-class to change this setting\n");
+		return -EINVAL;
+	}
 
+	if ((changed_flags & I40E_FLAG_DISABLE_FW_LLDP) ||
+	    (changed_flags & I40E_FLAG_MULTIPLE_TRAFFIC_CLASSES)) {
+		if ((new_flags & I40E_FLAG_DISABLE_FW_LLDP) &&
+		    !(new_flags & I40E_FLAG_MULTIPLE_TRAFFIC_CLASSES)) {
+#ifdef CONFIG_DCB
+			i40e_dcb_sw_default_config(pf, I40E_ETS_WILLING_MODE);
+#endif /* CONFIG_DCB */
+			i40e_aq_cfg_lldp_mib_change_event(&pf->hw, false, NULL);
 			i40e_aq_stop_lldp(&pf->hw, true, false, NULL);
-			i40e_aq_set_dcb_parameters(&pf->hw, true, NULL);
-			/* reset local_dcbx_config to default */
-			dcbcfg = &pf->hw.local_dcbx_config;
-			dcbcfg->etscfg.willing = 1;
-			dcbcfg->etscfg.maxtcs = 0;
-			dcbcfg->etscfg.tcbwtable[0] = 100;
-			for (i = 1; i < I40E_MAX_TRAFFIC_CLASS; i++)
-				dcbcfg->etscfg.tcbwtable[i] = 0;
-			for (i = 0; i < I40E_MAX_USER_PRIORITY; i++)
-				dcbcfg->etscfg.prioritytable[i] = 0;
-			dcbcfg->etscfg.tsatable[0] = I40E_IEEE_TSA_ETS;
-			dcbcfg->pfc.willing = 1;
-			dcbcfg->pfc.pfccap = I40E_MAX_TRAFFIC_CLASS;
+		} else if (new_flags &
+			   I40E_FLAG_MULTIPLE_TRAFFIC_CLASSES) {
+#ifdef CONFIG_DCB
+			i40e_dcb_sw_default_config(pf,
+						   I40E_ETS_NON_WILLING_MODE);
+#endif /* CONFIG_DCB */
+			i40e_aq_cfg_lldp_mib_change_event(&pf->hw, false, NULL);
+			i40e_aq_stop_lldp(&pf->hw, true, false, NULL);
+			new_flags &= ~(I40E_FLAG_DISABLE_FW_LLDP);
 		} else {
 			status = i40e_aq_start_lldp(&pf->hw, false, NULL);
 			if (status != I40E_SUCCESS) {
@@ -6595,7 +6632,7 @@ flags_complete:
 				case I40E_AQ_RC_EEXIST:
 					dev_warn(&pf->pdev->dev,
 						 "FW LLDP agent is already running\n");
-					is_reset_needed = false;
+					reset_needed = 0;
 					break;
 				case I40E_AQ_RC_EPERM:
 					dev_warn(&pf->pdev->dev,
@@ -6603,11 +6640,11 @@ flags_complete:
 					return (-EINVAL);
 				default:
 					dev_warn(&pf->pdev->dev,
-						 "Starting FW LLDP agent failed: error: %s, %s\n",
+						 "Starting FW LLDP agent failed with error: %s, %s\n",
 						 i40e_stat_str(&pf->hw,
-							       status),
+						 status),
 						 i40e_aq_str(&pf->hw,
-							     adq_err));
+						 adq_err));
 					return (-EINVAL);
 				}
 			}
@@ -6624,8 +6661,8 @@ flags_complete:
 	/* Issue reset to cause things to take effect, as additional bits
 	 * are added we will need to create a mask of bits requiring reset
 	 */
-	if (is_reset_needed)
-		i40e_do_reset(pf, BIT(__I40E_PF_RESET_REQUESTED), true);
+	if (reset_needed)
+		i40e_do_reset(pf, reset_needed, true);
 
 	return 0;
 }
@@ -6893,6 +6930,7 @@ static int i40e_set_eee(struct net_device *netdev, struct ethtool_eee *edata)
 
 	/* Cache current PHY configuration */
 	config.phy_type = abilities.phy_type;
+	config.phy_type_ext = abilities.phy_type_ext;
 	config.link_speed = abilities.link_speed;
 	config.abilities = abilities.abilities |
 			   I40E_AQ_PHY_ENABLE_ATOMIC_LINK;
@@ -6904,10 +6942,10 @@ static int i40e_set_eee(struct net_device *netdev, struct ethtool_eee *edata)
 	/* Set desired EEE state */
 	if (edata->eee_enabled) {
 		config.eee_capability = eee_capability;
-		config.eeer |= I40E_PRTPM_EEER_TX_LPI_EN_MASK;
+		config.eeer |= cpu_to_le32(I40E_PRTPM_EEER_TX_LPI_EN_MASK);
 	} else {
 		config.eee_capability = 0;
-		config.eeer &= ~I40E_PRTPM_EEER_TX_LPI_EN_MASK;
+		config.eeer &= ~cpu_to_le32(I40E_PRTPM_EEER_TX_LPI_EN_MASK);
 	}
 
 	/* Apply modified PHY configuration */
