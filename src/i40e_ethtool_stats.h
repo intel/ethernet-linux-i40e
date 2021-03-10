@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2020 Intel Corporation. */
+/* Copyright(c) 2013 - 2021 Intel Corporation. */
 
 /* ethtool statistics helpers */
 
@@ -270,7 +270,7 @@ static void __i40e_add_stat_strings(u8 **p, const struct i40e_stats stats[],
 		va_list args;
 
 		va_start(args, size);
-		vsnprintf(*p, ETH_GSTRING_LEN, stats[i].stat_string, args);
+		vsnprintf((char *)*p, ETH_GSTRING_LEN, stats[i].stat_string, args);
 		*p += ETH_GSTRING_LEN;
 		va_end(args);
 	}

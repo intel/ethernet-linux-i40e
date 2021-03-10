@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2013 - 2020 Intel Corporation. */
+/* Copyright(c) 2013 - 2021 Intel Corporation. */
 
 #include "i40e_adminq.h"
 #include "i40e_prototype.h"
@@ -314,8 +314,14 @@ static void i40e_parse_cee_pgcfg_tlv(struct i40e_cee_feat_tlv *tlv,
 	 *        |pg0|pg1|pg2|pg3|pg4|pg5|pg6|pg7|
 	 *        ---------------------------------
 	 */
-	for (i = 0; i < I40E_MAX_TRAFFIC_CLASS; i++)
+	for (i = 0; i < I40E_MAX_TRAFFIC_CLASS; i++) {
 		etscfg->tcbwtable[i] = buf[offset++];
+
+		if (etscfg->prioritytable[i] == I40E_CEE_PGID_STRICT)
+			dcbcfg->etscfg.tsatable[i] = I40E_IEEE_TSA_STRICT;
+		else
+			dcbcfg->etscfg.tsatable[i] = I40E_IEEE_TSA_ETS;
+	}
 
 	/* Number of TCs supported (1 octet) */
 	etscfg->maxtcs = buf[offset];

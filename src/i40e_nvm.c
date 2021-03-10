@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2013 - 2020 Intel Corporation. */
+/* Copyright(c) 2013 - 2021 Intel Corporation. */
 
 #include "i40e_prototype.h"
 
@@ -73,7 +73,8 @@ i40e_status i40e_acquire_nvm(struct i40e_hw *hw,
 	if (ret_code)
 		i40e_debug(hw, I40E_DEBUG_NVM,
 			   "NVM acquire type %d failed time_left=%llu ret=%d aq_err=%d\n",
-			   access, time_left, ret_code, hw->aq.asq_last_status);
+			   access, (unsigned long long)time_left, ret_code,
+			   hw->aq.asq_last_status);
 
 	if (ret_code && time_left) {
 		/* Poll until the current NVM owner timeouts */
@@ -95,7 +96,8 @@ i40e_status i40e_acquire_nvm(struct i40e_hw *hw,
 			hw->nvm.hw_semaphore_timeout = 0;
 			i40e_debug(hw, I40E_DEBUG_NVM,
 				   "NVM acquire timed out, wait %llu ms before trying again. status=%d aq_err=%d\n",
-				   time_left, ret_code, hw->aq.asq_last_status);
+				   (unsigned long long)time_left, ret_code,
+				   hw->aq.asq_last_status);
 		}
 	}
 

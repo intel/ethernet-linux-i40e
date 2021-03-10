@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2013 - 2020 Intel Corporation. */
+/* Copyright(c) 2013 - 2021 Intel Corporation. */
 
 /* this lets the macros that return timespec64 or structs compile cleanly with
  * W=2
@@ -37,6 +37,12 @@ enum i40e_ptp_pin {
 	SDP3_2 = 0,
 	SDP3_3,
 	GPIO_4
+};
+
+enum i40e_can_set_pins_t {
+	CANT_DO_PINS = -1,
+	CAN_SET_PINS,
+	CAN_DO_PINS
 };
 
 static struct ptp_pin_desc sdp_desc[] = {
@@ -196,27 +202,35 @@ static bool i40e_is_ptp_pin_dev(struct i40e_hw *hw)
 }
 
 /**
- * i40e_can_do_pins - check possibility of manipulating the pins
+ * i40e_can_set_pins - check possibility of manipulating the pins
  * @pf: board private structure
  *
  * Check if all conditions are satisfied to manipulate PTP pins.
- * Return true if pins can be manipulated or false otherwise.
+ * Return CAN_SET_PINS if pins can be set on a specific PF or
+ * return CAN_DO_PINS if pins can be manipulated within a NIC or
+ * return CANT_DO_PINS otherwise.
  **/
-static bool i40e_can_do_pins(struct i40e_pf *pf)
+static enum i40e_can_set_pins_t i40e_can_set_pins(struct i40e_pf *pf)
 {
 	if (!i40e_is_ptp_pin_dev(&pf->hw)) {
 		dev_warn(&pf->pdev->dev,
 			 "PTP external clock not supported.\n");
-		return false;
+		return CANT_DO_PINS;
 	}
 
 	if (!pf->ptp_pins) {
 		dev_warn(&pf->pdev->dev,
 			 "PTP PIN manipulation not allowed.\n");
-		return false;
+		return CANT_DO_PINS;
 	}
 
-	return true;
+	if (pf->hw.pf_id) {
+		dev_warn(&pf->pdev->dev,
+			 "PTP PINs should be accessed via PF0.\n");
+		return CAN_DO_PINS;
+	}
+
+	return CAN_SET_PINS;
 }
 
 /**
@@ -1120,13 +1134,12 @@ static void i40e_ptp_set_pins_hw(struct i40e_pf *pf)
 static int i40e_ptp_set_pins(struct i40e_pf *pf,
 			     struct i40e_ptp_pins_settings *pins)
 {
+	enum i40e_can_set_pins_t pin_caps = i40e_can_set_pins(pf);
 	int i = 0;
 
-	if (!i40e_can_do_pins(pf))
+	if (pin_caps == CANT_DO_PINS)
 		return -EOPNOTSUPP;
-
-	/* Use PF0 to set pins. Return success for user space tools */
-	if (pf->hw.pf_id)
+	else if (pin_caps == CAN_DO_PINS)
 		return 0;
 
 	if (pins->sdp3_2 == invalid)
@@ -1180,7 +1193,7 @@ int i40e_ptp_set_pins_ioctl(struct i40e_pf *pf, struct ifreq *ifr)
 	struct i40e_ptp_pins_settings pins;
 	int err;
 
-	if (!i40e_can_do_pins(pf) || pf->hw.pf_id)
+	if (i40e_can_set_pins(pf) != CAN_SET_PINS)
 		return -EOPNOTSUPP;
 
 	err = copy_from_user(&pins, ifr->ifr_data, sizeof(pins));
@@ -1211,10 +1224,6 @@ int i40e_ptp_alloc_pins(struct i40e_pf *pf)
 		return -I40E_ERR_NO_MEMORY;
 	}
 
-	/* Use PF0 to set pins. Return success for user space tools */
-	if (pf->hw.pf_id)
-		return 0;
-
 	pf->ptp_pins->sdp3_2 = off;
 	pf->ptp_pins->sdp3_3 = off;
 	pf->ptp_pins->gpio_4 = off;
@@ -1222,6 +1231,10 @@ int i40e_ptp_alloc_pins(struct i40e_pf *pf)
 	pf->ptp_pins->led2_1 = high;
 	pf->ptp_pins->led3_0 = high;
 	pf->ptp_pins->led3_1 = high;
+
+	/* Use PF0 to set pins in HW. Return success for user space tools */
+	if (pf->hw.pf_id)
+		return 0;
 
 	i40e_ptp_init_leds_hw(&pf->hw);
 	i40e_ptp_set_pins_hw(pf);
@@ -1238,7 +1251,7 @@ int i40e_ptp_alloc_pins(struct i40e_pf *pf)
  **/
 int i40e_ptp_get_pins(struct i40e_pf *pf, struct ifreq *ifr)
 {
-	if (!i40e_can_do_pins(pf) || pf->hw.pf_id)
+	if (i40e_can_set_pins(pf) != CAN_SET_PINS)
 		return -EOPNOTSUPP;
 
 	return copy_to_user(ifr->ifr_data, pf->ptp_pins,
@@ -1806,9 +1819,11 @@ void i40e_ptp_stop(struct i40e_pf *pf)
 			 pf->vsi[pf->lan_vsi]->netdev->name);
 	}
 
-	i40e_ptp_set_pin_hw(hw, I40E_SDP3_2, off);
-	i40e_ptp_set_pin_hw(hw, I40E_SDP3_3, off);
-	i40e_ptp_set_pin_hw(hw, I40E_GPIO_4, off);
+	if (i40e_is_ptp_pin_dev(&pf->hw)) {
+		i40e_ptp_set_pin_hw(hw, I40E_SDP3_2, off);
+		i40e_ptp_set_pin_hw(hw, I40E_SDP3_3, off);
+		i40e_ptp_set_pin_hw(hw, I40E_GPIO_4, off);
+	}
 
 	regval = rd32(hw, I40E_PRTTSYN_AUX_0(0));
 	regval &= ~I40E_PRTTSYN_AUX_0_PTPFLAG_MASK;

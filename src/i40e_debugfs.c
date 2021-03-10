@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2013 - 2020 Intel Corporation. */
+/* Copyright(c) 2013 - 2021 Intel Corporation. */
 
 #ifdef CONFIG_DEBUG_FS
 
@@ -1702,6 +1702,11 @@ static ssize_t i40e_dbg_command_write(struct file *filp,
 		}
 		pf->flags &= ~I40E_FLAG_DCB_ENABLED;
 	} else if (strncmp(cmd_buf, "dcb on", 6) == 0) {
+		if (pf->flags & I40E_FLAG_TC_MQPRIO) {
+			dev_info(&pf->pdev->dev,
+				 "Failed to enable DCB when TCs are configured through mqprio\n");
+			goto command_write_done;
+		}
 		pf->flags |= I40E_FLAG_DCB_ENABLED;
 	} else if (strncmp(cmd_buf, "lldp", 4) == 0) {
 		if (strncmp(&cmd_buf[5], "stop", 4) == 0) {

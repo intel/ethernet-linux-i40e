@@ -2,8 +2,8 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet Controller 700 Series
 ===============================================================================
 
-November 25, 2020
-Copyright(c) 2014 - 2020 Intel Corporation.
+February 16, 2021
+Copyright(c) 2014 - 2021 Intel Corporation.
 
 Contents
 ========
@@ -842,15 +842,18 @@ For cloud filters (tunneled packets):
  - All other filters, including where Tenant ID/VNI is specified.
    The lower 32 bits of the user-def field can carry the tenant ID/VNI
    if required.
+ - The 'loc' parameter specifies the rule number of the filter as being
+   stored in the base driver.
  - The VF can be specified using the "action" field, just as regular filters
    described in the "Sideband Perfect Filters" section above.
+ - To forward tunneled GRE packets directly to the VF, set bit 24 of the
+   "user-def" field. (Note: This feature is not supported on Intel(R) Ethernet
+   Network Connection X722 devices.)
  - Cloud filters can be defined with inner MAC, outer MAC, inner IP address,
    inner VLAN, and VNI as part of the cloud tuple. Cloud filters filter on
    destination (not source) MAC and IP. The destination and source MAC
    address fields in the ethtool command are overloaded as dst = outer,
    src = inner MAC address to facilitate tuple definition for a cloud filter.
- - The 'loc' parameter specifies the rule number of the filter as being
-   stored in the base driver.
  - Examples:
 
    To redirect traffic on VXLAN using tunnel id 34 (hex 0x22) coming from
@@ -860,6 +863,11 @@ For cloud filters (tunneled packets):
    # ethtool -U enp130s0 flow-type ether dst 8b:9d:ed:6a:ce:43 \
    src 1d:44:9d:54:da:de user-def 0x8000000000000022 loc 38 \
    action 0x200000000
+
+   To forward tunneled GRE packets to VF 0:
+
+   # ethtool -U enp130s0 flow-type ether user-def 0x8000000001000000
+   action 0x10000ffff
 
    To redirect traffic to L4 destination port 4789 to VF 0, when the l4mode
    module parameter is set to UDP:
@@ -1152,16 +1160,19 @@ IDs within a single Ethernet frame. VLAN IDs are sometimes referred to as
 allow L2 tunneling and the ability to segregate traffic within a particular
 VLAN ID, among other uses.
 
-NOTES:
-- 802.1ad (QinQ) is supported in 3.19 and later kernels.
-- Receive checksum offloads, cloud filters, and VLAN acceleration are not
-supported for 802.1ad (QinQ) packets.
-
 The following are examples of how to configure 802.1ad (QinQ):
 
 # ip link add link eth0 eth0.24 type vlan proto 802.1ad id 24
 # ip link add link eth0.24 eth0.24.371 type vlan proto 802.1Q id 371
   Where "24" and "371" are example VLAN IDs.
+
+NOTES:
+- 802.1ad (QinQ) is supported in 3.19 and later kernels.
+- Receive checksum offloads, cloud filters, and VLAN acceleration are not
+supported for 802.1ad (QinQ) packets.
+- VLAN protocols use the following EtherTypes:
+    802.1Q = EtherType 0x8100
+    802.1ad = EtherType 0x88A8
 
 
 IEEE 1588 Precision Time Protocol (PTP) Hardware Clock (PHC)
@@ -2168,7 +2179,7 @@ St - Fifth Floor, Boston, MA 02110-1301 USA.
 The full GNU General Public License is included in this distribution in the
 file called "COPYING".
 
-Copyright(c) 2014 - 2020 Intel Corporation.
+Copyright(c) 2014 - 2021 Intel Corporation.
 
 
 Trademarks

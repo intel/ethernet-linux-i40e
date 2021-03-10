@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
-# Copyright(c) 2013 - 2020 Intel Corporation.
+# Copyright(c) 2013 - 2021 Intel Corporation.
 
 #
 # common Makefile rules useful for out-of-tree Linux driver builds
@@ -135,7 +135,7 @@ ifeq (,$(wildcard ${CONFIG_FILE}))
 endif
 
 ifeq (,$(wildcard ${SYSTEM_MAP_FILE}))
-  $(warning Missing System.map file - depmod will not check for missing symbols)
+  $(warning Missing System.map file - depmod will not check for missing symbols during module installation)
 endif
 
 ifneq ($(words $(subst :, ,$(CURDIR))), 1)

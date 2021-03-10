@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2013 - 2020 Intel Corporation. */
+/* Copyright(c) 2013 - 2021 Intel Corporation. */
 
 #include <linux/prefetch.h>
 #ifdef HAVE_XDP_SUPPORT
@@ -1675,7 +1675,7 @@ int i40e_setup_rx_descriptors(struct i40e_ring *rx_ring)
 	/* XDP RX-queue info only needed for RX rings exposed to XDP */
 	if (rx_ring->vsi->type == I40E_VSI_MAIN) {
 		err = xdp_rxq_info_reg(&rx_ring->xdp_rxq, rx_ring->netdev,
-				       rx_ring->queue_index);
+				       rx_ring->queue_index, rx_ring->q_vector->napi.napi_id);
 		if (err < 0)
 			goto err;
 	}
@@ -4158,7 +4158,7 @@ u16 i40e_lan_select_queue(struct net_device *netdev,
  **/
 u16 i40e_lan_select_queue(struct net_device *netdev,
 			  struct sk_buff *skb,
-			  struct net_device __always_unused *sb_dev)
+			  struct net_device *sb_dev)
 {
 #else /* HAVE_NDO_SELECT_QUEUE_FALLBACK_REMOVED */
 /**
@@ -4172,7 +4172,7 @@ u16 i40e_lan_select_queue(struct net_device *netdev,
  **/
 u16 i40e_lan_select_queue(struct net_device *netdev,
 			  struct sk_buff *skb,
-			  struct net_device __always_unused *sb_dev,
+			  struct net_device *sb_dev,
 			  select_queue_fallback_t __always_unused fallback)
 {
 #endif /* HAVE_NDO_SELECT_QUEUE_FALLBACK_REMOVED */
@@ -4188,8 +4188,15 @@ u16 i40e_lan_select_queue(struct net_device *netdev,
 
 	/* is DCB enabled at all? */
 	if (vsi->tc_config.numtc == 1)
-		return i40e_swdcb_skb_tx_hash(netdev, skb,
-					      netdev->real_num_tx_queues);
+#if defined(HAVE_NDO_SELECT_QUEUE_FALLBACK_REMOVED)
+		return netdev_pick_tx(netdev, skb, sb_dev);
+#elif defined(HAVE_NDO_SELECT_QUEUE_SB_DEV)
+		return fallback(netdev, skb, sb_dev);
+#elif defined(HAVE_NDO_SELECT_QUEUE_ACCEL_FALLBACK)
+		return fallback(netdev, skb);
+#else
+		return __netdev_pick_tx(netdev, skb);
+#endif
 
 	prio = skb->priority;
 	hw = &vsi->back->hw;

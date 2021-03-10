@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2020 Intel Corporation. */
+/* Copyright(c) 2013 - 2021 Intel Corporation. */
 
 #ifndef _I40E_H_
 #define _I40E_H_
@@ -317,6 +317,12 @@ struct i40e_fdir_filter {
 #define I40E_CLOUD_FILTER_FLAGS_IIP  I40E_CLOUD_FIELD_IIP
 #define I40E_CLOUD_FILTER_FLAGS_OIP1 I40E_CLOUD_FIELD_OIP1
 #define I40E_CLOUD_FILTER_FLAGS_OIP2 I40E_CLOUD_FIELD_OIP2
+
+#define I40E_CLOUD_FILTER_ANY_QUEUE		0xffff
+#define I40E_CLOUD_FILTER_TUNNEL_TYPE_VXLAN	0x0
+#define I40E_CLOUD_FILTER_TUNNEL_TYPE_NVGRE	0x1
+#define I40E_CLOUD_FILTER_TUNNEL_TYPE_GENEVE	0x2
+#define I40E_CLOUD_FILTER_TUNNEL_TYPE_IP_IN_GRE	0x3
 
 struct i40e_cloud_filter {
 	struct hlist_node cloud_node;
@@ -1251,9 +1257,6 @@ int i40e_vsi_release(struct i40e_vsi *vsi);
 int i40e_vsi_mem_alloc(struct i40e_pf *pf, enum i40e_vsi_type type);
 int i40e_vsi_setup_rx_resources(struct i40e_vsi *vsi);
 int i40e_vsi_setup_tx_resources(struct i40e_vsi *vsi);
-int i40e_vsi_configure_tc_max_bw(struct i40e_vsi *vsi);
-int i40e_veb_configure_tc_max_bw(struct i40e_veb *veb, u8 enabled_tc);
-int i40e_update_ets(struct i40e_pf *pf);
 int i40e_vsi_config_tc(struct i40e_vsi *vsi, u8 enabled_tc);
 int i40e_vsi_request_irq_msix(struct i40e_vsi *vsi, char *basename);
 void i40e_service_event_schedule(struct i40e_pf *pf);
@@ -1333,7 +1336,7 @@ int i40e_ptp_ioctl(struct net_device *netdev, struct ifreq *ifr, int cmd);
 int i40e_open(struct net_device *netdev);
 int i40e_close(struct net_device *netdev);
 int i40e_vsi_open(struct i40e_vsi *vsi);
-void i40e_vlan_stripping_disable(struct i40e_vsi *vsi);
+int i40e_vlan_stripping_disable(struct i40e_vsi *vsi);
 int i40e_add_vlan_all_mac(struct i40e_vsi *vsi, s16 vid);
 int i40e_vsi_add_vlan(struct i40e_vsi *vsi, u16 vid);
 void i40e_rm_vlan_all_mac(struct i40e_vsi *vsi, s16 vid);
@@ -1344,7 +1347,7 @@ int i40e_del_mac_filter(struct i40e_vsi *vsi, const u8 *macaddr);
 bool i40e_is_vsi_in_vlan(struct i40e_vsi *vsi);
 int i40e_count_filters(struct i40e_vsi *vsi);
 struct i40e_mac_filter *i40e_find_mac(struct i40e_vsi *vsi, const u8 *macaddr);
-void i40e_vlan_stripping_enable(struct i40e_vsi *vsi);
+int i40e_vlan_stripping_enable(struct i40e_vsi *vsi);
 static inline bool i40e_is_sw_dcb(struct i40e_pf *pf)
 {
 	return !!(pf->flags & I40E_FLAG_DISABLE_FW_LLDP);
@@ -1358,6 +1361,7 @@ void i40e_dcbnl_flush_apps(struct i40e_pf *pf,
 void i40e_dcbnl_set_all(struct i40e_vsi *vsi);
 void i40e_dcbnl_setup(struct i40e_vsi *vsi);
 #endif /* HAVE_DCBNL_IEEE */
+int i40e_update_ets(struct i40e_pf *pf);
 bool i40e_dcb_need_reconfig(struct i40e_pf *pf,
 			    struct i40e_dcbx_config *old_cfg,
 			    struct i40e_dcbx_config *new_cfg);
@@ -1416,5 +1420,7 @@ static inline bool i40e_enabled_xdp_vsi(struct i40e_vsi *vsi)
 
 int i40e_restore_ingress_egress_mirror(struct i40e_vsi *src_vsi, int mirror,
 				       u16 rule_type, u16 *rule_id);
+int i40e_vsi_configure_tc_max_bw(struct i40e_vsi *vsi);
+int i40e_veb_configure_tc_max_bw(struct i40e_veb *veb, u8 enabled_tc);
 
 #endif /* _I40E_H_ */

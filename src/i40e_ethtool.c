@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2013 - 2020 Intel Corporation. */
+/* Copyright(c) 2013 - 2021 Intel Corporation. */
 
 /* ethtool support for i40e */
 
@@ -21,6 +21,8 @@
 	I40E_STAT(struct i40e_vsi, _name, _stat)
 #define I40E_VEB_STAT(_name, _stat) \
 	I40E_STAT(struct i40e_veb, _name, _stat)
+#define I40E_VEB_TC_STAT(_name, _stat) \
+	I40E_STAT(struct i40e_cp_veb_tc_stats, _name, _stat)
 #define I40E_PFC_STAT(_name, _stat) \
 	I40E_STAT(struct i40e_pfc_stats, _name, _stat)
 #define I40E_QUEUE_STAT(_name, _stat) \
@@ -55,11 +57,18 @@ static const struct i40e_stats i40e_gstrings_veb_stats[] = {
 	I40E_VEB_STAT("veb.rx_unknown_protocol", stats.rx_unknown_protocol),
 };
 
+struct i40e_cp_veb_tc_stats {
+	u64 tc_rx_packets;
+	u64 tc_rx_bytes;
+	u64 tc_tx_packets;
+	u64 tc_tx_bytes;
+};
+
 static const struct i40e_stats i40e_gstrings_veb_tc_stats[] = {
-	I40E_VEB_STAT("veb.tc_%u_tx_packets", tc_stats.tc_tx_packets),
-	I40E_VEB_STAT("veb.tc_%u_tx_bytes", tc_stats.tc_tx_bytes),
-	I40E_VEB_STAT("veb.tc_%u_rx_packets", tc_stats.tc_rx_packets),
-	I40E_VEB_STAT("veb.tc_%u_rx_bytes", tc_stats.tc_rx_bytes),
+	I40E_VEB_TC_STAT("veb.tc_%u_tx_packets", tc_tx_packets),
+	I40E_VEB_TC_STAT("veb.tc_%u_tx_bytes", tc_tx_bytes),
+	I40E_VEB_TC_STAT("veb.tc_%u_rx_packets", tc_rx_packets),
+	I40E_VEB_TC_STAT("veb.tc_%u_rx_bytes", tc_rx_bytes),
 };
 
 static const struct i40e_stats i40e_gstrings_misc_stats[] = {
@@ -734,8 +743,8 @@ static void i40e_get_settings_link_up(struct i40e_hw *hw,
 							     10000baseT_Full);
 		break;
 	case I40E_PHY_TYPE_10GBASE_T:
-	case I40E_PHY_TYPE_5GBASE_T:
-	case I40E_PHY_TYPE_2_5GBASE_T:
+	case I40E_PHY_TYPE_5GBASE_T_LINK_STATUS:
+	case I40E_PHY_TYPE_2_5GBASE_T_LINK_STATUS:
 	case I40E_PHY_TYPE_1000BASE_T:
 	case I40E_PHY_TYPE_100BASE_TX:
 		ethtool_link_ksettings_add_link_mode(ks, supported, Autoneg);
@@ -1028,6 +1037,7 @@ static int i40e_get_link_ksettings(struct net_device *netdev,
 
 	/* Set flow control settings */
 	ethtool_link_ksettings_add_link_mode(ks, supported, Pause);
+	ethtool_link_ksettings_add_link_mode(ks, supported, Asym_Pause);
 
 	switch (hw->fc.requested_mode) {
 	case I40E_FC_FULL:
@@ -2548,6 +2558,28 @@ static int i40e_get_sset_count(struct net_device *netdev, int sset)
 #endif /* HAVE_ETHTOOL_GET_SSET_COUNT */
 
 /**
+ * i40e_get_veb_tc_stats - copy VEB TC statistics to formatted structure
+ * @tc: the TC statistics in VEB structure (veb->tc_stats)
+ * @i: the index of traffic class in (veb->tc_stats) structure to copy
+ *
+ * Copy VEB TC statistics from structure of arrays (veb->tc_stats) to
+ * one dimensional structure i40e_cp_veb_tc_stats.
+ * Produce o formatted i40e_cp_veb_tc_stats structure of the VEB TC
+ * statistics for the given TC.
+ **/
+static inline struct i40e_cp_veb_tc_stats
+i40e_get_veb_tc_stats(struct i40e_veb_tc_stats *tc, unsigned int i)
+{
+	struct i40e_cp_veb_tc_stats veb_tc = {
+		.tc_rx_packets = tc->tc_rx_packets[i],
+		.tc_rx_bytes = tc->tc_rx_bytes[i],
+		.tc_tx_packets = tc->tc_tx_packets[i],
+		.tc_tx_bytes = tc->tc_tx_bytes[i],
+	};
+	return veb_tc;
+}
+
+/**
  * i40e_get_pfc_stats - copy HW PFC statistics to formatted structure
  * @pf: the PF device structure
  * @i: the priority value to copy
@@ -2640,8 +2672,15 @@ static void i40e_get_ethtool_stats(struct net_device *netdev,
 			       i40e_gstrings_veb_stats);
 
 	for (i = 0; i < I40E_MAX_TRAFFIC_CLASS; i++)
-		i40e_add_ethtool_stats(&data, veb_stats ? veb : NULL,
-				       i40e_gstrings_veb_tc_stats);
+		if (veb_stats) {
+			struct i40e_cp_veb_tc_stats veb_tc =
+				i40e_get_veb_tc_stats(&veb->tc_stats, i);
+			i40e_add_ethtool_stats(&data, &veb_tc,
+					       i40e_gstrings_veb_tc_stats);
+		} else {
+			i40e_add_ethtool_stats(&data, NULL,
+					       i40e_gstrings_veb_tc_stats);
+		}
 
 	i40e_add_ethtool_stats(&data, pf, i40e_gstrings_stats);
 
@@ -4444,7 +4483,12 @@ static int i40e_cloud_filter_mask2flags(struct i40e_pf *pf,
 		if (is_broadcast_ether_addr(fsp->m_u.ether_spec.h_source)) {
 			i |= I40E_CLOUD_FIELD_IMAC;
 		} else if (is_zero_ether_addr(fsp->m_u.ether_spec.h_source)) {
-			i &= ~I40E_CLOUD_FIELD_IMAC;
+			if (userdef->tunnel_type_valid &&
+			    userdef->tunnel_type ==
+			    I40E_CLOUD_FILTER_TUNNEL_TYPE_NVGRE)
+				i |= I40E_CLOUD_FIELD_IMAC;
+			else
+				i &= ~I40E_CLOUD_FIELD_IMAC;
 		} else {
 			dev_info(&pf->pdev->dev, "Bad ether source mask %pM\n",
 				 fsp->m_u.ether_spec.h_source);
@@ -4506,7 +4550,12 @@ static int i40e_cloud_filter_mask2flags(struct i40e_pf *pf,
 	 */
 	if (userdef->tenant_id_valid) {
 		if (userdef->tenant_id == 0)
-			i &= ~I40E_CLOUD_FIELD_TEN_ID;
+			if (userdef->tunnel_type_valid &&
+			    userdef->tunnel_type ==
+			    I40E_CLOUD_FILTER_TUNNEL_TYPE_NVGRE)
+				i |= I40E_CLOUD_FIELD_TEN_ID;
+			else
+				i &= ~I40E_CLOUD_FIELD_TEN_ID;
 		else
 			i |= I40E_CLOUD_FIELD_TEN_ID;
 	}
@@ -4604,7 +4653,6 @@ int i40e_add_del_custom_cloud_filter(struct i40e_vsi *vsi,
 	return ret;
 }
 
-#define I40E_CLOUD_FILTER_ANY_QUEUE 0xFFFF
 /**
  * i40e_add_cloud_filter_ethtool - Add cloud filter
  * @vsi: pointer to the VSI structure
@@ -5966,8 +6014,9 @@ static int i40e_add_fdir_ethtool(struct i40e_vsi *vsi,
 	fsp = (struct ethtool_rx_flow_spec *)&cmd->fs;
 
 	/* Parse the user-defined field */
-	if (i40e_parse_rx_flow_user_data(pf, fsp, &userdef))
-		return -EINVAL;
+	ret = i40e_parse_rx_flow_user_data(pf, fsp, &userdef);
+	if (ret)
+		return ret;
 
 	if (userdef.cloud_filter)
 		return i40e_add_cloud_filter_ethtool(vsi, cmd, &userdef);
@@ -6489,7 +6538,8 @@ static int i40e_set_priv_flags(struct net_device *dev, u32 flags)
 flags_complete:
 	changed_flags = orig_flags ^ new_flags;
 
-	if (changed_flags & I40E_FLAG_DISABLE_FW_LLDP)
+	if (changed_flags & (I40E_FLAG_DISABLE_FW_LLDP |
+	    I40E_FLAG_MULTIPLE_TRAFFIC_CLASSES))
 		reset_needed = I40E_PF_RESET_AND_REBUILD_FLAG;
 	if (changed_flags & (I40E_FLAG_VEB_STATS_ENABLED |
 	    I40E_FLAG_LEGACY_RX | I40E_FLAG_SOURCE_PRUNING_DISABLED))

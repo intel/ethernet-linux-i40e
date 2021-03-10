@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2013 - 2020 Intel Corporation. */
+/* Copyright(c) 2013 - 2021 Intel Corporation. */
 
 #include "i40e.h"
 
@@ -80,8 +80,10 @@ i40e_vc_link_speed2mbps(enum i40e_aq_link_speed link_speed)
  *
  * set a link state on a single vf
  **/
-static void i40e_set_vf_link_state(struct i40e_vf *vf,
-				   struct virtchnl_pf_event *pfe, struct i40e_link_status *ls)
+static void
+i40e_set_vf_link_state(struct i40e_vf *vf,
+		       struct virtchnl_pf_event *pfe,
+		       struct i40e_link_status *ls)
 {
 	u8 link_status = ls->link_info & I40E_AQ_LINK_UP;
 
@@ -91,12 +93,15 @@ static void i40e_set_vf_link_state(struct i40e_vf *vf,
 #endif
 
 	if (vf->driver_caps & VIRTCHNL_VF_CAP_ADV_LINK_SPEED) {
-		pfe->event_data.link_event_adv.link_speed = link_status ?
-			i40e_vc_link_speed2mbps(ls->link_speed) : 0;
+		pfe->event_data.link_event_adv.link_speed =
+			link_status ? i40e_vc_link_speed2mbps(ls->link_speed) :
+				0;
 		pfe->event_data.link_event_adv.link_status = link_status;
 	} else {
-		pfe->event_data.link_event.link_speed = link_status ?
-			i40e_virtchnl_link_speed(ls->link_speed) : 0;
+		pfe->event_data.link_event.link_speed =
+			link_status ?
+				i40e_virtchnl_link_speed(ls->link_speed) :
+				VIRTCHNL_LINK_SPEED_UNKNOWN;
 		pfe->event_data.link_event.link_status = link_status;
 	}
 }
@@ -243,11 +248,9 @@ static inline void i40e_vc_reset_vf(struct i40e_vf *vf, bool notify_vf)
 		if (test_bit(__I40E_VFS_RELEASING, pf->state))
 			return;
 
-		if (i40e_reset_vf(vf, false)) {
-			clear_bit(I40E_VF_STATE_LOADED_VF_DRIVER,
-				  &vf->vf_states);
+		if (i40e_reset_vf(vf, false))
 			return;
-		}
+
 		usleep_range(10000, 20000);
 	}
 
@@ -534,7 +537,8 @@ static int i40e_config_vsi_tx_queue(struct i40e_vf *vf, u16 vsi_id,
 		 * or queue did not find it's TC, assign it to queue set 0
 		 */
 		if (i >= I40E_MAX_TRAFFIC_CLASS ||
-		    vsi->info.qs_handle[i] == I40E_AQ_VSI_QS_HANDLE_INVALID)
+		    le16_to_cpu(vsi->info.qs_handle[i]) ==
+		    I40E_AQ_VSI_QS_HANDLE_INVALID)
 			tx_ctx.rdylist = le16_to_cpu(vsi->info.qs_handle[0]);
 		else
 			tx_ctx.rdylist = le16_to_cpu(vsi->info.qs_handle[i]);
@@ -1227,10 +1231,10 @@ static int i40e_restore_vfd_config(struct i40e_vf *vf, struct i40e_vsi *vsi)
 		goto err_out;
 	}
 
-	if (vf->vlan_stripping) {
-		ret = i40e_configure_vf_vlan_stripping(vsi, vf->vf_id, true);
+	if (!vf->vlan_stripping) {
+		ret = i40e_configure_vf_vlan_stripping(vsi, vf->vf_id, false);
 		if (ret) {
-			vf->vlan_stripping = false;
+			vf->vlan_stripping = true;
 			goto err_out;
 		}
 	}
@@ -2569,6 +2573,8 @@ int i40e_alloc_vfs(struct i40e_pf *pf, u16 num_alloc_vfs)
 		vfs[i].allow_untagged = true;
 		/* assign default allow_bcast value */
 		vfs[i].allow_bcast = true;
+		/* assign default vlan_stripping value */
+		vfs[i].vlan_stripping = true;
 		/* assign default capabilities */
 		set_bit(I40E_VIRTCHNL_VF_CAP_L2, &vfs[i].vf_caps);
 		set_bit(I40E_VF_STATE_PRE_ENABLE, &vfs[i].vf_states);
@@ -2957,7 +2963,7 @@ static int i40e_vc_get_vf_resources_msg(struct i40e_vf *vf, u8 *msg)
 				vf->default_lan_addr.addr);
 	}
 	set_bit(I40E_VF_STATE_ACTIVE, &vf->vf_states);
-	set_bit(I40E_VF_STATE_LOADED_VF_DRIVER, &vf->vf_states);
+	set_bit(I40E_VF_STATE_RESOURCES_LOADED, &vf->vf_states);
 	/* if vf is in base mode, keep only the base capabilities that are
 	 * negotiated
 	 */
@@ -3633,6 +3639,47 @@ static int i40e_check_enough_queue(struct i40e_vf *vf, u16 needed)
 	return -ENOMEM;
 }
 
+static int i40e_set_vf_num_queues(struct i40e_vf *vf, int num_queues)
+{
+	int cur_pairs = vf->num_queue_pairs;
+	struct i40e_pf *pf = vf->pf;
+	int max_size;
+
+	if (num_queues > I40E_MAX_VF_QUEUES) {
+		dev_err(&pf->pdev->dev, "Unable to configure %d VF queues, the maximum is %d\n",
+			num_queues,
+			I40E_MAX_VF_QUEUES);
+		return -EINVAL;
+	} else if (num_queues - cur_pairs > pf->queues_left) {
+		dev_warn(&pf->pdev->dev, "Unable to configure %d VF queues, only %d available\n",
+			 num_queues - cur_pairs,
+			 pf->queues_left);
+		return -EINVAL;
+	} else if (i40e_check_enough_queue(vf, num_queues) < 0) {
+		dev_warn(&pf->pdev->dev, "VF requested %d more queues, but there is not enough for it.\n",
+			 num_queues - cur_pairs);
+		return -EINVAL;
+	}
+
+	max_size = i40e_max_lump_qp(pf);
+	if (max_size < 0) {
+		dev_err(&pf->pdev->dev, "Unable to configure %d VF queues, pile=<null>\n",
+			num_queues);
+		return -EINVAL;
+	}
+
+	if (num_queues > max_size) {
+		dev_err(&pf->pdev->dev, "Unable to configure %d VF queues, only %d available\n",
+			num_queues, max_size);
+		return -EINVAL;
+	}
+
+	/* successful request */
+	vf->num_req_queues = num_queues;
+	i40e_vc_reset_vf(vf, true);
+	return 0;
+}
+
 /**
  * i40e_vc_request_queues_msg
  * @vf: pointer to the VF info
@@ -3648,40 +3695,12 @@ static int i40e_vc_request_queues_msg(struct i40e_vf *vf, u8 *msg)
 	struct virtchnl_vf_res_request *vfres =
 		(struct virtchnl_vf_res_request *)msg;
 	u16 req_pairs = vfres->num_queue_pairs;
-	u8 cur_pairs = vf->num_queue_pairs;
-	struct i40e_pf *pf = vf->pf;
 
 	if (!i40e_sync_vf_state(vf, I40E_VF_STATE_ACTIVE))
 		return -EINVAL;
 
-	if (req_pairs > I40E_MAX_VF_QUEUES) {
-		dev_err(&pf->pdev->dev,
-			"VF %d tried to request more than %d queues.\n",
-			vf->vf_id,
-			I40E_MAX_VF_QUEUES);
-		vfres->num_queue_pairs = I40E_MAX_VF_QUEUES;
-	} else if (req_pairs - cur_pairs > pf->queues_left) {
-		dev_warn(&pf->pdev->dev,
-			 "VF %d requested %d more queues, but only %d left.\n",
-			 vf->vf_id,
-			 req_pairs - cur_pairs,
-			 pf->queues_left);
-		vfres->num_queue_pairs = pf->queues_left + cur_pairs;
-	} else if (i40e_check_enough_queue(vf, req_pairs) < 0) {
-		dev_warn(&pf->pdev->dev,
-			 "VF %d requested %d more queues, but there is not enough for it.\n",
-			 vf->vf_id,
-			 req_pairs - cur_pairs);
-		vfres->num_queue_pairs = cur_pairs;
-	} else {
-		/* successful request */
-		vf->num_req_queues = req_pairs;
-		i40e_vc_reset_vf(vf, true);
-		return 0;
-	}
+	return i40e_set_vf_num_queues(vf, req_pairs);
 
-	return i40e_vc_send_msg_to_vf(vf, VIRTCHNL_OP_REQUEST_QUEUES, 0,
-				      (u8 *)vfres, sizeof(*vfres));
 }
 
 /**
@@ -4307,8 +4326,9 @@ static int i40e_vc_enable_vlan_stripping(struct i40e_vf *vf, u8 *msg)
 	}
 
 	vsi = vf->pf->vsi[vf->lan_vsi_idx];
-	i40e_vlan_stripping_enable(vsi);
-
+	aq_ret = i40e_vlan_stripping_enable(vsi);
+	if (!aq_ret)
+		vf->vlan_stripping = true;
 	/* send the response to the VF */
 err:
 	return i40e_vc_send_resp_to_vf(vf, VIRTCHNL_OP_ENABLE_VLAN_STRIPPING,
@@ -4333,8 +4353,9 @@ static int i40e_vc_disable_vlan_stripping(struct i40e_vf *vf, u8 *msg)
 	}
 
 	vsi = vf->pf->vsi[vf->lan_vsi_idx];
-	i40e_vlan_stripping_disable(vsi);
-
+	aq_ret = i40e_vlan_stripping_disable(vsi);
+	if (!aq_ret)
+		vf->vlan_stripping = false;
 	/* send the response to the VF */
 err:
 	return i40e_vc_send_resp_to_vf(vf, VIRTCHNL_OP_DISABLE_VLAN_STRIPPING,
@@ -5010,6 +5031,7 @@ int i40e_vc_process_vf_msg(struct i40e_pf *pf, s16 vf_id, u32 v_opcode,
 		i40e_vc_notify_vf_link_state(vf);
 		break;
 	case VIRTCHNL_OP_RESET_VF:
+		clear_bit(I40E_VF_STATE_RESOURCES_LOADED, &vf->vf_states);
 		i40e_vc_reset_vf(vf, false);
 		ret = 0;
 		break;
@@ -5172,15 +5194,12 @@ static int i40e_set_vf_mac(struct i40e_vf *vf, struct i40e_vsi *vsi,
 	/* When the VF is resetting wait until it is done.
 	 * It can take up to 200 milliseconds,
 	 * but wait for up to 300 milliseconds to be safe.
-	 * If the VF is indeed in reset, the vsi pointer has
-	 * to show on the newly loaded vsi under pf->vsi[id].
+	 * Acquire the vsi pointer only after the VF has been
+	 * properly initialized.
 	 */
 	for (i = 0; i < 15; i++) {
-		if (test_bit(I40E_VF_STATE_INIT, &vf->vf_states)) {
-			if (i > 0)
-				vsi = pf->vsi[vf->lan_vsi_idx];
+		if (test_bit(I40E_VF_STATE_INIT, &vf->vf_states))
 			break;
-		}
 		msleep(20);
 	}
 	if (!test_bit(I40E_VF_STATE_INIT, &vf->vf_states)) {
@@ -5189,6 +5208,7 @@ static int i40e_set_vf_mac(struct i40e_vf *vf, struct i40e_vsi *vsi,
 		ret = -EAGAIN;
 		goto error_param;
 	}
+	vsi = pf->vsi[vf->lan_vsi_idx];
 
 	/* Lock once because below invoked function add/del_filter requires
 	 * mac_filter_hash_lock to be held
@@ -6187,7 +6207,7 @@ static int i40e_set_mirror(struct pci_dev *pdev, int vf_id,
 {
 	u16 vid, sw_seid, dst_seid, rule_id, rule_type;
 	struct i40e_pf *pf = pci_get_drvdata(pdev);
-	int ret = 0, num = 0, cnt = 0, add = 0;
+	int ret, num = 0, cnt, add, status;
 	u16 rules_used, rules_free;
 	struct i40e_vsi *vsi;
 	struct i40e_vf *vf;
@@ -6230,17 +6250,25 @@ static int i40e_set_mirror(struct pci_dev *pdev, int vf_id,
 				num++;
 			}
 		}
-		ret = i40e_aq_add_mirrorrule(&pf->hw, sw_seid,
-					     rule_type, dst_seid,
-					     cnt, mr_list, NULL,
-					     &rule_id, &rules_used,
-					     &rules_free);
+		status = i40e_aq_add_mirrorrule(&pf->hw, sw_seid,
+						rule_type, dst_seid,
+						cnt, mr_list, NULL,
+						&rule_id, &rules_used,
+						&rules_free);
 
 		if (pf->hw.aq.asq_last_status == I40E_AQ_RC_ENOSPC)
-			dev_warn(&pdev->dev, "Not enough resources to assign a mirror rule\n");
+			dev_warn(&pdev->dev, "Not enough resources to assign a mirror rule. Maximum limit of mirrored VLANs is 192.\n");
 
-		if (ret)
+		if (status == I40E_ERR_ADMIN_QUEUE_ERROR && cnt == 1) {
+			dev_warn(&pdev->dev, "Unable to add vlan mirror rule to VF %d.\n", vf_id);
+			ret = -EPERM;
 			goto err_free;
+		}
+
+		if (status) {
+			ret = -EINVAL;
+			goto err_free;
+		}
 		vf->vlan_rule_id = rule_id;
 	} else {
 		/* Del mirrors */
@@ -6250,12 +6278,14 @@ static int i40e_set_mirror(struct pci_dev *pdev, int vf_id,
 				num++;
 			}
 		}
-		ret = i40e_aq_delete_mirrorrule(&pf->hw, sw_seid, rule_type,
-						vf->vlan_rule_id, cnt, mr_list,
-						NULL, &rules_used,
-						&rules_free);
-		if (ret)
+		status = i40e_aq_delete_mirrorrule(&pf->hw, sw_seid, rule_type,
+						   vf->vlan_rule_id, cnt, mr_list,
+						   NULL, &rules_used,
+						   &rules_free);
+		if (status) {
+			ret = -EINVAL;
 			goto err_free;
+		}
 	}
 
 	/* Copy over the updated bitmap */
@@ -6458,8 +6488,16 @@ static int i40e_set_vlan_strip(struct pci_dev *pdev, int vf_id,
 	vf = &pf->vf[vf_id];
 	vsi = pf->vsi[vf->lan_vsi_idx];
 	ret = i40e_configure_vf_vlan_stripping(vsi, vf_id, enable);
-	if (!ret)
-		vf->vlan_stripping = enable;
+	if (ret)
+		goto err_out;
+	vf->vlan_stripping = enable;
+
+	if (enable)
+		ret = i40e_vc_send_resp_to_vf(vf, VIRTCHNL_OP_ENABLE_VLAN_STRIPPING,
+					      I40E_SUCCESS);
+	else
+		ret = i40e_vc_send_resp_to_vf(vf, VIRTCHNL_OP_DISABLE_VLAN_STRIPPING,
+					      I40E_SUCCESS);
 err_out:
 	return ret;
 }
@@ -6653,6 +6691,7 @@ error_out:
 	return ret;
 }
 
+#ifdef CONFIG_DCB
 /**
  * i40e_enable_vf_queues
  * @vsi: PCI device information struct
@@ -6706,6 +6745,7 @@ static int i40e_enable_vf_queues(struct i40e_vsi *vsi, bool enable)
 err_out:
 	return ret;
 }
+#endif /* CONFIG_DCB */
 
 /**
  * i40e_set_vf_enable
@@ -7459,14 +7499,16 @@ error_out:
 static int i40e_set_pf_qos_apply(struct pci_dev *pdev)
 {
 	struct i40e_aqc_configure_vsi_tc_bw_data bw_data;
-	u16 total_mib_bw[I40E_MAX_TRAFFIC_CLASS] = {0};
 	struct i40e_pf *pf = pci_get_drvdata(pdev);
 	int i, j, ret = 0, total_share = 0;
-	bool reconfig_vf_vsi = false;
 	struct i40e_vf *vf = pf->vf;
 	struct i40e_vsi *vsi;
+#ifdef CONFIG_DCB
+	u16 total_mib_bw[I40E_MAX_TRAFFIC_CLASS] = {0};
+	bool reconfig_vf_vsi = false;
 	u8 enabled_tc = 0;
 	s16 total_bw = 0;
+#endif
 
 	for (i = 0; i < pf->num_alloc_vfs; i++, vf++)
 		total_share += vf->bw_share;
@@ -7516,6 +7558,7 @@ static int i40e_set_pf_qos_apply(struct pci_dev *pdev)
 	}
 	pf->vf_bw_applied = true;
 
+#ifdef CONFIG_DCB
 	for (i = 0; i < I40E_MAX_TRAFFIC_CLASS; i++)
 		if (pf->dcb_user_up_map[i] !=
 		    I40E_MULTIPLE_TRAFFIC_CLASS_NO_ENTRY)
@@ -7663,7 +7706,7 @@ static int i40e_set_pf_qos_apply(struct pci_dev *pdev)
 					vf->tc_info.requested_tc_share[j];
 		}
 	}
-
+#endif /* CONFIG_DCB */
 error_param:
 	return ret;
 }
@@ -7861,7 +7904,7 @@ static int i40e_set_num_queues(struct pci_dev *pdev, int vf_id, int num_queues)
 {
 	struct i40e_pf *pf = pci_get_drvdata(pdev);
 	struct i40e_vf *vf;
-	int ret, max_size;
+	int ret;
 
 	/* validate the request */
 	ret = i40e_validate_vf(pf, vf_id);
@@ -7869,49 +7912,14 @@ static int i40e_set_num_queues(struct pci_dev *pdev, int vf_id, int num_queues)
 		return ret;
 	vf = &pf->vf[vf_id];
 
-	if (test_bit(I40E_VF_STATE_LOADED_VF_DRIVER, &vf->vf_states)) {
+	if (test_bit(I40E_VF_STATE_RESOURCES_LOADED, &vf->vf_states)) {
 		dev_err(&pdev->dev,
 			"Unable to configure %d queues, please unbind the driver for VF %d\n",
 			num_queues, vf_id);
 		return -EAGAIN;
 	}
-	if (num_queues > I40E_MAX_VF_QUEUES) {
-		dev_err(&pdev->dev,
-			"Unable to configure %d VF queues, the maximum is %d\n",
-			num_queues, I40E_MAX_VF_QUEUES);
-		return -EINVAL;
-	}
-	if (num_queues - vf->num_queue_pairs > pf->queues_left) {
-		dev_err(&pdev->dev,
-			"Unable to configure %d VF queues, only %d available\n",
-			num_queues, vf->num_queue_pairs + pf->queues_left);
-		return -EINVAL;
-	}
 
-	max_size = i40e_max_lump_qp(pf);
-	if (max_size < 0) {
-		dev_err(&pdev->dev,
-			"Unable to configure %d VF queues, pile=<null>\n",
-			num_queues);
-		return max_size;
-	}
-
-	if (num_queues > max_size) {
-		dev_err(&pdev->dev,
-			"Unable to configure %d VF queues, only %d available\n",
-			num_queues, max_size);
-		return -EINVAL;
-	}
-
-	/* Set vf->num_req_queues to the desired value and reset the VF. When
-	 * the VSI is reallocated it will be configured with the new queue
-	 * count.
-	 */
-	vf->num_req_queues = num_queues;
-	i40e_vc_notify_vf_reset(vf);
-	i40e_reset_vf(vf, false);
-
-	return 0;
+	return i40e_set_vf_num_queues(vf, num_queues);
 }
 
 /**
@@ -8379,7 +8387,6 @@ static int i40e_set_pf_qos_tc_priority(struct pci_dev *pdev, int tc,
 }
 
 /**
- *
  * i40e_get_pf_qos_tc_priority
  * @pdev: PCI device information struct
  * @tc: Traffic class number
@@ -8409,7 +8416,6 @@ static int i40e_get_pf_qos_tc_priority(struct pci_dev *pdev, int tc,
 }
 
 /**
- *
  * i40e_set_vf_max_tc_tx_rate
  * @pdev: PCI device information struct
  * @vf_id: VF identifier
@@ -8513,7 +8519,6 @@ static int i40e_set_vf_qos_tc_share(struct pci_dev *pdev, int vf_id, int tc,
 				    u8 share)
 {
 	struct i40e_pf *pf = pci_get_drvdata(pdev);
-	struct i40e_vsi *vsi;
 	struct i40e_vf *vf;
 	int ret;
 
@@ -8522,7 +8527,6 @@ static int i40e_set_vf_qos_tc_share(struct pci_dev *pdev, int vf_id, int tc,
 		goto err;
 
 	vf = &pf->vf[vf_id];
-	vsi = pf->vsi[vf->lan_vsi_idx];
 
 	if (vf->tc_info.requested_tc_share[tc] && !share) {
 		dev_err(&pdev->dev, "Invalid share value. Can't set share back to 0");
@@ -8647,4 +8651,4 @@ const struct vfd_ops i40e_vfd_ops = {
 	.get_vf_qos_tc_share	= i40e_get_vf_qos_tc_share,
 
 };
-#endif /* HAVE_NDO_SET_VF_LINK_STATE */
+#endif /* __cplusplus */
