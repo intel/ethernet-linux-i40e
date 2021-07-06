@@ -84,6 +84,11 @@ struct i40e_vf_tc_info {
 	u16 max_tc_tx_rate[I40E_MAX_TRAFFIC_CLASS];
 };
 
+struct i40e_time_mac {
+	unsigned long time_modified;
+	u8 addr[ETH_ALEN];
+};
+
 /* VF information structure */
 struct i40e_vf {
 	struct i40e_pf *pf;
@@ -99,6 +104,7 @@ struct i40e_vf {
 	u16 stag;
 
 	struct virtchnl_ether_addr default_lan_addr;
+	struct i40e_time_mac legacy_last_added_umac; /* keeps last added MAC address */
 	s16 port_vlan_id;
 	bool pf_set_mac;	/* The VMM admin set the VF MAC address */
 	bool trusted;
@@ -138,7 +144,7 @@ struct i40e_vf {
 	int egress_vlan;
 	DECLARE_BITMAP(trunk_vlans, VLAN_N_VID);
 	bool trunk_set_by_pf;
-	bool allow_untagged;
+	bool allow_untagged; /* update filters, when changing value */
 	bool loopback;
 	bool vlan_stripping;
 	u8 promisc_mode;

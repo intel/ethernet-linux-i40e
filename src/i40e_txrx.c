@@ -1850,9 +1850,10 @@ static bool i40e_alloc_mapped_page(struct i40e_ring *rx_ring,
  * @rx_ring:  rx ring in play
  * @skb: packet to send up
  * @vlan_tag: vlan tag for packet
+ * @vlan_tpid: vlan tpid for packet
  **/
 static void i40e_receive_skb(struct i40e_ring *rx_ring,
-			     struct sk_buff *skb, u16 vlan_tag)
+			     struct sk_buff *skb, u16 vlan_tag, u16 vlan_tpid)
 {
 	struct i40e_q_vector *q_vector = rx_ring->q_vector;
 #ifdef HAVE_VLAN_RX_REGISTER
@@ -1877,7 +1878,7 @@ static void i40e_receive_skb(struct i40e_ring *rx_ring,
 	if ((rx_ring->netdev->features & NETIF_F_HW_VLAN_RX) &&
 	    (vlan_tag & VLAN_VID_MASK))
 #endif /* NETIF_F_HW_VLAN_CTAG_RX */
-		__vlan_hwaccel_put_tag(skb, htons(ETH_P_8021Q), vlan_tag);
+		__vlan_hwaccel_put_tag(skb, htons(vlan_tpid), vlan_tag);
 
 	napi_gro_receive(&q_vector->napi, skb);
 #endif /* HAVE_VLAN_RX_REGISTER */
@@ -2740,6 +2741,7 @@ static int i40e_clean_rx_irq(struct i40e_ring *rx_ring, int budget)
 	unsigned int xdp_xmit = 0;
 	bool failure = false;
 	struct xdp_buff xdp;
+	u16 tpid;
 
 #ifdef HAVE_XDP_BUFF_FRAME_SZ
 #if (PAGE_SIZE < 8192)
@@ -2749,7 +2751,11 @@ static int i40e_clean_rx_irq(struct i40e_ring *rx_ring, int budget)
 
 #ifdef HAVE_XDP_BUFF_RXQ
 	xdp.rxq = &rx_ring->xdp_rxq;
-#endif
+#endif /* HAVE_XDP_BUFF_RXQ */
+	tpid = rx_ring->vsi->back->hw.second_tag;
+
+	if (i40e_is_double_vlan(&rx_ring->vsi->back->hw))
+		tpid = rx_ring->vsi->back->hw.first_tag;
 
 	while (likely(total_rx_packets < (unsigned int)budget)) {
 		struct i40e_rx_buffer *rx_buffer;
@@ -2873,7 +2879,7 @@ static int i40e_clean_rx_irq(struct i40e_ring *rx_ring, int budget)
 			   le16_to_cpu(rx_desc->wb.qword0.lo_dword.l2tag1) : 0;
 
 		i40e_trace(clean_rx_irq_rx, rx_ring, rx_desc, skb);
-		i40e_receive_skb(rx_ring, skb, vlan_tag);
+		i40e_receive_skb(rx_ring, skb, vlan_tag, tpid);
 		skb = NULL;
 
 		/* update budget accounting */
@@ -3254,9 +3260,10 @@ static void i40e_atr(struct i40e_ring *tx_ring, struct sk_buff *skb,
 
 /**
  * i40e_tx_prepare_vlan_flags - prepare generic TX VLAN tagging flags for HW
- * @skb:     send buffer
- * @tx_ring: ring to send buffer on
- * @flags:   the tx flags to be set
+ * @skb:        send buffer
+ * @tx_ring:    ring to send buffer on
+ * @flags:      the tx flags to be set
+ * @outer_vlan: VLAN tag returned in case of double vlan
  *
  * Checks the skb and set up correspondingly several generic transmit flags
  * related to VLAN tagging for the HW, such as VLAN, DCB, etc.
@@ -3266,7 +3273,8 @@ static void i40e_atr(struct i40e_ring *tx_ring, struct sk_buff *skb,
  **/
 static inline int i40e_tx_prepare_vlan_flags(struct sk_buff *skb,
 					     struct i40e_ring *tx_ring,
-					     u32 *flags)
+					     u32 *flags,
+					     u32 *outer_vlan)
 {
 	__be16 protocol = skb->protocol;
 	u32  tx_flags = 0;
@@ -3291,8 +3299,15 @@ static inline int i40e_tx_prepare_vlan_flags(struct sk_buff *skb,
 
 	/* if we have a HW VLAN tag being added, default to the HW one */
 	if (skb_vlan_tag_present(skb)) {
-		tx_flags |= skb_vlan_tag_get(skb) << I40E_TX_FLAGS_VLAN_SHIFT;
-		tx_flags |= I40E_TX_FLAGS_HW_VLAN;
+		/* Only offload on outer, if there is a vlan header in skb */
+		if (i40e_is_double_vlan(&tx_ring->vsi->back->hw) &&
+		    eth_type_vlan(skb->protocol)) {
+			*outer_vlan = skb_vlan_tag_get(skb);
+		} else {
+			tx_flags |= skb_vlan_tag_get(skb) <<
+				I40E_TX_FLAGS_VLAN_SHIFT;
+			tx_flags |= I40E_TX_FLAGS_HW_VLAN;
+		}
 	/* else if it is a SW VLAN, check the next protocol and store the tag */
 	} else if (protocol == htons(ETH_P_8021Q)) {
 		struct vlan_hdr *vhdr, _vhdr;
@@ -3739,7 +3754,7 @@ static int i40e_tx_enable_csum(struct sk_buff *skb, u32 *tx_flags,
 }
 
 /**
- * i40e_create_tx_ctx Build the Tx context descriptor
+ * i40e_create_tx_ctx - Build the Tx context descriptor
  * @tx_ring:  ring to create the descriptor on
  * @cd_type_cmd_tso_mss: Quad Word 1
  * @cd_tunneling: Quad Word 0 - bits 0-31
@@ -3767,6 +3782,9 @@ static void i40e_create_tx_ctx(struct i40e_ring *tx_ring,
 	context_desc->l2tag2 = cpu_to_le16(cd_l2tag2);
 	context_desc->rsvd = cpu_to_le16(0);
 	context_desc->type_cmd_tso_mss = cpu_to_le64(cd_type_cmd_tso_mss);
+	if (context_desc->l2tag2)
+		context_desc->type_cmd_tso_mss |= I40E_TX_CTX_DESC_IL2TAG2 <<
+			I40E_TXD_CTX_QW1_CMD_SHIFT;
 }
 
 /**
@@ -4334,7 +4352,7 @@ static netdev_tx_t i40e_xmit_frame_ring(struct sk_buff *skb,
 	first->gso_segs = 1;
 
 	/* prepare the xmit flags */
-	if (i40e_tx_prepare_vlan_flags(skb, tx_ring, &tx_flags))
+	if (i40e_tx_prepare_vlan_flags(skb, tx_ring, &tx_flags, &cd_l2tag2))
 		goto out_drop;
 
 	/* obtain protocol of skb */

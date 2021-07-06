@@ -223,6 +223,7 @@ struct i40e_phy_info {
 #define I40E_CAP_PHY_TYPE_10GBASE_CR1_CU BIT_ULL(I40E_PHY_TYPE_10GBASE_CR1_CU)
 #define I40E_CAP_PHY_TYPE_10GBASE_AOC BIT_ULL(I40E_PHY_TYPE_10GBASE_AOC)
 #define I40E_CAP_PHY_TYPE_40GBASE_AOC BIT_ULL(I40E_PHY_TYPE_40GBASE_AOC)
+#define I40E_CAP_PHY_TYPE_10GBASE_ER BIT_ULL(I40E_PHY_TYPE_10GBASE_ER)
 #define I40E_CAP_PHY_TYPE_100BASE_TX BIT_ULL(I40E_PHY_TYPE_100BASE_TX)
 #define I40E_CAP_PHY_TYPE_1000BASE_T BIT_ULL(I40E_PHY_TYPE_1000BASE_T)
 #define I40E_CAP_PHY_TYPE_10GBASE_T BIT_ULL(I40E_PHY_TYPE_10GBASE_T)
@@ -671,6 +672,8 @@ struct i40e_hw {
 	u16 switch_tag;
 	u16 first_tag;
 	u16 second_tag;
+	bool is_double_vlan;
+	bool is_outer_vlan_processing;
 
 	/* NVMUpdate features */
 	struct i40e_nvmupd_features nvmupd_features;

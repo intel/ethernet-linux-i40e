@@ -99,6 +99,7 @@ static char *i40e_filter_state_string[] = {
 	"ACTIVE",
 	"FAILED",
 	"REMOVE",
+	"INACTIVE",
 };
 
 /**
@@ -402,13 +403,12 @@ static void i40e_dbg_dump_vsi_seid(struct i40e_pf *pf, int seid)
 		 "    info: sec_flags = 0x%02x, sec_reserved = 0x%02x\n",
 		 vsi->info.sec_flags, vsi->info.sec_reserved);
 	dev_info(&pf->pdev->dev,
-		 "    info: pvid = 0x%04x, fcoe_pvid = 0x%04x, port_vlan_flags = 0x%02x\n",
-		 vsi->info.pvid, vsi->info.fcoe_pvid,
-		 vsi->info.port_vlan_flags);
+		 "    info: pvid = 0x%04x, outer_vlan = 0x%04x, port_vlan_flags = 0x%02x, outer_vlan_flags = 0x%02x\n",
+		 vsi->info.pvid, vsi->info.outer_vlan,
+		 vsi->info.port_vlan_flags, vsi->info.outer_vlan_flags);
 	dev_info(&pf->pdev->dev,
-		 "    info: pvlan_reserved[] = 0x%02x 0x%02x 0x%02x\n",
-		 vsi->info.pvlan_reserved[0], vsi->info.pvlan_reserved[1],
-		 vsi->info.pvlan_reserved[2]);
+		 "    info: pvlan_reserved[] = 0x%02x 0x%02x\n",
+		 vsi->info.pvlan_reserved[0], vsi->info.pvlan_reserved[1]);
 	dev_info(&pf->pdev->dev,
 		 "    info: ingress_table = 0x%08x, egress_table = 0x%08x\n",
 		 vsi->info.ingress_table, vsi->info.egress_table);
@@ -565,6 +565,14 @@ static void i40e_dbg_dump_desc(int cnt, int vsi_seid, int ring_id, int desc_n,
 	vsi = i40e_dbg_find_vsi(pf, vsi_seid);
 	if (!vsi) {
 		dev_info(&pf->pdev->dev, "vsi %d not found\n", vsi_seid);
+		return;
+	}
+	if (vsi->type != I40E_VSI_MAIN ||
+	    vsi->type != I40E_VSI_FDIR ||
+	    vsi->type != I40E_VSI_VMDQ2) {
+		dev_info(&pf->pdev->dev,
+			 "vsi %d type %d descriptor rings not available\n",
+			 vsi_seid, vsi->type);
 		return;
 	}
 	if (ring_id >= vsi->num_queue_pairs || ring_id < 0) {
@@ -2233,7 +2241,7 @@ static const struct file_operations i40e_dbg_command_fops = {
 static char i40e_dbg_netdev_ops_buf[256] = "";
 
 /**
- * i40e_dbg_netdev_ops - read for netdev_ops datum
+ * i40e_dbg_netdev_ops_read - read for netdev_ops datum
  * @filp: the opened file
  * @buffer: where to write the data for the user to read
  * @count: the size of the user's buffer

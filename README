@@ -1,8 +1,8 @@
 
-i40e Linux* Base Driver for the Intel(R) Ethernet Controller 700 Series
-===============================================================================
+i40e Linux* Base Driver for the Intel(R) Ethernet 700 Series
+============================================================
 
-February 16, 2021
+May 12, 2021
 Copyright(c) 2014 - 2021 Intel Corporation.
 
 Contents
@@ -73,12 +73,12 @@ SFP+ and QSFP+ Devices:
 For information about supported media, refer to this document:
 http://www.intel.com/content/dam/www/public/us/en/documents/release-notes/xl710-
 ethernet-controller-feature-matrix.pdf
-NOTE: Some adapters based on the Intel(R) Ethernet Controller 700 Series only
-support Intel Ethernet Optics modules. On these adapters, other modules are not
+NOTE: Some adapters based on the Intel(R) Ethernet 700 Series only support
+Intel Ethernet Optics modules. On these adapters, other modules are not
 supported and will not function.
 
-NOTE: For connections based on Intel(R) Ethernet Controller 700 Series, support
-is dependent on your system board. Please see your vendor for details.
+NOTE: For connections based on Intel(R) Ethernet 700 Series, support is
+dependent on your system board. Please see your vendor for details.
 
 NOTE: In all cases Intel recommends using Intel Ethernet Optics; other modules
 may function but are not validated by Intel. Contact Intel for supported media
@@ -103,7 +103,7 @@ Enabling a VF link if the port is disconnected
 If the physical function (PF) link is down, you can force link up (from the
 host PF) on any virtual functions (VF) bound to the PF. Note that this requires
 kernel support (Red Hat kernel 3.10.0-327 or newer, upstream kernel 3.11.0 or
-newer, and associated iproute2 user space support).
+newer) and associated iproute2 user space support.
 
 For example, to force link up on VF 0 bound to PF eth0:
 
@@ -281,9 +281,7 @@ Valid Range:
 1-64 (Intel Ethernet Controller XXV710/XL710 based devices)
 
 NOTE: This parameter is only used on kernel 3.7.x and below. On kernel 3.8.x
-and above, use sysfs to enable VFs. Also, for Red Hat distributions, this
-parameter is only used on version 6.6 and older. For version 6.7 and newer, use
-sysfs.
+and above, use sysfs to enable VFs. Use sysfs for Red Hat distributions.
 
 For example, you can create 4 VFs as follows:
 
@@ -425,10 +423,11 @@ For example:
 
 This setting lasts until the PF is reloaded.
 
-NOTE: Assigning a MAC address for a VF from the host will disable any
-subsequent requests to change the MAC address from within the VM. This is a
-security feature. The VM is not aware of this restriction, so if this is
-attempted in the VM, it will trigger MDD events.
+NOTE: For untrusted VFs, assigning a MAC address for a VF from the host will
+disable any subsequent requests to change the MAC address from within the VM.
+This is a security feature. The VM is not aware of this restriction, so if this
+is attempted in the VM, it will trigger MDD events. Trusted VFs are allowed to
+change the MAC address from within the VM.
 
 
 Trusted VFs and VF Promiscuous Mode
@@ -1023,8 +1022,8 @@ Multiple filters can be added to the device, using the same recipe (and
 requires no additional recipe resources), either on the same interface or on
 different interfaces. Each filter uses the same fields for matching, but can
 have different match values.
-  tc filter add dev <ethX> protocol ip ingress prio 1 flower ip_proto
-   tcp dst_port $app_port skip_sw hw_tc 1
+  # tc filter add dev <ethX> protocol ip ingress prio 1 flower ip_proto
+    tcp dst_port $app_port skip_sw hw_tc 1
 
 For example:
 
@@ -1111,38 +1110,22 @@ enabling flow control may mitigate the issue.
 
 Speed and Duplex Configuration
 ------------------------------
-In addressing speed and duplex configuration issues, you need to distinguish
-between copper-based adapters and fiber-based adapters.
-
-In the default mode, an Intel(R) Ethernet Network Adapter using copper
-connections will attempt to auto-negotiate with its link partner to determine
-the best setting. If the adapter cannot establish link with the link partner
-using auto-negotiation, you may need to manually configure the adapter and link
-partner to identical settings to establish link and pass packets. This should
-only be needed when attempting to link with an older switch that does not
-support auto-negotiation or one that has been forced to a specific speed or
-duplex mode. Your link partner must match the setting you choose. 1 Gbps speeds
-and higher cannot be forced. Use the autonegotiation advertising setting to
-manually set devices for 1 Gbps and higher.
-
-NOTE: You cannot set the speed for devices based on the Intel(R) Ethernet
-Network Adapter XXV710 based devices.
-
-Speed, duplex, and autonegotiation advertising are configured through the
-ethtool utility. For the latest version, download and install ethtool from the
-following website:
-
-   https://kernel.org/pub/software/network/ethtool/
+You cannot set speed, duplex, or autonegotiation settings using ethtool.
 
 To see the speed configurations your device supports, run the following:
 
 # ethtool <ethX>
 
-Caution: Only experienced network administrators should force speed and duplex
-or change autonegotiation advertising manually. The settings at the switch must
-always match the adapter settings. Adapter performance may suffer or your
-adapter may not operate if you configure the adapter differently from your
-switch.
+To have your device advertise supported speeds, use the following:
+
+# ethtool -s <ethX> advertise N
+  Where N is a bitmask of the desired speeds.
+
+For example, to have your device advertise 10000baseSR Full, use:
+
+# ethtool -s <ethX> advertise 0x80000000000
+
+For more details, please refer to the ethtool man page.
 
 
 NAPI
@@ -1157,8 +1140,8 @@ IEEE 802.1ad (QinQ) Support
 The IEEE 802.1ad standard, informally known as QinQ, allows for multiple VLAN
 IDs within a single Ethernet frame. VLAN IDs are sometimes referred to as
 "tags," and multiple VLAN IDs are thus referred to as a "tag stack." Tag stacks
-allow L2 tunneling and the ability to segregate traffic within a particular
-VLAN ID, among other uses.
+allow L2 tunneling and the ability to separate traffic within a particular VLAN
+ID, among other uses.
 
 The following are examples of how to configure 802.1ad (QinQ):
 
@@ -1471,15 +1454,20 @@ SR-IOV hypervisor functions:
 - tpid
   Specifies the TPID of the outer VLAN tag (S-tag). Can be set to 0x88A8 or
   0x8100. This setting affects all VFs configured on the specified PF.
+  Changing the TPID on PF0 results in a device-wide change; you should align
+  TPID settings on other PFs.
   Note: This setting is not supported on Intel(R) Ethernet Network Connection
   X722 based devices.
   Example 1: set TPID to 0x88A8.
-  # echo 0x88a8 > /sys/class/net/p1p2/device/sriov/tpid
+  # echo 0x88a8 > /sys/class/net/p1p0/device/sriov/tpid
   Example 2: show the configured value.
-  # cat /sys/class/net/p1p2/device/sriov/tpid
+  # cat /sys/class/net/p1p0/device/sriov/tpid
 
 - vlan_mirror
-  Supports both ingress and egress traffic mirroring.
+  Supports both ingress and egress traffic mirroring. Supports two operations,
+  add and rem:
+  - add: adds one or more VLAN IDs to a mirror list for a given VF.
+  - rem: removes VLAN IDs from the mirror list for a given VF.
   Example 1: mirror traffic based upon VLANs 2,4,6,18-22 to VF 3 of PF p1p1.
   # echo add 2,4,6,18-22 > /sys/class/net/p1p1/device/sriov/3/vlan_mirror
   Example 2: remove VLAN 4, 15-17 from traffic mirroring at destination VF 3.
@@ -1488,7 +1476,7 @@ SR-IOV hypervisor functions:
   # echo rem 0 - 4095> /sys/class/net/p1p1/device/sriov/3/vlan_mirror
 
 - trunk
-  Supports two operations: add and rem.
+  Lists the VLANs to filter on. Supports two operations, add and rem:
   - add: adds one or more VLAN IDs into VF VLAN filtering.
   - rem: removes VLAN IDs from the VF VLAN filtering list.
   Example 1: add multiple VLAN tags, VLANs 2,4,5,10-20, by PF, p1p2, on
@@ -1498,6 +1486,14 @@ SR-IOV hypervisor functions:
   # echo rem 5,11-13 > /sys/class/net/p1p2/device/sriov/1/trunk
   Note: for rem, if VLAN ID is not on the VLAN filtering list, the
   VLAN ID will be ignored.
+
+- allow_untagged
+  Supports enabling and disabling the filtering of untagged frames to the
+  specified VF.
+  Example 1: allow untagged packet to VF 1 on p1p2.
+  # echo on > /sys/class/net/p1p2/device/sriov/1/allow_untagged
+  Example 2: disable untagged frames.
+  # echo off > /sys/class/net/p1p2/device/sriov/1/allow_untagged
 
 - egress_mirror
   Supports egress traffic mirroring from this VF to the specified VF.
@@ -1819,16 +1815,30 @@ helpful to optimize performance in VMs.
 Known Issues/Troubleshooting
 ============================
 
-Linux bonding fails with Virtual Functions bound to an Intel(R) Ethernet
-Controller 700 series based device
-------------------------------------------------------------------------
-If you bind Virtual Functions (VFs) to an Intel(R) Ethernet Controller 700
-series based device, the VF slaves may fail when they become the active slave.
-If the MAC address of the VF is set by the PF (Physical Function) of the
-device, when you add a slave, or change the active-backup slave, Linux bonding
-tries to sync the backup slave's MAC address to the same MAC address as the
-active slave. Linux bonding will fail at this point. This issue will not occur
-if the VF's MAC address is not set by the PF.
+Receive Error counts may be higher than the actual packet error count
+---------------------------------------------------------------------
+When a packet is received with more than one error, two bad packets may be
+reported. This affects all devices based on 10G, or faster, controllers.
+
+
+Linux bonding fails with VFs bound to an Intel(R) Ethernet 700 Series device
+----------------------------------------------------------------------------
+If you bind Virtual Functions (VFs) to an Intel(R) Ethernet 700 Series device,
+the VF targets may fail when they become the active target. If the MAC address
+of the VF is set by the PF (Physical Function) of the device, when you add a
+target, or change the active-backup target, Linux bonding tries to sync the
+backup target's MAC address to the same MAC address as the active target. Linux
+bonding will fail at this point. This issue will not occur if the VF's MAC
+address is not set by the PF.
+
+
+Bonding failover time longer than expected
+------------------------------------------
+This issue is limited to Intel(R) Ethernet Network Adapter XXV710 devices
+connected to a Juniper EX4550 switch. In such a configuration, bonding failover
+may take longer than expected. Disabling FW-LLDP may resolve the issue:
+
+# ethtool --set-priv-flags <ethX> disable-fw-lldp on
 
 
 Failure to enable MAX VFs when MFP and SR-IOV enabled
@@ -1884,14 +1894,6 @@ Error: "<ethX> selects TX queue XX but real number of TX queues is YY"
 When configuring the number of queues under heavy traffic load, you may see an
 error message stating "<ethX> selects TX queue XX, but real number of TX queues
 is YY." This message is informational only and does not affect functionality.
-
-
-Windows Server 2016 Does Not Work as a Guest OS on Older RHEL and SLES KVMs
----------------------------------------------------------------------------
-Microsoft* Windows Server* 2016 does not work as a guest operating system on
-the KVM hypervisor version included with Red Hat* Enterprise Linux* (RHEL)
-version 6.8 and Suse* Linux Enterprise Server (SLES) version 11.4. Windows
-Server 2016 does work as a guest OS on RHEL 7.2 and SLES 12.1.
 
 
 Fixing Performance Issues When Using IOMMU in Virtualized Environments
@@ -2027,12 +2029,6 @@ If this error occurs, moving your adapter to a true PCIe v3.0 x8 slot will
 resolve the issue.
 
 
-ethtool may incorrectly display SFP+ fiber module as direct attached cable
---------------------------------------------------------------------------
-Due to kernel limitations, port type can only be correctly displayed on kernel
-2.6.33 or greater.
-
-
 Fiber optics and auto-negotiation
 ---------------------------------
 Modules based on 40GBASE-SR4, 25GBASE-SR, active optical cable (AOC), and
@@ -2054,7 +2050,7 @@ Running ethtool -t <ethX> command causes break between PF and test client
 -----------------------------------------------------------------------
 When there are active VFs, "ethtool -t" performs a full diagnostic. In the
 process, it resets itself and all attached VFs. The VF drivers encounter a
-disruption, but are able to recover.
+disruption but are able to recover.
 
 
 Enabling SR-IOV in a 64-bit Microsoft* Windows Server* 2012/R2 guest OS under
@@ -2065,7 +2061,7 @@ includes traditional PCIe devices, as well as SR-IOV-capable devices based on
 the Intel Ethernet Controller XL710.
 
 
-Unable to obtain DHCP lease on boot with RedHat
+Unable to obtain DHCP lease on boot with Red Hat
 -----------------------------------------------
 In configurations where the auto-negotiation process takes more than 5 seconds,
 the boot script may fail with the following message:
@@ -2075,7 +2071,7 @@ This error may occur even though the presence of link can be confirmed using
 ethtool <ethX>. In this case, try setting "LINKDELAY=30" in
 /etc/sysconfig/network-scripts/ifdfg-<ethX>.
 
-The same issue can occur during a network boot (via PXE) on RedHat
+The same issue can occur during a network boot (via PXE) on Red Hat
 distributions that use the dracut script:
 "Warning: No carrier detected on interface <ethX>"
 

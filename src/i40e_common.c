@@ -1150,6 +1150,7 @@ static enum i40e_media_type i40e_get_media_type(struct i40e_hw *hw)
 	enum i40e_media_type media;
 
 	switch (hw->phy.link_info.phy_type) {
+	case I40E_PHY_TYPE_10GBASE_ER:
 	case I40E_PHY_TYPE_10GBASE_SR:
 	case I40E_PHY_TYPE_10GBASE_LR:
 	case I40E_PHY_TYPE_1000BASE_SX:
@@ -1158,6 +1159,9 @@ static enum i40e_media_type i40e_get_media_type(struct i40e_hw *hw)
 	case I40E_PHY_TYPE_40GBASE_LR4:
 	case I40E_PHY_TYPE_25GBASE_LR:
 	case I40E_PHY_TYPE_25GBASE_SR:
+	case I40E_PHY_TYPE_10GBASE_AOC:
+	case I40E_PHY_TYPE_25GBASE_AOC:
+	case I40E_PHY_TYPE_40GBASE_AOC:
 		media = I40E_MEDIA_TYPE_FIBER;
 		break;
 	case I40E_PHY_TYPE_100BASE_TX:
@@ -1172,10 +1176,7 @@ static enum i40e_media_type i40e_get_media_type(struct i40e_hw *hw)
 	case I40E_PHY_TYPE_10GBASE_CR1:
 	case I40E_PHY_TYPE_40GBASE_CR4:
 	case I40E_PHY_TYPE_10GBASE_SFPP_CU:
-	case I40E_PHY_TYPE_40GBASE_AOC:
-	case I40E_PHY_TYPE_10GBASE_AOC:
 	case I40E_PHY_TYPE_25GBASE_CR:
-	case I40E_PHY_TYPE_25GBASE_AOC:
 	case I40E_PHY_TYPE_25GBASE_ACC:
 		media = I40E_MEDIA_TYPE_DA;
 		break;
@@ -1875,6 +1876,9 @@ i40e_status i40e_aq_get_link_info(struct i40e_hw *hw,
 	     hw->aq.fw_min_ver < 40)) && hw_link_info->phy_type == 0xE)
 		hw_link_info->phy_type = I40E_PHY_TYPE_10GBASE_SFPP_CU;
 
+	/* 'Get Link Status' response data structure from X722 FW has
+	 * different format and does not contain this information
+	 */
 	if (hw->flags & I40E_HW_FLAG_AQ_PHY_ACCESS_CAPABLE &&
 	    hw->mac.type != I40E_MAC_X722) {
 		__le32 tmp;
@@ -2357,7 +2361,7 @@ i40e_status i40e_aq_set_vsi_vlan_promisc(struct i40e_hw *hw,
 }
 
 /**
- * i40e_get_vsi_params - get VSI configuration info
+ * i40e_aq_get_vsi_params - get VSI configuration info
  * @hw: pointer to the hw struct
  * @vsi_ctx: pointer to a vsi context struct
  * @cmd_details: pointer to command details structure or NULL
@@ -2610,7 +2614,7 @@ i40e_status i40e_get_link_status(struct i40e_hw *hw, bool *link_up)
 }
 
 /**
- * i40e_updatelink_status - update status of the HW network link
+ * i40e_update_link_info - update status of the HW network link
  * @hw: pointer to the hw struct
  **/
 i40e_status i40e_update_link_info(struct i40e_hw *hw)
@@ -2623,10 +2627,13 @@ i40e_status i40e_update_link_info(struct i40e_hw *hw)
 		return status;
 
 	/* extra checking needed to ensure link info to user is timely */
-	if ((hw->phy.link_info.link_info & I40E_AQ_MEDIA_AVAILABLE) &&
-	    ((hw->phy.link_info.link_info & I40E_AQ_LINK_UP) ||
-	     !(hw->phy.link_info_old.link_info & I40E_AQ_LINK_UP))) {
-		status = i40e_aq_get_phy_capabilities(hw, false, false,
+	if (((hw->phy.link_info.link_info & I40E_AQ_MEDIA_AVAILABLE) &&
+	     ((hw->phy.link_info.link_info & I40E_AQ_LINK_UP) ||
+	      !(hw->phy.link_info_old.link_info & I40E_AQ_LINK_UP))) ||
+	    hw->mac.type == I40E_MAC_X722) {
+		status = i40e_aq_get_phy_capabilities(hw, false,
+						      hw->mac.type ==
+						      I40E_MAC_X722,
 						      &abilities, NULL);
 		if (status)
 			return status;
@@ -2765,33 +2772,28 @@ get_veb_exit:
 }
 
 /**
- * i40e_aq_add_macvlan
- * @hw: pointer to the hw struct
- * @seid: VSI for the mac address
+ * i40e_prepare_add_macvlan
  * @mv_list: list of macvlans to be added
+ * @desc: pointer to AQ descriptor structure
  * @count: length of the list
- * @cmd_details: pointer to command details structure or NULL
+ * @seid: VSI for the mac address
  *
- * Add MAC/VLAN addresses to the HW filtering
+ * Internal helper function that prepares the add macvlan request
+ * and returns the buffer size.
  **/
-i40e_status i40e_aq_add_macvlan(struct i40e_hw *hw, u16 seid,
-			struct i40e_aqc_add_macvlan_element_data *mv_list,
-			u16 count, struct i40e_asq_cmd_details *cmd_details)
+static u16
+i40e_prepare_add_macvlan(struct i40e_aqc_add_macvlan_element_data *mv_list,
+			 struct i40e_aq_desc *desc, u16 count, u16 seid)
 {
-	struct i40e_aq_desc desc;
 	struct i40e_aqc_macvlan *cmd =
-		(struct i40e_aqc_macvlan *)&desc.params.raw;
-	i40e_status status;
+		(struct i40e_aqc_macvlan *)&desc->params.raw;
 	u16 buf_size;
 	int i;
-
-	if (count == 0 || !mv_list || !hw)
-		return I40E_ERR_PARAM;
 
 	buf_size = count * sizeof(*mv_list);
 
 	/* prep the rest of the request */
-	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_add_macvlan);
+	i40e_fill_default_direct_cmd_desc(desc, i40e_aqc_opc_add_macvlan);
 	cmd->num_addresses = CPU_TO_LE16(count);
 	cmd->seid[0] = CPU_TO_LE16(I40E_AQC_MACVLAN_CMD_SEID_VALID | seid);
 	cmd->seid[1] = 0;
@@ -2802,12 +2804,75 @@ i40e_status i40e_aq_add_macvlan(struct i40e_hw *hw, u16 seid,
 			mv_list[i].flags |=
 			    CPU_TO_LE16(I40E_AQC_MACVLAN_ADD_USE_SHARED_MAC);
 
-	desc.flags |= CPU_TO_LE16((u16)(I40E_AQ_FLAG_BUF | I40E_AQ_FLAG_RD));
+	desc->flags |= CPU_TO_LE16((u16)(I40E_AQ_FLAG_BUF | I40E_AQ_FLAG_RD));
 	if (buf_size > I40E_AQ_LARGE_BUF)
-		desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_LB);
+		desc->flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_LB);
+
+	return buf_size;
+}
+
+/**
+ * i40e_aq_add_macvlan
+ * @hw: pointer to the hw struct
+ * @seid: VSI for the mac address
+ * @mv_list: list of macvlans to be added
+ * @count: length of the list
+ * @cmd_details: pointer to command details structure or NULL
+ *
+ * Add MAC/VLAN addresses to the HW filtering
+ **/
+enum i40e_status_code
+i40e_aq_add_macvlan(struct i40e_hw *hw, u16 seid,
+		    struct i40e_aqc_add_macvlan_element_data *mv_list,
+		    u16 count, struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aq_desc desc;
+	i40e_status status;
+	u16 buf_size;
+
+	if (count == 0 || !mv_list || !hw)
+		return I40E_ERR_PARAM;
+
+	buf_size = i40e_prepare_add_macvlan(mv_list, &desc, count, seid);
 
 	status = i40e_asq_send_command_atomic(hw, &desc, mv_list, buf_size,
 					      cmd_details, true);
+
+	return status;
+}
+
+/**
+ * i40e_aq_add_macvlan_v2
+ * @hw: pointer to the hw struct
+ * @seid: VSI for the mac address
+ * @mv_list: list of macvlans to be added
+ * @count: length of the list
+ * @cmd_details: pointer to command details structure or NULL
+ * @aq_status: pointer to Admin Queue status return value
+ *
+ * Add MAC/VLAN addresses to the HW filtering.
+ * The _v2 version returns the last Admin Queue status in aq_status
+ * to avoid race conditions in access to hw->aq.asq_last_status.
+ * It also calls _v2 versions of asq_send_command functions to
+ * get the aq_status on the stack.
+ **/
+enum i40e_status_code
+i40e_aq_add_macvlan_v2(struct i40e_hw *hw, u16 seid,
+		       struct i40e_aqc_add_macvlan_element_data *mv_list,
+		       u16 count, struct i40e_asq_cmd_details *cmd_details,
+		       enum i40e_admin_queue_err *aq_status)
+{
+	struct i40e_aq_desc desc;
+	i40e_status status;
+	u16 buf_size;
+
+	if (count == 0 || !mv_list || !hw)
+		return I40E_ERR_PARAM;
+
+	buf_size = i40e_prepare_add_macvlan(mv_list, &desc, count, seid);
+
+	status = i40e_asq_send_command_atomic_v2(hw, &desc, mv_list, buf_size,
+						 cmd_details, true, aq_status);
 
 	return status;
 }
@@ -4321,7 +4386,7 @@ i40e_status i40e_aq_del_udp_tunnel(struct i40e_hw *hw, u8 index,
 }
 
 /**
- * i40e_aq_get_switch_resource_alloc (0x0204)
+ * i40e_aq_get_switch_resource_alloc - command (0x0204) to get allocations
  * @hw: pointer to the hw struct
  * @num_entries: pointer to u8 to store the number of resource entries returned
  * @buf: pointer to a user supplied buffer.  This buffer must be large enough
@@ -4411,6 +4476,43 @@ i40e_status i40e_aq_dcb_updated(struct i40e_hw *hw,
 	i40e_status status;
 
 	i40e_fill_default_direct_cmd_desc(&desc, i40e_aqc_opc_dcb_updated);
+
+	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
+
+	return status;
+}
+/**
+ * i40e_aq_set_port_parameters - set physical port parameters.
+ * @hw: pointer to the hw struct
+ * @bad_frame_vsi: defines the VSI to which bad frames are forwarded
+ * @save_bad_pac: if set packets with errors are forwarded to the bad frames VSI
+ * @pad_short_pac: if set transmit packets smaller than 60 bytes are padded
+ * @double_vlan: if set double VLAN is enabled
+ * @cmd_details: pointer to command details structure or NULL
+ **/
+i40e_status i40e_aq_set_port_parameters(struct i40e_hw *hw,
+				u16 bad_frame_vsi, bool save_bad_pac,
+				bool pad_short_pac, bool double_vlan,
+				struct i40e_asq_cmd_details *cmd_details)
+{
+	struct i40e_aqc_set_port_parameters *cmd;
+	i40e_status status;
+	struct i40e_aq_desc desc;
+	u16 command_flags = 0;
+
+	cmd = (struct i40e_aqc_set_port_parameters *)&desc.params.raw;
+
+	i40e_fill_default_direct_cmd_desc(&desc,
+					  i40e_aqc_opc_set_port_parameters);
+
+	cmd->bad_frame_vsi = CPU_TO_LE16(bad_frame_vsi);
+	if (save_bad_pac)
+		command_flags |= I40E_AQ_SET_P_PARAMS_SAVE_BAD_PACKETS;
+	if (pad_short_pac)
+		command_flags |= I40E_AQ_SET_P_PARAMS_PAD_SHORT_PACKETS;
+	if (double_vlan)
+		command_flags |= I40E_AQ_SET_P_PARAMS_DOUBLE_VLAN_ENA;
+	cmd->command_flags = CPU_TO_LE16(command_flags);
 
 	status = i40e_asq_send_command(hw, &desc, NULL, 0, cmd_details);
 
@@ -5776,7 +5878,7 @@ u8 i40e_get_phy_address(struct i40e_hw *hw, u8 dev_num)
 }
 
 /**
- * i40e_blink_phy_led
+ * i40e_blink_phy_link_led
  * @hw: pointer to the HW structure
  * @time: time how long led will blinks in secs
  * @interval: gap between LED on and off in msecs
@@ -6526,7 +6628,7 @@ i40e_status i40e_aq_set_arp_proxy_config(struct i40e_hw *hw,
 }
 
 /**
- * i40e_aq_opc_set_ns_proxy_table_entry
+ * i40e_aq_set_ns_proxy_table_entry
  * @hw: pointer to the HW structure
  * @ns_proxy_table_entry: pointer to NS table entry command struct
  * @cmd_details: pointer to command details

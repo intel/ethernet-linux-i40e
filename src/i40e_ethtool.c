@@ -552,6 +552,13 @@ static void i40e_phy_type_to_ethtool(struct i40e_pf *pf,
 			ethtool_link_ksettings_add_link_mode(ks, advertising,
 							     10000baseLR_Full);
 	}
+	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_ER) {
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     10000baseER_Full);
+		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
+			ethtool_link_ksettings_add_link_mode(ks, advertising,
+							     10000baseER_Full);
+	}
 	if (phy_types & I40E_CAP_PHY_TYPE_1000BASE_SX ||
 	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_LX ||
 	    phy_types & I40E_CAP_PHY_TYPE_1000BASE_T_OPTICAL) {
@@ -566,7 +573,8 @@ static void i40e_phy_type_to_ethtool(struct i40e_pf *pf,
 	if (phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1 ||
 	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1_CU ||
 	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_SR ||
-	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_LR) {
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_LR ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_ER) {
 		ethtool_link_ksettings_add_link_mode(ks, supported,
 						     10000baseT_Full);
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
@@ -595,6 +603,7 @@ static void i40e_phy_type_to_ethtool(struct i40e_pf *pf,
 	    phy_types & I40E_CAP_PHY_TYPE_20GBASE_KR2 ||
 	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_SR ||
 	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_LR ||
+	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_ER ||
 	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_KX4 ||
 	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_KR ||
 	    phy_types & I40E_CAP_PHY_TYPE_10GBASE_CR1_CU ||
@@ -698,6 +707,7 @@ static void i40e_get_settings_link_up(struct i40e_hw *hw,
 	case I40E_PHY_TYPE_25GBASE_LR:
 	case I40E_PHY_TYPE_10GBASE_SR:
 	case I40E_PHY_TYPE_10GBASE_LR:
+	case I40E_PHY_TYPE_10GBASE_ER:
 	case I40E_PHY_TYPE_1000BASE_SX:
 	case I40E_PHY_TYPE_1000BASE_LX:
 		ethtool_link_ksettings_add_link_mode(ks, supported, Autoneg);
@@ -720,6 +730,10 @@ static void i40e_get_settings_link_up(struct i40e_hw *hw,
 						     10000baseLR_Full);
 		ethtool_link_ksettings_add_link_mode(ks, advertising,
 						     10000baseLR_Full);
+		ethtool_link_ksettings_add_link_mode(ks, supported,
+						     10000baseER_Full);
+		ethtool_link_ksettings_add_link_mode(ks, advertising,
+						     10000baseER_Full);
 		ethtool_link_ksettings_add_link_mode(ks, supported,
 						     1000baseX_Full);
 		ethtool_link_ksettings_add_link_mode(ks, advertising,
@@ -1081,7 +1095,7 @@ static int i40e_set_link_ksettings(struct net_device *netdev,
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_hw *hw = &pf->hw;
 	bool autoneg_changed = false;
-	i40e_status status = 0;
+	i40e_status status = I40E_SUCCESS;
 	int timeout = 50;
 	int err = 0;
 	u8 autoneg;
@@ -1223,7 +1237,9 @@ static int i40e_set_link_ksettings(struct net_device *netdev,
 	    ethtool_link_ksettings_test_link_mode(ks, advertising,
 						  10000baseSR_Full) ||
 	    ethtool_link_ksettings_test_link_mode(ks, advertising,
-						  10000baseLR_Full))
+						  10000baseLR_Full) ||
+	    ethtool_link_ksettings_test_link_mode(ks, advertising,
+						  10000baseER_Full))
 #else
 	    0)
 #endif /* HAVE_ETHTOOL_NEW_10G_BITS */
@@ -1356,7 +1372,7 @@ static int i40e_set_settings(struct net_device *netdev,
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_hw *hw = &pf->hw;
 	struct ethtool_cmd safe_ecmd;
-	i40e_status status = 0;
+	i40e_status status = I40E_SUCCESS;
 	bool change = false;
 	int timeout = 50;
 	int err = 0;
@@ -1569,7 +1585,7 @@ static int i40e_set_fec_cfg(struct net_device *netdev, u8 fec_cfg)
 	struct i40e_aq_get_phy_abilities_resp abilities;
 	struct i40e_pf *pf = np->vsi->back;
 	struct i40e_hw *hw = &pf->hw;
-	i40e_status status = 0;
+	i40e_status status = I40E_SUCCESS;
 	u64 flags = 0;
 	int err = 0;
 
@@ -1590,7 +1606,8 @@ static int i40e_set_fec_cfg(struct net_device *netdev, u8 fec_cfg)
 
 		memset(&config, 0, sizeof(config));
 		config.phy_type = abilities.phy_type;
-		config.abilities = abilities.abilities;
+		config.abilities = abilities.abilities |
+				   I40E_AQ_PHY_ENABLE_ATOMIC_LINK;
 		config.phy_type_ext = abilities.phy_type_ext;
 		config.link_speed = abilities.link_speed;
 		config.eee_capability = abilities.eee_capability;
@@ -1631,7 +1648,7 @@ static int i40e_get_fec_param(struct net_device *netdev,
 	struct i40e_aq_get_phy_abilities_resp abilities;
 	struct i40e_pf *pf = np->vsi->back;
 	struct i40e_hw *hw = &pf->hw;
-	i40e_status status = 0;
+	i40e_status status = I40E_SUCCESS;
 	int err = 0;
 	u8 fec_cfg;
 
@@ -1738,7 +1755,7 @@ static int i40e_nway_reset(struct net_device *netdev)
 	struct i40e_pf *pf = np->vsi->back;
 	struct i40e_hw *hw = &pf->hw;
 	bool link_up = hw->phy.link_info.link_info & I40E_AQ_LINK_UP;
-	i40e_status ret = 0;
+	i40e_status ret = I40E_SUCCESS;
 
 	ret = i40e_aq_set_link_restart_an(hw, link_up, NULL);
 	if (ret) {
@@ -2087,25 +2104,25 @@ static int i40e_get_eeprom(struct net_device *netdev,
 	magic = hw->vendor_id | (hw->device_id << 16);
 	if (eeprom->magic && eeprom->magic != magic) {
 		struct i40e_nvm_access *cmd = (struct i40e_nvm_access *)eeprom;
-		int errno = 0;
+		int err = 0;
 
 		/* make sure it is the right magic for NVMUpdate */
 		if ((eeprom->magic >> 16) != hw->device_id)
-			errno = -EINVAL;
+			err = -EINVAL;
 		else if (test_bit(__I40E_RESET_RECOVERY_PENDING, pf->state) ||
 			 test_bit(__I40E_RESET_INTR_RECEIVED, pf->state))
-			errno = -EBUSY;
+			err = -EBUSY;
 		else
-			ret_val = i40e_nvmupd_command(hw, cmd, bytes, &errno);
+			ret_val = i40e_nvmupd_command(hw, cmd, bytes, &err);
 
-		if ((errno || ret_val) && (hw->debug_mask & I40E_DEBUG_NVM))
+		if ((err || ret_val) && (hw->debug_mask & I40E_DEBUG_NVM))
 			dev_info(&pf->pdev->dev,
 				 "NVMUpdate read failed err=%d status=0x%x errno=%d module=%d offset=0x%x size=%d\n",
-				 ret_val, hw->aq.asq_last_status, errno,
+				 ret_val, hw->aq.asq_last_status, err,
 				 (u8)(cmd->config & I40E_NVM_MOD_PNT_MASK),
 				 cmd->offset, cmd->data_size);
 
-		return errno;
+		return err;
 	}
 
 	/* normal ethtool get_eeprom support */
@@ -2189,30 +2206,30 @@ static int i40e_set_eeprom(struct net_device *netdev,
 	struct i40e_pf *pf = np->vsi->back;
 	struct i40e_nvm_access *cmd = (struct i40e_nvm_access *)eeprom;
 	int ret_val = 0;
-	int errno = 0;
+	int err = 0;
 	u32 magic;
 
 	/* normal ethtool set_eeprom is not supported */
 	magic = hw->vendor_id | (hw->device_id << 16);
 	if (eeprom->magic == magic)
-		errno = -EOPNOTSUPP;
+		err = -EOPNOTSUPP;
 	/* check for NVMUpdate access method */
 	else if (!eeprom->magic || (eeprom->magic >> 16) != hw->device_id)
-		errno = -EINVAL;
+		err = -EINVAL;
 	else if (test_bit(__I40E_RESET_RECOVERY_PENDING, pf->state) ||
 		 test_bit(__I40E_RESET_INTR_RECEIVED, pf->state))
-		errno = -EBUSY;
+		err = -EBUSY;
 	else
-		ret_val = i40e_nvmupd_command(hw, cmd, bytes, &errno);
+		ret_val = i40e_nvmupd_command(hw, cmd, bytes, &err);
 
-	if ((errno || ret_val) && (hw->debug_mask & I40E_DEBUG_NVM))
+	if ((err || ret_val) && (hw->debug_mask & I40E_DEBUG_NVM))
 		dev_info(&pf->pdev->dev,
 			 "NVMUpdate write failed err=%d status=0x%x errno=%d module=%d offset=0x%x size=%d\n",
-			 ret_val, hw->aq.asq_last_status, errno,
+			 ret_val, hw->aq.asq_last_status, err,
 			 (u8)(cmd->config & I40E_NVM_MOD_PNT_MASK),
 			 cmd->offset, cmd->data_size);
 
-	return errno;
+	return err;
 }
 
 static void i40e_get_drvinfo(struct net_device *netdev,
@@ -5606,7 +5623,7 @@ static int i40e_check_fdir_input_set(struct i40e_vsi *vsi,
 				    (struct in6_addr *)&ipv6_full_mask))
 			new_mask |= I40E_L3_V6_DST_MASK;
 		else if (ipv6_addr_any((struct in6_addr *)
-				       &tcp_ip6_spec->ip6src))
+				       &tcp_ip6_spec->ip6dst))
 			new_mask &= ~I40E_L3_V6_DST_MASK;
 		else
 			return -EOPNOTSUPP;
@@ -6879,7 +6896,7 @@ static int i40e_get_eee(struct net_device *netdev, struct ethtool_eee *edata)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_aq_get_phy_abilities_resp phy_cfg;
-	i40e_status status = 0;
+	i40e_status status = I40E_SUCCESS;
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_pf *pf = vsi->back;
 	struct i40e_hw *hw = &pf->hw;

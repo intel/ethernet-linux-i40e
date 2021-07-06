@@ -13,6 +13,7 @@
 #include <linux/aer.h>
 #include <linux/netdevice.h>
 #include <linux/ioport.h>
+#include <linux/crash_dump.h>
 #include <linux/slab.h>
 #include <linux/list.h>
 #include <linux/hash.h>
@@ -85,6 +86,8 @@ bool i40e_is_l4mode_enabled(void);
 #define I40E_FDIR_RING_COUNT		32
 #define I40E_MAX_AQ_BUF_SIZE		4096
 #define I40E_AQ_LEN			256
+#define I40E_MIN_ARQ_LEN		1
+#define I40E_MIN_ASQ_LEN		2
 #define I40E_AQ_WORK_LIMIT		66 /* max number of VFs + a little */
 /*
  * If I40E_MAX_USER_PRIORITY is updated please also update
@@ -615,6 +618,7 @@ struct i40e_pf {
 #define I40E_HW_STOP_FW_LLDP			BIT(16)
 #define I40E_HW_PORT_ID_VALID			BIT(17)
 #define I40E_HW_RESTART_AUTONEG			BIT(18)
+#define I40E_HW_OUTER_VLAN_CAPABLE		BIT(19)
 
 	u64 flags;
 #define I40E_FLAG_RX_CSUM_ENABLED		BIT(0)
@@ -876,6 +880,7 @@ enum i40e_filter_state {
 	I40E_FILTER_ACTIVE,		/* Added to switch by FW */
 	I40E_FILTER_FAILED,		/* Rejected by FW */
 	I40E_FILTER_REMOVE,		/* To be removed */
+	I40E_FILTER_INACTIVE,		/* Removed from FW, only for vlan 0 */
 /* There is no 'removed' state; the filter struct is freed */
 };
 struct i40e_mac_filter {
@@ -1283,6 +1288,9 @@ int i40e_max_lump_qp(struct i40e_pf *pf);
 int i40e_veb_config_tc(struct i40e_veb *veb, u8 enabled_tc);
 int i40e_vsi_add_pvid(struct i40e_vsi *vsi, u16 vid);
 void i40e_vsi_remove_pvid(struct i40e_vsi *vsi);
+bool i40e_is_double_vlan(struct i40e_hw *hw);
+bool i40e_is_vid(struct i40e_aqc_vsi_properties_data *info);
+__le16 *i40e_get_current_vid(struct i40e_vsi *vsi);
 int i40e_get_custom_cloud_filter_type(u8 flags, u16 *type);
 int i40e_add_del_custom_cloud_filter(struct i40e_vsi *vsi,
 				     struct i40e_cloud_filter *filter,
@@ -1387,6 +1395,7 @@ void i40e_ptp_stop(struct i40e_pf *pf);
 int i40e_ptp_alloc_pins(struct i40e_pf *pf);
 #endif /* HAVE_PTP_1588_CLOCK */
 u8 i40e_pf_get_num_tc(struct i40e_pf *pf);
+int i40e_update_adq_vsi_queues(struct i40e_vsi *vsi, int vsi_offset);
 int i40e_vsi_get_bw_info(struct i40e_vsi *vsi);
 int i40e_is_vsi_uplink_mode_veb(struct i40e_vsi *vsi);
 i40e_status i40e_get_partition_bw_setting(struct i40e_pf *pf);

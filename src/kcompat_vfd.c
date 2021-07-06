@@ -3198,10 +3198,11 @@ static void free_vfd_vf(struct pci_dev *pdev, struct vfd_vf_obj *vf)
 	int i;
 
 	for (i = 0; i < VFD_NUM_TC; i++) {
-		dev_info(&pdev->dev, "deleting VF %s tc",
-			 vf->vf_tc_kobjs[i]->name);
+		dev_dbg(&pdev->dev, "deleting VF %s tc",
+			vf->vf_tc_kobjs[i]->name);
 		kobject_put(vf->vf_tc_kobjs[i]);
 	}
+
 	dev_info(&pdev->dev, "deleting VF %s sysfs", vf->vf_qos_kobj->name);
 	kobject_put(vf->vf_qos_kobj);
 	dev_info(&pdev->dev, "deleting VF %s sysfs", vf->vf_kobj->name);
