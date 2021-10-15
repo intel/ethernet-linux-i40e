@@ -8,6 +8,7 @@
 #include "i40e.h"
 #include "i40e_trace.h"
 #include "i40e_prototype.h"
+#include "i40e_txrx_common.h"
 
 static inline __le64 build_ctob(u32 td_cmd, u32 td_offset, unsigned int size,
 				u32 td_tag)
@@ -678,8 +679,8 @@ int i40e_add_del_fdir(struct i40e_vsi *vsi,
  * This is used to verify if the FD programming or invalidation
  * requested by SW to the HW is successful or not and take actions accordingly.
  **/
-static void i40e_fd_handle_status(struct i40e_ring *rx_ring,
-				  union i40e_rx_desc *rx_desc, u8 prog_id)
+void i40e_fd_handle_status(struct i40e_ring *rx_ring,
+			   union i40e_rx_desc *rx_desc, u8 prog_id)
 {
 	struct i40e_pf *pf = rx_ring->vsi->back;
 	struct pci_dev *pdev = pf->pdev;
@@ -1399,6 +1400,11 @@ static void i40e_reuse_rx_page(struct i40e_ring *rx_ring,
 	new_buff->page		= old_buff->page;
 	new_buff->page_offset	= old_buff->page_offset;
 	new_buff->pagecnt_bias	= old_buff->pagecnt_bias;
+
+	rx_ring->rx_stats.page_reuse_count++;
+
+	/* clear contents of buffer_info */
+	old_buff->page = NULL;
 }
 
 #endif /* CONFIG_I40E_DISABLE_PACKET_SPLIT */
@@ -1425,30 +1431,15 @@ static void i40e_reuse_rx_skb(struct i40e_ring *rx_ring,
 	/* transfer page from old buffer to new buffer */
 	new_buff->dma		= old_buff->dma;
 	new_buff->skb		= old_buff->skb;
+
+	rx_buffer->skb = NULL;
 }
 
 #endif /* CONFIG_I40E_DISABLE_PACKET_SPLIT */
-/**
- * i40e_rx_is_programming_status - check for programming status descriptor
- * @qw: qword representing status_error_len in CPU ordering
- *
- * The value of in the descriptor length field indicate if this
- * is a programming status descriptor for flow director or FCoE
- * by the value of I40E_RX_PROG_STATUS_DESC_LENGTH, otherwise
- * it is a packet descriptor.
- **/
-static inline bool i40e_rx_is_programming_status(u64 qw)
-{
-	/* The Rx filter programming status and SPH bit occupy the same
-	 * spot in the descriptor. Since we don't support packet split we
-	 * can just reuse the bit as an indication that this is a
-	 * programming status descriptor.
-	 */
-	return qw & I40E_RXD_QW1_LENGTH_SPH_MASK;
-}
 
 /**
- * i40e_clean_programming_status - clean the programming status descriptor
+ * i40e_clean_programming_status - try to clean the programming status
+ * descriptor
  * @rx_ring: the rx ring that has this descriptor
  * @rx_desc: the rx descriptor written back by HW
  * @qw: qword representing status_error_len in CPU ordering
@@ -1457,14 +1448,21 @@ static inline bool i40e_rx_is_programming_status(u64 qw)
  * status being successful or not and take actions accordingly. FCoE should
  * handle its context/filter programming/invalidation status and take actions.
  *
+ * Returns an i40e_rx_buffer to reuse if the cleanup occurred, otherwise NULL.
  **/
-static void i40e_clean_programming_status(struct i40e_ring *rx_ring,
-					  union i40e_rx_desc *rx_desc,
-					  u64 qw)
+struct i40e_rx_buffer *i40e_clean_programming_status
+	(struct i40e_ring *rx_ring,
+	 union i40e_rx_desc *rx_desc,
+	 u64 qw)
 {
 	struct i40e_rx_buffer *rx_buffer;
-	u32 ntc = rx_ring->next_to_clean;
+	u32 ntc;
 	u8 id;
+
+	if (!i40e_rx_is_programming_status(qw))
+		return NULL;
+
+	ntc = rx_ring->next_to_clean;
 
 	/* fetch, update, and store next to clean */
 	rx_buffer = &rx_ring->rx_bi[ntc++];
@@ -1473,26 +1471,13 @@ static void i40e_clean_programming_status(struct i40e_ring *rx_ring,
 
 	prefetch(I40E_RX_DESC(rx_ring, ntc));
 
-#ifdef CONFIG_I40E_DISABLE_PACKET_SPLIT
-	/* place unused page back on the ring */
-	i40e_reuse_rx_skb(rx_ring, rx_buffer);
-
-	/* clear contents of buffer_info */
-	rx_buffer->skb = NULL;
-#else
-	/* place unused page back on the ring */
-	i40e_reuse_rx_page(rx_ring, rx_buffer);
-	rx_ring->rx_stats.page_reuse_count++;
-
-	/* clear contents of buffer_info */
-	rx_buffer->page = NULL;
-#endif
-
 	id = (qw & I40E_RX_PROG_STATUS_DESC_QW1_PROGID_MASK) >>
 		  I40E_RX_PROG_STATUS_DESC_QW1_PROGID_SHIFT;
 
 	if (id == I40E_RX_PROG_STATUS_DESC_FD_FILTER_STATUS)
 		i40e_fd_handle_status(rx_ring, rx_desc, id);
+
+	return rx_buffer;
 }
 
 /**
@@ -1694,7 +1679,7 @@ err:
  * @rx_ring: ring to bump
  * @val: new head index
  **/
-static inline void i40e_release_rx_desc(struct i40e_ring *rx_ring, u32 val)
+void i40e_release_rx_desc(struct i40e_ring *rx_ring, u32 val)
 {
 	rx_ring->next_to_use = val;
 
@@ -1852,8 +1837,8 @@ static bool i40e_alloc_mapped_page(struct i40e_ring *rx_ring,
  * @vlan_tag: vlan tag for packet
  * @vlan_tpid: vlan tpid for packet
  **/
-static void i40e_receive_skb(struct i40e_ring *rx_ring,
-			     struct sk_buff *skb, u16 vlan_tag, u16 vlan_tpid)
+void i40e_receive_skb(struct i40e_ring *rx_ring,
+		      struct sk_buff *skb, u16 vlan_tag, u16 vlan_tpid)
 {
 	struct i40e_q_vector *q_vector = rx_ring->q_vector;
 #ifdef HAVE_VLAN_RX_REGISTER
@@ -1956,12 +1941,13 @@ no_buffers:
 	return true;
 }
 
-#define I40E_XDP_PASS          0
-#define I40E_XDP_CONSUMED      BIT(0)
-#define I40E_XDP_TX            BIT(1)
-#define I40E_XDP_REDIR         BIT(2)
-
-static inline void i40e_xdp_ring_update_tail(struct i40e_ring *xdp_ring)
+/**
+ * i40e_xdp_ring_update_tail - Updates the XDP Tx ring tail register
+ * @xdp_ring: XDP Tx ring
+ *
+ * This function updates the XDP Tx ring tail register.
+ **/
+void i40e_xdp_ring_update_tail(struct i40e_ring *xdp_ring)
 {
 	/* Force memory writes to complete before letting h/w
 	 * know there are new descriptors to fetch.
@@ -2178,7 +2164,6 @@ static inline void i40e_rx_hash(struct i40e_ring *ring,
  * order to populate the hash, checksum, VLAN, protocol, and
  * other fields within the skb.
  **/
-static inline
 void i40e_process_skb_fields(struct i40e_ring *rx_ring,
 			     union i40e_rx_desc *rx_desc, struct sk_buff *skb,
 			     u8 rx_ptype)
@@ -2615,8 +2600,8 @@ static bool i40e_is_non_eop(struct i40e_ring *rx_ring,
 static int i40e_xmit_xdp_ring(struct xdp_frame *xdp,
 			      struct i40e_ring *xdp_ring);
 
-static int i40e_xmit_xdp_tx_ring(struct xdp_buff *xdp,
-				 struct i40e_ring *xdp_ring)
+int i40e_xmit_xdp_tx_ring(struct xdp_buff *xdp,
+			  struct i40e_ring *xdp_ring)
 {
 	struct xdp_frame *xdpf = xdp_convert_buff_to_frame(xdp);
 
@@ -2722,6 +2707,49 @@ static void i40e_rx_buffer_flip(struct i40e_ring *rx_ring,
 }
 
 /**
+ * i40e_update_rx_stats - Update Rx ring statistics
+ * @rx_ring: rx descriptor ring
+ * @total_rx_bytes: number of bytes received
+ * @total_rx_packets: number of packets received
+ *
+ * This function updates the Rx ring statistics.
+ **/
+void i40e_update_rx_stats(struct i40e_ring *rx_ring,
+			  unsigned int total_rx_bytes,
+			  unsigned int total_rx_packets)
+{
+	u64_stats_update_begin(&rx_ring->syncp);
+	rx_ring->stats.packets += total_rx_packets;
+	rx_ring->stats.bytes += total_rx_bytes;
+	u64_stats_update_end(&rx_ring->syncp);
+	rx_ring->q_vector->rx.total_packets += total_rx_packets;
+	rx_ring->q_vector->rx.total_bytes += total_rx_bytes;
+}
+
+/**
+ * i40e_finalize_xdp_rx - Bump XDP Tx tail and/or flush redirect map
+ * @rx_ring: Rx ring
+ * @xdp_res: Result of the receive batch
+ *
+ * This function bumps XDP Tx tail and/or flush redirect map, and
+ * should be called when a batch of packets has been processed in the
+ * napi loop.
+ **/
+void i40e_finalize_xdp_rx(struct i40e_ring *rx_ring,
+			  unsigned int xdp_res)
+{
+	if (xdp_res & I40E_XDP_REDIR)
+		xdp_do_flush_map();
+
+	if (xdp_res & I40E_XDP_TX) {
+		struct i40e_ring *xdp_ring =
+			rx_ring->vsi->xdp_rings[rx_ring->queue_index];
+
+		i40e_xdp_ring_update_tail(xdp_ring);
+	}
+}
+
+/**
  * i40e_clean_rx_irq - Clean completed descriptors from Rx ring - bounce buf
  * @rx_ring: rx descriptor ring to transact packets on
  * @budget: Total limit on number of packets to process
@@ -2786,12 +2814,18 @@ static int i40e_clean_rx_irq(struct i40e_ring *rx_ring, int budget)
 		 * verified the descriptor has been written back.
 		 */
 		dma_rmb();
-
-		if (unlikely(i40e_rx_is_programming_status(qword))) {
-			i40e_clean_programming_status(rx_ring, rx_desc, qword);
+		rx_buffer = i40e_clean_programming_status(rx_ring, rx_desc,
+							  qword);
+		if (unlikely(rx_buffer)) {
+#ifdef CONFIG_I40E_DISABLE_PACKET_SPLIT
+			i40e_reuse_rx_skb(rx_ring, rx_buffer);
+#else
+			i40e_reuse_rx_page(rx_ring, rx_buffer);
+#endif /* CONFIG_I40E_DISABLE_PACKET_SPLIT */
 			cleaned_count++;
 			continue;
 		}
+
 		size = (qword & I40E_RXD_QW1_LENGTH_PBUF_MASK) >>
 		       I40E_RXD_QW1_LENGTH_PBUF_SHIFT;
 		if (!size)
@@ -2886,23 +2920,10 @@ static int i40e_clean_rx_irq(struct i40e_ring *rx_ring, int budget)
 		total_rx_packets++;
 	}
 
-	if (xdp_xmit & I40E_XDP_REDIR)
-		xdp_do_flush_map();
-
-	if (xdp_xmit & I40E_XDP_TX) {
-		struct i40e_ring *xdp_ring =
-			rx_ring->vsi->xdp_rings[rx_ring->queue_index];
-
-		i40e_xdp_ring_update_tail(xdp_ring);
-	}
+	i40e_finalize_xdp_rx(rx_ring, xdp_xmit);
 	rx_ring->skb = skb;
 
-	u64_stats_update_begin(&rx_ring->syncp);
-	rx_ring->stats.packets += total_rx_packets;
-	rx_ring->stats.bytes += total_rx_bytes;
-	u64_stats_update_end(&rx_ring->syncp);
-	rx_ring->q_vector->rx.total_packets += total_rx_packets;
-	rx_ring->q_vector->rx.total_bytes += total_rx_bytes;
+	i40e_update_rx_stats(rx_ring, total_rx_bytes, total_rx_packets);
 
 	/* guarantee a trip back through this routine if there was a failure */
 	return failure ? budget : (int)total_rx_packets;
@@ -4474,6 +4495,7 @@ int i40e_xdp_xmit(struct net_device *dev, struct xdp_buff *xdp)
 	struct i40e_netdev_priv *np = netdev_priv(dev);
 	unsigned int queue_index = smp_processor_id();
 	struct i40e_vsi *vsi = np->vsi;
+	struct i40e_pf *pf = vsi->back;
 #ifdef HAVE_XDP_FRAME_STRUCT
 	struct i40e_ring *xdp_ring;
 	int drops = 0;
@@ -4484,7 +4506,8 @@ int i40e_xdp_xmit(struct net_device *dev, struct xdp_buff *xdp)
 	if (test_bit(__I40E_VSI_DOWN, vsi->state))
 		return -ENETDOWN;
 
-	if (!i40e_enabled_xdp_vsi(vsi) || queue_index >= vsi->num_queue_pairs)
+	if (!i40e_enabled_xdp_vsi(vsi) || queue_index >= vsi->num_queue_pairs ||
+	    test_bit(__I40E_CONFIG_BUSY, pf->state))
 		return -ENXIO;
 #ifdef HAVE_XDP_FRAME_STRUCT
 	if (unlikely(flags & ~XDP_XMIT_FLAGS_MASK))

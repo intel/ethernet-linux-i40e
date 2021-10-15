@@ -41,6 +41,10 @@
 		     + __GNUC_PATCHLEVEL__)
 #endif /* GCC_VERSION */
 
+#ifndef IEEE_8021QAZ_APP_SEL_DSCP
+#define IEEE_8021QAZ_APP_SEL_DSCP	5
+#endif
+
 /* Backport macros for controlling GCC diagnostics */
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(4,18,0) )
 
@@ -749,6 +753,9 @@ struct _kc_ethtool_pauseparam {
 #ifndef SPEED_100000
 #define SPEED_100000 100000
 #endif
+#ifndef SPEED_200000
+#define SPEED_200000 200000
+#endif
 
 #ifndef RHEL_RELEASE_VERSION
 #define RHEL_RELEASE_VERSION(a,b) (((a) << 8) + (b))
@@ -974,9 +981,8 @@ struct _kc_ethtool_pauseparam {
   #endif /*  LINUX_VERSION_CODE == KERNEL_VERSION(4,15,0) */
 #endif /* if (NOT RHEL && NOT SLES && NOT UBUNTU) */
 
+
 #ifdef __KLOCWORK__
-/* The following are not compiled into the binary driver; they are here
- * only to tune Klocwork scans to workaround false-positive issues.
  */
 #ifdef ARRAY_SIZE
 #undef ARRAY_SIZE
@@ -1408,6 +1414,7 @@ struct vlan_ethhdr {
 /* 2.4.22 => 2.4.17 */
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(2,4,22) )
 #define pci_name(x)	((x)->slot_name)
+#define cpu_online(cpuid) test_bit((cpuid), &cpu_online_map)
 
 #ifndef SUPPORTED_10000baseT_Full
 #define SUPPORTED_10000baseT_Full	BIT(12)
@@ -6125,10 +6132,6 @@ struct udp_tunnel_info {
 };
 #endif
 
-#if (RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,5))
-#define HAVE_TCF_EXTS_TO_LIST
-#endif
-
 #if (UBUNTU_VERSION_CODE && UBUNTU_VERSION_CODE < UBUNTU_VERSION(4,8,0,0))
 #define tc_no_actions(_exts) true
 #define tc_for_each_action(_a, _exts) while (0)
@@ -6177,7 +6180,6 @@ pci_release_mem_regions(struct pci_dev *pdev)
 #endif /* RHEL7.4+ || SLES12sp3+ */
 #else
 #define HAVE_UDP_ENC_RX_OFFLOAD
-#define HAVE_TCF_EXTS_TO_LIST
 #define HAVE_ETHTOOL_NEW_50G_BITS
 #endif /* 4.8.0 */
 
@@ -6766,7 +6768,6 @@ void _kc_pcie_print_link_status(struct pci_dev *dev);
 #define HAVE_XDP_SOCK
 #define HAVE_NDO_XDP_XMIT_BULK_AND_FLAGS
 #define NO_NDO_XDP_FLUSH
-#define HAVE_AF_XDP_SUPPORT
 #endif /* 4.18.0 */
 
 /*****************************************************************************/
@@ -6796,11 +6797,6 @@ void _kc_pcie_print_link_status(struct pci_dev *dev);
 #define HAVE_NDO_SELECT_QUEUE_SB_DEV
 #define HAVE_TCF_BLOCK_CB_REGISTER_EXTACK
 #endif
-#if ((RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,0)) ||\
-     (SLE_VERSION_CODE >= SLE_VERSION(15,1,0)))
-#define HAVE_TCF_EXTS_FOR_EACH_ACTION
-#undef HAVE_TCF_EXTS_TO_LIST
-#endif /* RHEL8.0+ */
 
 static inline void __kc_metadata_dst_free(void *md_dst)
 {
@@ -6813,8 +6809,6 @@ static inline void __kc_metadata_dst_free(void *md_dst)
 #define NO_NETDEV_BPF_PROG_ATTACHED
 #define HAVE_NDO_SELECT_QUEUE_SB_DEV
 #define HAVE_NETDEV_SB_DEV
-#undef HAVE_TCF_EXTS_TO_LIST
-#define HAVE_TCF_EXTS_FOR_EACH_ACTION
 #define HAVE_TCF_VLAN_TPID
 #define HAVE_RHASHTABLE_TYPES
 #define HAVE_DEVLINK_REGIONS
@@ -6824,29 +6818,6 @@ static inline void __kc_metadata_dst_free(void *md_dst)
 /*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4,20,0))
 #define HAVE_XDP_UMEM_PROPS
-#ifdef HAVE_AF_XDP_SUPPORT
-#ifndef napi_if_scheduled_mark_missed
-static inline bool __kc_napi_if_scheduled_mark_missed(struct napi_struct *n)
-{
-	unsigned long val, new;
-
-	do {
-		val = READ_ONCE(n->state);
-		if (val & NAPIF_STATE_DISABLE)
-			return true;
-
-		if (!(val & NAPIF_STATE_SCHED))
-			return false;
-
-		new = val | NAPIF_STATE_MISSED;
-	} while (cmpxchg(&n->state, val, new) != val);
-
-	return true;
-}
-
-#define napi_if_scheduled_mark_missed __kc_napi_if_scheduled_mark_missed
-#endif /* !napi_if_scheduled_mark_missed */
-#endif /* HAVE_AF_XDP_SUPPORT */
 #if (RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,0)))
 #define HAVE_DEVLINK_ESWITCH_OPS_EXTACK
 #endif /* RHEL >= 8.0 */
@@ -6922,6 +6893,7 @@ ptp_read_system_postts(struct ptp_system_timestamp __always_unused *sts)
 #if (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,2))
 #define HAVE_TC_INDIR_BLOCK
 #endif /* RHEL 8.2 */
+#define INDIRECT_CALLABLE_DECLARE(x) x
 #else /* >= 5.0.0 */
 #define HAVE_PTP_SYS_OFFSET_EXTENDED_IOCTL
 #define HAVE_PTP_CLOCK_INFO_GETTIMEX64
@@ -6929,6 +6901,7 @@ ptp_read_system_postts(struct ptp_system_timestamp __always_unused *sts)
 #define HAVE_DMA_ALLOC_COHERENT_ZEROES_MEM
 #define HAVE_GENEVE_TYPE
 #define HAVE_TC_INDIR_BLOCK
+#define HAVE_INDIRECT_CALL_WRAPPER_HEADER
 #endif /* 5.0.0 */
 
 /*****************************************************************************/
@@ -7190,10 +7163,10 @@ static inline void _kc_bitmap_set_value8(unsigned long *map,
 
 /*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5,6,0))
-#ifdef HAVE_AF_XDP_SUPPORT
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
 #define xsk_umem_release_addr		xsk_umem_discard_addr
 #define xsk_umem_release_addr_rq	xsk_umem_discard_addr_rq
-#endif /* HAVE_AF_XDP_SUPPORT */
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
 #if (RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,3)) || \
      (SLE_VERSION_CODE && SLE_VERSION_CODE >= SLE_VERSION(15,3,0)))
 #define HAVE_TX_TIMEOUT_TXQUEUE
@@ -7212,10 +7185,6 @@ u64 _kc_pci_get_dsn(struct pci_dev *dev);
     !(RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,3)))
 #define pci_aer_clear_nonfatal_status	pci_cleanup_aer_uncorrect_error_status
 #endif
-
-#define cpu_latency_qos_update_request pm_qos_update_request
-#define cpu_latency_qos_add_request(arg1, arg2) pm_qos_add_request(arg1, PM_QOS_CPU_DMA_LATENCY, arg2)
-#define cpu_latency_qos_remove_request pm_qos_remove_request
 
 #ifndef DEVLINK_INFO_VERSION_GENERIC_FW_BUNDLE_ID
 #define DEVLINK_INFO_VERSION_GENERIC_FW_BUNDLE_ID "fw.bundle_id"

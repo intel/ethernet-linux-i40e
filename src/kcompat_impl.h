@@ -320,6 +320,90 @@ _kc_devlink_port_attrs_set(struct devlink_port *devlink_port,
 
 #endif /* CONFIG_NET_DEVLINK */
 
+#ifdef NEED_IDA_ALLOC_MIN_MAX_RANGE_FREE
+/* ida_alloc(), ida_alloc_min(), ida_alloc_max(), ida_alloc_range(), and
+ * ida_free() were added in commit 5ade60dda43c ("ida: add new API").
+ *
+ * Also, using "0" as the "end" argument (3rd argument) to ida_simple_get() is
+ * considered the max value, which is why it's used in ida_alloc() and
+ * ida_alloc_min().
+ */
+static inline int ida_alloc(struct ida *ida, gfp_t gfp)
+{
+	return ida_simple_get(ida, 0, 0, gfp);
+}
+
+static inline int ida_alloc_min(struct ida *ida, unsigned int min, gfp_t gfp)
+{
+	return ida_simple_get(ida, min, 0, gfp);
+}
+
+static inline int ida_alloc_max(struct ida *ida, unsigned int max, gfp_t gfp)
+{
+	return ida_simple_get(ida, 0, max, gfp);
+}
+
+static inline int
+ida_alloc_range(struct ida *ida, unsigned int min, unsigned int max, gfp_t gfp)
+{
+	return ida_simple_get(ida, min, max, gfp);
+}
+
+static inline void ida_free(struct ida *ida, unsigned int id)
+{
+	ida_simple_remove(ida, id);
+}
+#endif /* NEED_IDA_ALLOC_MIN_MAX_RANGE_FREE */
+
+/*
+ * dev_printk implementations
+ */
+
+/* NEED_DEV_PRINTK_ONCE
+ *
+ * The dev_*_once family of printk functions was introduced by commit
+ * e135303bd5be ("device: Add dev_<level>_once variants")
+ *
+ * The implementation is very straight forward so we will just implement them
+ * as-is here.
+ */
+#ifdef NEED_DEV_PRINTK_ONCE
+#ifdef CONFIG_PRINTK
+#define dev_level_once(dev_level, dev, fmt, ...)			\
+do {									\
+	static bool __print_once __read_mostly;				\
+									\
+	if (!__print_once) {						\
+		__print_once = true;					\
+		dev_level(dev, fmt, ##__VA_ARGS__);			\
+	}								\
+} while (0)
+#else
+#define dev_level_once(dev_level, dev, fmt, ...)			\
+do {									\
+	if (0)								\
+		dev_level(dev, fmt, ##__VA_ARGS__);			\
+} while (0)
+#endif
+
+#define dev_emerg_once(dev, fmt, ...)					\
+	dev_level_once(dev_emerg, dev, fmt, ##__VA_ARGS__)
+#define dev_alert_once(dev, fmt, ...)					\
+	dev_level_once(dev_alert, dev, fmt, ##__VA_ARGS__)
+#define dev_crit_once(dev, fmt, ...)					\
+	dev_level_once(dev_crit, dev, fmt, ##__VA_ARGS__)
+#define dev_err_once(dev, fmt, ...)					\
+	dev_level_once(dev_err, dev, fmt, ##__VA_ARGS__)
+#define dev_warn_once(dev, fmt, ...)					\
+	dev_level_once(dev_warn, dev, fmt, ##__VA_ARGS__)
+#define dev_notice_once(dev, fmt, ...)					\
+	dev_level_once(dev_notice, dev, fmt, ##__VA_ARGS__)
+#define dev_info_once(dev, fmt, ...)					\
+	dev_level_once(dev_info, dev, fmt, ##__VA_ARGS__)
+#define dev_dbg_once(dev, fmt, ...)					\
+	dev_level_once(dev_dbg, dev, fmt, ##__VA_ARGS__)
+#endif /* NEED_DEV_PRINTK_ONCE */
+
 #ifdef HAVE_TC_CB_AND_SETUP_QDISC_MQPRIO
 
 /* NEED_TC_CLS_CAN_OFFLOAD_AND_CHAIN0
@@ -358,5 +442,155 @@ tc_cls_can_offload_and_chain0(const struct net_device *dev,
 #ifdef NEED_TC_SETUP_QDISC_MQPRIO
 #define TC_SETUP_QDISC_MQPRIO TC_SETUP_MQPRIO
 #endif /* NEED_TC_SETUP_QDISC_MQPRIO */
+
+/*
+ * ART/TSC functions
+ */
+#ifdef HAVE_PTP_CROSSTIMESTAMP
+/* NEED_CONVERT_ART_NS_TO_TSC
+ *
+ * convert_art_ns_to_tsc was added by upstream commit fc804f65d462 ("x86/tsc:
+ * Convert ART in nanoseconds to TSC").
+ *
+ * This function is similar to convert_art_to_tsc, but expects the input in
+ * terms of nanoseconds, rather than ART cycles. We implement this by
+ * accessing the tsc_khz value and performing the proper calculation. In order
+ * to access the correct clock object on returning, we use the function
+ * convert_art_to_tsc, because the art_related_clocksource is inaccessible.
+ */
+#ifdef NEED_CONVERT_ART_NS_TO_TSC
+#ifdef CONFIG_X86
+#include <asm/tsc.h>
+
+static inline struct system_counterval_t convert_art_ns_to_tsc(u64 art_ns)
+{
+	struct system_counterval_t system;
+	u64 tmp, res, rem;
+
+	rem = do_div(art_ns, USEC_PER_SEC);
+
+	res = art_ns * tsc_khz;
+	tmp = rem * tsc_khz;
+
+	do_div(tmp, USEC_PER_SEC);
+	res += tmp;
+
+	system = convert_art_to_tsc(art_ns);
+	system.cycles = res;
+
+	return system;
+}
+#else /* CONFIG_X86 */
+static inline struct system_counterval_t convert_art_ns_to_tsc(u64 art_ns)
+{
+	WARN_ONCE(1, "%s is only supported on X86", __func__);
+	return (struct system_counterval_t){};
+}
+#endif /* !CONFIG_X86 */
+#endif /* NEED_CONVERT_ART_NS_TO_TSC */
+#endif /* HAVE_PTP_CROSSTIMESTAMP */
+
+#ifdef NEED_BUS_FIND_DEVICE_CONST_DATA
+/* NEED_BUS_FIND_DEVICE_CONST_DATA
+ *
+ * bus_find_device() was updated in upstream commit 418e3ea157ef
+ * ("bus_find_device: Unify the match callback with class_find_device")
+ * to take a const void *data parameter and also have the match() function
+ * passed in take a const void *data parameter.
+ *
+ * all of the kcompat below makes it so the caller can always just call
+ * bus_find_device() according to the upstream kernel without having to worry
+ * about const vs. non-const arguments.
+ */
+struct _kc_bus_find_device_custom_data {
+	const void *real_data;
+	int (*real_match)(struct device *dev, const void *data);
+};
+
+static inline int _kc_bus_find_device_wrapped_match(struct device *dev, void *data)
+{
+	struct _kc_bus_find_device_custom_data *custom_data = data;
+
+	return custom_data->real_match(dev, custom_data->real_data);
+}
+
+static inline struct device *
+_kc_bus_find_device(struct bus_type *type, struct device *start,
+		    const void *data,
+		    int (*match)(struct device *dev, const void *data))
+{
+	struct _kc_bus_find_device_custom_data custom_data = {};
+
+	custom_data.real_data = data;
+	custom_data.real_match = match;
+
+	return bus_find_device(type, start, &custom_data,
+			       _kc_bus_find_device_wrapped_match);
+}
+
+/* force callers of bus_find_device() to call _kc_bus_find_device() on kernels
+ * where NEED_BUS_FIND_DEVICE_CONST_DATA is defined
+ */
+#define bus_find_device(type, start, data, match) \
+	_kc_bus_find_device(type, start, data, match)
+#endif /* NEED_BUS_FIND_DEVICE_CONST_DATA */
+
+#ifdef NEED_DEV_PM_DOMAIN_ATTACH_DETACH
+#include <linux/acpi.h>
+/* NEED_DEV_PM_DOMAIN_ATTACH_DETACH
+ *
+ * dev_pm_domain_attach() and dev_pm_domain_detach() were added in upstream
+ * commit 46420dd73b80 ("PM / Domains: Add APIs to attach/detach a PM domain for
+ * a device"). To support older kernels and OSVs that don't have these API, just
+ * implement how older versions worked by directly calling acpi_dev_pm_attach()
+ * and acpi_dev_pm_detach().
+ */
+static inline int dev_pm_domain_attach(struct device *dev, bool power_on)
+{
+	if (dev->pm_domain)
+		return 0;
+
+	if (ACPI_HANDLE(dev))
+		return acpi_dev_pm_attach(dev, true);
+
+	return 0;
+}
+
+static inline void dev_pm_domain_detach(struct device *dev, bool power_off)
+{
+	if (ACPI_HANDLE(dev))
+		acpi_dev_pm_detach(dev, true);
+}
+#endif /* NEED_DEV_PM_DOMAIN_ATTACH_DETACH */
+
+#ifdef NEED_CPU_LATENCY_QOS_RENAME
+/* NEED_CPU_LATENCY_QOS_RENAME
+ *
+ * The PM_QOS_CPU_DMA_LATENCY definition was removed in 67b06ba01857 ("PM:
+ * QoS: Drop PM_QOS_CPU_DMA_LATENCY and rename related functions"). The
+ * related functions were renamed to use "cpu_latency_qos_" prefix.
+ *
+ * Use wrapper functions to map the new API onto the API available in older
+ * kernels.
+ */
+#include <linux/pm_qos.h>
+static inline void
+cpu_latency_qos_add_request(struct pm_qos_request *req, s32 value)
+{
+	pm_qos_add_request(req, PM_QOS_CPU_DMA_LATENCY, value);
+}
+
+static inline void
+cpu_latency_qos_update_request(struct pm_qos_request *req, s32 new_value)
+{
+	pm_qos_update_request(req, new_value);
+}
+
+static inline void
+cpu_latency_qos_remove_request(struct pm_qos_request *req)
+{
+	pm_qos_remove_request(req);
+}
+#endif /* NEED_CPU_LATENCY_QOS_RENAME */
 
 #endif /* _KCOMPAT_IMPL_H_ */

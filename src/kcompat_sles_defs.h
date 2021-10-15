@@ -93,12 +93,21 @@
 #endif
 
 /*****************************************************************************/
+#if (SLE_KERNEL_CODE < SLE_KERNEL_VERSION(4,12,14,100))
+#else /* >= 4.12.14-100 */
+#undef HAVE_TCF_EXTS_TO_LIST
+#define HAVE_TCF_EXTS_FOR_EACH_ACTION
+#endif /* 4.12.14-100 */
+
+/*****************************************************************************/
 #if (SLE_KERNEL_CODE < SLE_KERNEL_VERSION(4,12,14,111))
+#define NEED_IDA_ALLOC_MIN_MAX_RANGE_FREE
 #else /* >= 4.12.14-111 */
 #define HAVE_DEVLINK_PORT_ATTRS_SET_PORT_FLAVOUR
 #undef NEED_MACVLAN_ACCEL_PRIV
 #undef NEED_MACVLAN_RELEASE_L2FW_OFFLOAD
 #undef NEED_MACVLAN_SUPPORTS_DEST_FILTER
+#undef NEED_IDA_ALLOC_MIN_MAX_RANGE_FREE
 #endif /* 4.12.14-111 */
 
 /*****************************************************************************/
@@ -116,9 +125,15 @@
 /*****************************************************************************/
 #if (SLE_KERNEL_CODE < SLE_KERNEL_VERSION(5,3,8,2))
 #else /* >= 5.3.8-2 */
+#undef NEED_BUS_FIND_DEVICE_CONST_DATA
 #undef NEED_FLOW_INDR_BLOCK_CB_REGISTER
 #undef NEED_SKB_FRAG_OFF_ACCESSORS
 #endif /* 5.3.8-2 */
+
+#if (SLE_KERNEL_CODE < SLE_KERNEL_VERSION(5,3,18,26))
+#else /* >= 5.3.18-26 */
+#undef NEED_CPU_LATENCY_QOS_RENAME
+#endif
 
 /*****************************************************************************/
 #if (SLE_KERNEL_CODE < SLE_KERNEL_VERSION(5,3,18,34))

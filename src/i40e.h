@@ -652,6 +652,8 @@ struct i40e_pf {
 #define I40E_FLAG_BASE_R_FEC			BIT(26)
 #define I40E_FLAG_TOTAL_PORT_SHUTDOWN		BIT(27)
 #define I40E_FLAG_MULTIPLE_TRAFFIC_CLASSES	BIT(28)
+#define I40E_FLAG_CLS_FLOWER			BIT(29)
+#define I40E_FLAG_VF_VLAN_PRUNE_DISABLE		BIT(30)
 
 	/* flag to enable/disable vf base mode support */
 	bool vf_base_mode_only;

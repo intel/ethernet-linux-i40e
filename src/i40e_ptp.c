@@ -914,6 +914,66 @@ void i40e_ptp_rx_hwtstamp(struct i40e_pf *pf, struct sk_buff *skb, u8 index)
 }
 
 /**
+ * i40e_ptp_get_link_speed_hw - get the link speed
+ * @pf: Board private structure
+ *
+ * Calculate link speed depending on the link status.
+ * Return the link speed.
+ **/
+static enum i40e_aq_link_speed i40e_ptp_get_link_speed_hw(struct i40e_pf *pf)
+{
+	bool link_up = pf->hw.phy.link_info.link_info & I40E_AQ_LINK_UP;
+	enum i40e_aq_link_speed link_speed = I40E_LINK_SPEED_UNKNOWN;
+	struct i40e_hw *hw = &pf->hw;
+
+	if (link_up) {
+		struct i40e_link_status *hw_link_info = &hw->phy.link_info;
+
+		i40e_aq_get_link_info(hw, true, NULL, NULL);
+		link_speed = hw_link_info->link_speed;
+	} else {
+		enum i40e_prt_mac_link_speed prtmac_linksta;
+		u64 prtmac_pcs_linksta;
+
+		prtmac_linksta = (rd32(hw, I40E_PRTMAC_LINKSTA(0))
+			& I40E_PRTMAC_LINKSTA_MAC_LINK_SPEED_MASK)
+			>> I40E_PRTMAC_LINKSTA_MAC_LINK_SPEED_SHIFT;
+
+		if (prtmac_linksta == I40E_PRT_MAC_LINK_SPEED_40GB) {
+			link_speed = I40E_LINK_SPEED_40GB;
+		} else {
+			i40e_aq_debug_read_register(hw,
+						    I40E_PRTMAC_PCS_LINK_STATUS1(0),
+						    &prtmac_pcs_linksta,
+						    NULL);
+
+			prtmac_pcs_linksta = (prtmac_pcs_linksta
+			& I40E_PRTMAC_PCS_LINK_STATUS1_LINK_SPEED_MASK)
+			>> I40E_PRTMAC_PCS_LINK_STATUS1_LINK_SPEED_SHIFT;
+
+			switch (prtmac_pcs_linksta) {
+			case I40E_PRT_MAC_PCS_LINK_SPEED_100MB:
+				link_speed = I40E_LINK_SPEED_100MB;
+				break;
+			case I40E_PRT_MAC_PCS_LINK_SPEED_1GB:
+				link_speed = I40E_LINK_SPEED_1GB;
+				break;
+			case I40E_PRT_MAC_PCS_LINK_SPEED_10GB:
+				link_speed = I40E_LINK_SPEED_10GB;
+				break;
+			case I40E_PRT_MAC_PCS_LINK_SPEED_20GB:
+				link_speed = I40E_LINK_SPEED_20GB;
+				break;
+			default:
+				link_speed = I40E_LINK_SPEED_UNKNOWN;
+			}
+		}
+	}
+
+	return link_speed;
+}
+
+/**
  * i40e_ptp_set_increment - Utility function to update clock increment rate
  * @pf: Board private structure
  *
@@ -923,16 +983,14 @@ void i40e_ptp_rx_hwtstamp(struct i40e_pf *pf, struct sk_buff *skb, u8 index)
  **/
 void i40e_ptp_set_increment(struct i40e_pf *pf)
 {
-	struct i40e_link_status *hw_link_info;
+	enum i40e_aq_link_speed link_speed;
 	struct i40e_hw *hw = &pf->hw;
 	u64 incval;
 	u32 mult;
 
-	hw_link_info = &hw->phy.link_info;
+	link_speed = i40e_ptp_get_link_speed_hw(pf);
 
-	i40e_aq_get_link_info(&pf->hw, true, NULL, NULL);
-
-	switch (hw_link_info->link_speed) {
+	switch (link_speed) {
 	case I40E_LINK_SPEED_10GB:
 		mult = I40E_PTP_10GB_INCVAL_MULT;
 		break;
@@ -975,6 +1033,7 @@ void i40e_ptp_set_increment(struct i40e_pf *pf)
 	/* Update the base adjustement value. */
 	WRITE_ONCE(pf->ptp_adj_mult, mult);
 	smp_mb(); /* Force the above update. */
+	i40e_ptp_set_1pps_signal_hw(pf);
 }
 
 /**

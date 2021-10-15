@@ -1150,7 +1150,6 @@ static enum i40e_media_type i40e_get_media_type(struct i40e_hw *hw)
 	enum i40e_media_type media;
 
 	switch (hw->phy.link_info.phy_type) {
-	case I40E_PHY_TYPE_10GBASE_ER:
 	case I40E_PHY_TYPE_10GBASE_SR:
 	case I40E_PHY_TYPE_10GBASE_LR:
 	case I40E_PHY_TYPE_1000BASE_SX:

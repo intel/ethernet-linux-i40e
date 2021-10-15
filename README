@@ -2,7 +2,7 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet 700 Series
 ============================================================
 
-May 12, 2021
+August 10, 2021
 Copyright(c) 2014 - 2021 Intel Corporation.
 
 Contents
@@ -148,37 +148,6 @@ from it.
 Building and Installation
 =========================
 
-To build a binary RPM package of this driver
---------------------------------------------
-Note: RPM functionality has only been tested in Red Hat distributions.
-
-1. Run the following command, where <x.x.x> is the version number for the
-   driver tar file.
-
-   # rpmbuild -tb i40e-<x.x.x>.tar.gz
-
-   NOTE: For the build to work properly, the currently running kernel MUST
-   match the version and configuration of the installed kernel sources. If
-   you have just recompiled the kernel, reboot the system before building.
-
-2. After building the RPM, the last few lines of the tool output contain the
-   location of the RPM file that was built. Install the RPM with one of the
-   following commands, where <RPM> is the location of the RPM file:
-
-   # rpm -Uvh <RPM>
-       or
-   # dnf/yum localinstall <RPM>
-
-NOTES:
-- To compile the driver on some kernel/arch combinations, you may need to
-install a package with the development version of libelf (e.g. libelf-dev,
-libelf-devel, elfutilsl-libelf-devel).
-- When compiling an out-of-tree driver, details will vary by distribution.
-However, you will usually need a kernel-devel RPM or some RPM that provides the
-kernel headers at a minimum. The RPM kernel-devel will usually fill in the link
-at /lib/modules/'uname -r'/build.
-
-
 To manually build the driver
 ----------------------------
 1. Move the base driver tar file to the directory of your choice.
@@ -234,17 +203,45 @@ To manually build the driver
    # ping <IP_address>
 
 Note: For certain distributions like (but not limited to) Red Hat Enterprise
-Linux 7, Ubuntu, and SUSE Linux Enterprise Server (SLES) 11, once the driver is
-installed, you may need to update the initrd/initramfs file to prevent the OS
-loading old versions of the i40e driver.
+Linux 7 and Ubuntu, once the driver is installed, you may need to update the
+initrd/initramfs file to prevent the OS loading old versions of the i40e driver.
    For Red Hat distributions:
 	# dracut --force
 
    For Ubuntu:
 	# update-initramfs -u
 
-   For SLES:
-	# mkinitrd
+ 
+To build a binary RPM package of this driver
+--------------------------------------------
+Note: RPM functionality has only been tested in Red Hat distributions.
+
+1. Run the following command, where <x.x.x> is the version number for the
+   driver tar file.
+
+   # rpmbuild -tb i40e-<x.x.x>.tar.gz
+
+   NOTE: For the build to work properly, the currently running kernel MUST
+   match the version and configuration of the installed kernel sources. If
+   you have just recompiled the kernel, reboot the system before building.
+
+2. After building the RPM, the last few lines of the tool output contain the
+   location of the RPM file that was built. Install the RPM with one of the
+   following commands, where <RPM> is the location of the RPM file:
+
+   # rpm -Uvh <RPM>
+       or
+   # dnf/yum localinstall <RPM>
+
+NOTES:
+- To compile the driver on some kernel/arch combinations, you may need to
+install a package with the development version of libelf (e.g. libelf-dev,
+libelf-devel, elfutilsl-libelf-devel).
+- When compiling an out-of-tree driver, details will vary by distribution.
+However, you will usually need a kernel-devel RPM or some RPM that provides the
+kernel headers at a minimum. The RPM kernel-devel will usually fill in the link
+at /lib/modules/'uname -r'/build.
+
 
 
 
@@ -510,6 +507,30 @@ spoofed packet, it is dropped by the hardware and not transmitted.
 NOTE: This feature can be disabled for a specific VF:
 
 # ip link set <ethX> vf <vf id> spoofchk {off|on}
+
+
+VLAN Pruning
+------------
+The i40e driver allows you to enable or disable VLAN pruning for the VF VSI
+using the ethtool private flag vf-vlan-prune-disable.
+
+NOTE:
+- You cannot change this private flag while any VFs are active.
+- If a port VLAN is configured, this flag has no effect.
+
+To disable or enable VLAN pruning on all VFs, do the following:
+1. Deinitialize any VFs.
+2. On the PF, use the following command:
+
+# ethtool --set-priv-flags <ethX> vf-vlan-prune-disable on|off
+  Where:
+  on - disables VLAN pruning
+  off - enables VLAN pruning (default)
+
+3. Initialize and configure any VFs.
+
+VLAN pruning will then be disabled or enabled on any of these VFs, depending on
+the flag you set.
 
 
 Intel(R) Ethernet Flow Director
@@ -874,8 +895,8 @@ For cloud filters (tunneled packets):
    # ethtool -U enp130s0 flow-type udp4 dst-port 4789 action 0xffffffff00000000
 
 
-Flow Control
-------------
+Link-Level Flow Control (LFC)
+-----------------------------
 Ethernet Flow Control (IEEE 802.3x) can be configured with ethtool to enable
 receiving and transmitting pause frames for i40e. When transmit is enabled,
 pause frames are generated when the receive packet buffer crosses a predefined
@@ -1208,8 +1229,7 @@ per Port (MFP) and SR-IOV are enabled. An error from i40e is logged that says
 
 Data Center Bridging (DCB)
 --------------------------
-NOTE:
-The kernel assumes that TC0 is available, and will disable Priority Flow
+NOTE: The kernel assumes that TC0 is available, and will disable Priority Flow
 Control (PFC) on the device if TC0 is not available. To fix this, ensure TC0 is
 enabled when setting up DCB on your switch.
 
@@ -2104,9 +2124,9 @@ affect all ports and drivers on the device. Loading DPDK with the
 RPM driver installation fails with dependency issues on upstream kernels
 ------------------------------------------------------------------------
 Building an RPM Package Manager (RPM) file when running a nonstock kernel on
-Novell* SUSE* Linux Enterprise Server (SLES) causes the ksyms definitions to
-not match the ones provided by the installed kernel RPM. This results in
-dependency conflicts that prevent the RPM from compiling and installing.
+SUSE* Linux Enterprise Server (SLES) causes the ksyms definitions to not match
+the ones provided by the installed kernel RPM. This results in dependency
+conflicts that prevent the RPM from compiling and installing.
 
 
 SR-IOV virtual functions have identical MAC addresses

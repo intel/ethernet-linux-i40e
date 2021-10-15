@@ -211,6 +211,9 @@ void i40e_vc_notify_vf_reset(struct i40e_vf *vf)
 	    !test_bit(I40E_VF_STATE_ACTIVE, &vf->vf_states))
 		return;
 
+	if (ktime_get_ns() - vf->reset_timestamp < I40E_VF_RESET_TIME_MIN)
+		usleep_range(30000, 60000);
+
 	abs_vf_id = vf->vf_id + (int)vf->pf->hw.func_caps.vf_base_id;
 
 	pfe.event = VIRTCHNL_EVENT_RESET_IMPENDING;
@@ -1644,6 +1647,9 @@ static void i40e_map_pf_to_vf_queues(struct i40e_vf *vf)
 		num_tc = vf->num_tc;
 
 	for (i = 0; i < num_tc; i++) {
+		const u32 queue_mapping_size = ARRAY_SIZE
+			(pf->vsi[vf->lan_vsi_idx]->info.queue_mapping);
+
 		if (vf->adq_enabled) {
 			qps = vf->ch[i].num_qps;
 			vsi_id =  vf->ch[i].vsi_id;
@@ -1651,6 +1657,8 @@ static void i40e_map_pf_to_vf_queues(struct i40e_vf *vf)
 			qps = pf->vsi[vf->lan_vsi_idx]->alloc_queue_pairs;
 			vsi_id = vf->lan_vsi_id;
 		}
+
+		qps = min(queue_mapping_size, qps);
 
 		for (j = 0; j < qps; j++) {
 			qid = i40e_vc_get_pf_queue_id(vf, vsi_id, j);
@@ -2319,6 +2327,7 @@ bool i40e_reset_vf(struct i40e_vf *vf, bool flr)
 
 	i40e_flush(hw);
 	usleep_range(20000, 40000);
+	vf->reset_timestamp = ktime_get_ns();
 	clear_bit(__I40E_VF_DISABLE, pf->state);
 
 	return true;
@@ -3285,7 +3294,7 @@ static int i40e_vc_config_queues_msg(struct i40e_vf *vf, u8 *msg)
 	}
 
 	if (vf->adq_enabled) {
-		for (i = 0; i < I40E_MAX_VF_VSI; i++)
+		for (i = 0; i < vf->num_tc; i++)
 			num_qps_all += vf->ch[i].num_qps;
 		if (num_qps_all != qci->num_queue_pairs) {
 			aq_ret = I40E_ERR_PARAM;
