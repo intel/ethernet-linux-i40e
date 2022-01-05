@@ -43,7 +43,7 @@ static const char i40e_driver_string[] =
 
 #define DRV_VERSION_MAJOR 2
 #define DRV_VERSION_MINOR 17
-#define DRV_VERSION_BUILD 4
+#define DRV_VERSION_BUILD 15
 #define DRV_VERSION_SUBBUILD 0
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
@@ -1465,6 +1465,7 @@ static s16 i40e_get_vf_new_vlan(struct i40e_vsi *vsi,
 				int vlan_filters,
 				bool trusted)
 {
+	s16 *pvid = i40e_get_current_vid(vsi);
 	struct i40e_pf *pf = vsi->back;
 	bool is_any;
 
@@ -1472,15 +1473,17 @@ static s16 i40e_get_vf_new_vlan(struct i40e_vsi *vsi,
 		f = new_mac->f;
 
 	is_any = (trusted ||
-		  (pf->flags & I40E_FLAG_VF_VLAN_PRUNE_DISABLE));
+		  !(pf->flags & I40E_FLAG_VF_VLAN_PRUNING));
 
-	if ((vlan_filters && f->vlan == I40E_VLAN_ANY) ||
+	if (!(*pvid) && ((vlan_filters && f->vlan == I40E_VLAN_ANY) ||
 	    (!is_any && !vlan_filters && f->vlan == I40E_VLAN_ANY) ||
-	    (is_any && !vlan_filters && f->vlan == 0)) {
+	    (is_any && !vlan_filters && f->vlan == 0))) {
 		if (is_any)
 			return I40E_VLAN_ANY;
 		else
 			return 0;
+	} else if ((*pvid) && f->vlan == I40E_VLAN_ANY) {
+		return 0;
 	}
 
 	return f->vlan;
@@ -2778,7 +2781,7 @@ int i40e_sync_vsi_filters(struct i40e_vsi *vsi)
 
 		num_add = 0;
 		hlist_for_each_entry_safe(new_mac, h, &tmp_add_list, hlist) {
-			if (unlikely(new_mac->state == I40E_FILTER_INACTIVE))
+			if (new_mac->f->state == I40E_FILTER_INACTIVE)
 				continue;
 			/* handle broadcast filters by updating the broadcast
 			 * promiscuous flag instead of adding a MAC filter.
@@ -18069,6 +18072,7 @@ static void __exit i40e_exit_module(void)
 {
 	pci_unregister_driver(&i40e_driver);
 	destroy_workqueue(i40e_wq);
+	ida_destroy(&i40e_client_ida);
 	i40e_dbg_exit();
 #ifdef HAVE_KFREE_RCU_BARRIER
 	rcu_barrier();

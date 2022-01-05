@@ -8,19 +8,12 @@
 #include "i40e_prototype.h"
 #include "i40e_client.h"
 
-#if IS_ENABLED(CONFIG_MFD_CORE)
-#define I40E_MFD_CELL_SIZE      ARRAY_SIZE(i40e_mfd_cells)
-
-#endif
 static const char i40e_client_interface_version_str[] = I40E_CLIENT_VERSION_STR;
 static struct i40e_client *registered_client;
 static LIST_HEAD(i40e_devices);
 static DEFINE_MUTEX(i40e_device_mutex);
+DEFINE_IDA(i40e_client_ida);
 
-#if IS_ENABLED(CONFIG_MFD_CORE)
-static struct mfd_cell i40e_mfd_cells[] = ASSIGN_PEER_INFO;
-
-#endif
 static int i40e_client_virtchnl_send(struct i40e_info *ldev,
 				     struct i40e_client *client,
 				     u32 vf_id, u8 *msg, u16 len);
@@ -289,57 +282,59 @@ void i40e_client_update_msix_info(struct i40e_pf *pf)
 	cdev->lan_info.msix_entries = &pf->msix_entries[pf->iwarp_base_vector];
 }
 
-#if IS_ENABLED(CONFIG_MFD_CORE)
-static DEFINE_IDA(i40e_peer_index_ida);
-
-static int i40e_init_peer_mfd_devices(struct i40e_pf *pf)
+static void i40e_auxiliary_dev_release(struct device *dev)
 {
-	struct i40e_peer_dev_platform_data *platform_data;
-	struct pci_dev *pdev = pf->pdev;
-	int status;
-	int i;
+	struct auxiliary_device *aux_dev = to_auxiliary_dev(dev);
+	struct i40e_auxiliary_device *i40e_aux_dev =
+		container_of(aux_dev, struct i40e_auxiliary_device, aux_dev);
 
-	platform_data = kcalloc(I40E_MFD_CELL_SIZE,
-				sizeof(*platform_data), GFP_KERNEL);
-	if (!platform_data)
-		return -ENOMEM;
-
-	for (i = 0; i < I40E_MFD_CELL_SIZE; i++) {
-		/* don't create an RDMA MFD device if NIC does not
-		 * support RDMA functionality
-		 */
-		if (i40e_mfd_cells[i].id == I40E_PEER_RDMA_ID &&
-		    !(I40E_FLAG_IWARP_ENABLED & pf->flags)) {
-			dev_warn(&pf->pdev->dev,
-				 "RDMA not supported with this config\n");
-			continue;
-		}
-		platform_data[i].ldev = &pf->cinst->lan_info;
-		i40e_mfd_cells[i].platform_data = &platform_data[i];
-		i40e_mfd_cells[i].pdata_size = sizeof(platform_data);
-	}
-
-	status = ida_simple_get(&i40e_peer_index_ida, 0, 0, GFP_KERNEL);
-	if (status < 0) {
-		dev_err(&pdev->dev,
-			"failed to get unique index for device\n");
-		return status;
-	}
-
-	pf->peer_idx = status;
-	status = mfd_add_devices(&pf->pdev->dev, pf->peer_idx,
-				 i40e_mfd_cells, I40E_MFD_CELL_SIZE,
-				 NULL, 0, NULL);
-
-	if (status)
-		dev_err(&pf->pdev->dev,
-			"Failure adding MFD devs for peers: %d\n", status);
-
-	kfree(platform_data);
-	return status;
+	ida_simple_remove(&i40e_client_ida, aux_dev->id);
+	kfree(i40e_aux_dev);
 }
 
-#endif
+static int i40e_register_auxiliary_dev(struct i40e_info *ldev, const char *name)
+{
+	struct i40e_auxiliary_device *i40e_aux_dev;
+	struct pci_dev *pdev = ldev->pcidev;
+	struct auxiliary_device *aux_dev;
+	int ret;
+
+	i40e_aux_dev = kzalloc(sizeof(*i40e_aux_dev), GFP_KERNEL);
+	if (!i40e_aux_dev)
+		return -ENOMEM;
+
+	i40e_aux_dev->ldev = ldev;
+
+	aux_dev = &i40e_aux_dev->aux_dev;
+	aux_dev->name = name;
+	aux_dev->dev.parent = &pdev->dev;
+	aux_dev->dev.release = i40e_auxiliary_dev_release;
+	ldev->aux_dev = aux_dev;
+
+	ret = ida_simple_get(&i40e_client_ida, 0, 0, GFP_KERNEL);
+	if (ret < 0) {
+		kfree(i40e_aux_dev);
+		return ret;
+	}
+
+	aux_dev->id = ret;
+
+	ret = auxiliary_device_init(aux_dev);
+	if (ret < 0) {
+		ida_simple_remove(&i40e_client_ida, aux_dev->id);
+		kfree(i40e_aux_dev);
+		return ret;
+	}
+
+	ret = auxiliary_device_add(aux_dev);
+	if (ret) {
+		auxiliary_device_uninit(aux_dev);
+		return ret;
+	}
+
+	return ret;
+}
+
 /**
  * i40e_client_add_instance - add a client instance struct to the instance list
  * @pf: pointer to the board struct
@@ -386,13 +381,9 @@ static void i40e_client_add_instance(struct i40e_pf *pf)
 	cdev->lan_info.msix_count = pf->num_iwarp_msix;
 	cdev->lan_info.msix_entries = &pf->msix_entries[pf->iwarp_base_vector];
 
-#if IS_ENABLED(CONFIG_MFD_CORE)
-	status = i40e_init_peer_mfd_devices(pf);
-	if (status)
+	if (i40e_register_auxiliary_dev(&cdev->lan_info, "iwarp"))
 		goto done;
 
-	set_bit(__I40E_CLIENT_INSTANCE_NONE, &cdev->state);
-#endif
 	return;
 
 done:
@@ -405,8 +396,7 @@ done:
  * @pf: pointer to the board struct
  *
  **/
-static
-void i40e_client_del_instance(struct i40e_pf *pf)
+static void i40e_client_del_instance(struct i40e_pf *pf)
 {
 	kfree(pf->cinst);
 	pf->cinst = NULL;
@@ -514,13 +504,13 @@ out:
  **/
 int i40e_lan_del_device(struct i40e_pf *pf)
 {
+	struct auxiliary_device *aux_dev = pf->cinst->lan_info.aux_dev;
 	struct i40e_device *ldev, *tmp;
 	int ret = -ENODEV;
 
-#if IS_ENABLED(CONFIG_MFD_CORE)
-	mfd_remove_devices(&pf->pdev->dev);
+	auxiliary_device_delete(aux_dev);
+	auxiliary_device_uninit(aux_dev);
 
-#endif
 	/* First, remove any client instance. */
 	i40e_client_del_instance(pf);
 

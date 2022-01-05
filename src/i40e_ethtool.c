@@ -313,8 +313,8 @@ static const struct i40e_priv_flags i40e_gstrings_priv_flags[] = {
 	I40E_PRIV_FLAG("base-r-fec", I40E_FLAG_BASE_R_FEC, 0),
 	I40E_PRIV_FLAG("multiple-traffic-classes",
 		       I40E_FLAG_MULTIPLE_TRAFFIC_CLASSES, 0),
-	I40E_PRIV_FLAG("vf-vlan-prune-disable",
-		       I40E_FLAG_VF_VLAN_PRUNE_DISABLE, 0),
+	I40E_PRIV_FLAG("vf-vlan-pruning",
+		       I40E_FLAG_VF_VLAN_PRUNING, 0),
 };
 
 #define I40E_PRIV_FLAGS_STR_LEN ARRAY_SIZE(i40e_gstrings_priv_flags)
@@ -6659,10 +6659,10 @@ flags_complete:
 		return -EINVAL;
 	}
 
-	if ((changed_flags & I40E_FLAG_VF_VLAN_PRUNE_DISABLE) &&
+	if ((changed_flags & I40E_FLAG_VF_VLAN_PRUNING) &&
 	    pf->num_alloc_vfs) {
-		dev_warn(&pf->pdev->dev,
-			 "Changing vf-vlan-prune-disable flag while VF(s) are active is not supported");
+		dev_err(&pf->pdev->dev,
+			"vf-vlan-pruning: VLAN pruning cannot be changed while VFs are active.\n");
 		return -EOPNOTSUPP;
 	}
 

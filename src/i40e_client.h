@@ -4,13 +4,12 @@
 #ifndef _I40E_CLIENT_H_
 #define _I40E_CLIENT_H_
 
-#include <linux/platform_device.h>
-#if IS_ENABLED(CONFIG_MFD_CORE)
-#include <linux/mfd/core.h>
+#include <linux/auxiliary_bus.h>
+
 
 #define I40E_PEER_RDMA_NAME    "i40e_rdma"
 #define I40E_PEER_RDMA_ID      PLATFORM_DEVID_AUTO
-#endif /* CONFIG_MFD_CORE */
+
 #define I40E_CLIENT_STR_LENGTH 10
 /* Client interface version should be updated anytime there is a change in the
  * existing APIs or data structures.
@@ -90,6 +89,7 @@ struct i40e_info {
 	u8 lanmac[6];
 	struct net_device *netdev;
 	struct pci_dev *pcidev;
+	struct auxiliary_device *aux_dev;
 	u8 __iomem *hw_addr;
 	u8 fid;	/* function id, PF id or VF id */
 #define I40E_CLIENT_FTYPE_PF 0
@@ -111,10 +111,12 @@ struct i40e_info {
 	u16 fw_maj_ver;                 /* firmware major version */
 	u16 fw_min_ver;                 /* firmware minor version */
 	u32 fw_build;                   /* firmware build number */
-#if IS_ENABLED(CONFIG_MFD_CORE)
-	struct platform_device *platform_dev;
-#endif
 	struct i40e_client *client;
+};
+
+struct i40e_auxiliary_device {
+	struct auxiliary_device aux_dev;
+	struct i40e_info *ldev;
 };
 
 #define I40E_CLIENT_RESET_LEVEL_PF   1
@@ -211,15 +213,5 @@ static inline bool i40e_client_is_registered(struct i40e_client *client)
 	return test_bit(__I40E_CLIENT_REGISTERED, &client->state);
 }
 
-#if IS_ENABLED(CONFIG_MFD_CORE)
-#define ASSIGN_PEER_INFO                                               \
-{                                                                      \
-	{ .name = I40E_PEER_RDMA_NAME, .id = I40E_PEER_RDMA_ID },       \
-}
-
-struct i40e_peer_dev_platform_data {
-	struct i40e_info *ldev;
-};
-#endif /* CONFIG_MFD_CORE */
 #endif /* _I40E_CLIENT_H_ */
 

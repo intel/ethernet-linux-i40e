@@ -4257,7 +4257,10 @@ static int i40e_vc_add_vlan_msg(struct i40e_vf *vf, u8 *msg)
 	for (i = 0; i < vfl->num_elements; i++) {
 		if (i40e_is_vid(&vsi->info) &&
 		    vfl->vlan_id[i]) {
-			aq_ret = I40E_ERR_PARAM;
+			if (i40e_is_double_vlan(&pf->hw))
+				aq_ret = I40E_SUCCESS;
+			else
+				aq_ret = I40E_ERR_PARAM;
 			goto error_param;
 		}
 

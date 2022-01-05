@@ -653,7 +653,7 @@ struct i40e_pf {
 #define I40E_FLAG_TOTAL_PORT_SHUTDOWN		BIT(27)
 #define I40E_FLAG_MULTIPLE_TRAFFIC_CLASSES	BIT(28)
 #define I40E_FLAG_CLS_FLOWER			BIT(29)
-#define I40E_FLAG_VF_VLAN_PRUNE_DISABLE		BIT(30)
+#define I40E_FLAG_VF_VLAN_PRUNING		BIT(30)
 
 	/* flag to enable/disable vf base mode support */
 	bool vf_base_mode_only;
@@ -857,9 +857,6 @@ struct i40e_pf {
 	bool dcb_user_reconfig;
 	/* List to keep previous DDP profiles to be rolled back in the future */
 	struct list_head ddp_old_prof;
-#if IS_ENABLED(CONFIG_MFD_CORE)
-	int peer_idx;
-#endif
 };
 
 /**
@@ -1059,6 +1056,8 @@ struct i40e_vsi {
 struct i40e_netdev_priv {
 	struct i40e_vsi *vsi;
 };
+
+extern struct ida i40e_client_ida;
 
 /* struct that defines an interrupt vector */
 struct i40e_q_vector {

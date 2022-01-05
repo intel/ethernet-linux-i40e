@@ -2,7 +2,7 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet 700 Series
 ============================================================
 
-August 10, 2021
+November 4, 2021
 Copyright(c) 2014 - 2021 Intel Corporation.
 
 Contents
@@ -22,7 +22,7 @@ Overview
 ========
 This driver supports kernel versions 2.6.32 and newer. However, some features
 may require a newer kernel version. The associated Virtual Function (VF) driver
-for this driver is iavf.
+for this driver is iavf. The associated RDMA driver for this driver is irdma.
 
 Driver information can be obtained using ethtool, lspci, and ip. Instructions
 on updating ethtool can be found in the section Additional Configurations later
@@ -233,6 +233,13 @@ Note: RPM functionality has only been tested in Red Hat distributions.
        or
    # dnf/yum localinstall <RPM>
 
+3. If your distribution or kernel does not contain inbox support for auxiliary
+   bus, you must also install the auxiliary RPM:
+
+   # rpm -Uvh <i40e RPM> <auxiliary RPM>
+       or
+   # dnf/yum localinstall <i40e RPM> <auxiliary RPM>
+
 NOTES:
 - To compile the driver on some kernel/arch combinations, you may need to
 install a package with the development version of libelf (e.g. libelf-dev,
@@ -243,19 +250,10 @@ kernel headers at a minimum. The RPM kernel-devel will usually fill in the link
 at /lib/modules/'uname -r'/build.
 
 
-
-
 Command Line Parameters
 =======================
-In general, ethtool and other OS-specific commands are used to configure
-user-changeable parameters after the driver is loaded. The i40e driver only
-supports the max_vfs kernel parameter on older kernels that do not have the
-standard sysfs interface. The only other module parameter supported is the
-debug parameter that can control the default logging verbosity of the driver.
-
-If the driver is built as a module, the following optional parameters are used
-by entering them on the command line with the modprobe command using this
-syntax:
+If the driver is built as a module, enter optional parameters on the command
+line with the following syntax:
 
 # modprobe i40e [<option>=<VAL1>]
 
@@ -265,7 +263,13 @@ For example:
 
 # modprobe i40e max_vfs=7
 
-The default value for each parameter is generally the recommended setting,
+- The i40e driver only supports the max_vfs kernel parameter on older kernels
+that do not have the standard sysfs interface.
+- The only other module parameter supported is the debug parameter that can
+control the default logging verbosity of the driver.
+- In general, use ethtool and other OS-specific commands to configure
+user-changeable parameters after the driver is loaded.
+- The default value for each parameter is generally the recommended setting,
 unless otherwise noted.
 
 
@@ -512,20 +516,23 @@ NOTE: This feature can be disabled for a specific VF:
 VLAN Pruning
 ------------
 The i40e driver allows you to enable or disable VLAN pruning for the VF VSI
-using the ethtool private flag vf-vlan-prune-disable.
+using the ethtool private flag vf-vlan-pruning.
 
 NOTE:
 - You cannot change this private flag while any VFs are active.
-- If a port VLAN is configured, this flag has no effect.
+- If a port VLAN is configured, VLAN pruning will always be enabled.
+- When VLAN pruning is enabled, the interface will:
+    - Discard all packets with a VLAN tag when Rx VLAN filtering is disabled.
+    - Discard untagged packets when Rx VLAN filtering is enabled.
 
 To disable or enable VLAN pruning on all VFs, do the following:
 1. Deinitialize any VFs.
 2. On the PF, use the following command:
 
-# ethtool --set-priv-flags <ethX> vf-vlan-prune-disable on|off
+# ethtool --set-priv-flags <ethX> vf-vlan-pruning on|off
   Where:
-  on - disables VLAN pruning
-  off - enables VLAN pruning (default)
+  on - enables VLAN pruning
+  off - disables VLAN pruning (default)
 
 3. Initialize and configure any VFs.
 
@@ -846,7 +853,7 @@ For regular Intel Ethernet Flow Director filters:
  - No user-def specified or highest bit (bit 63) is 0. For example:
 
    # ethtool -U enp130s0 flow-type ip4 src-ip 192.168.0.1 dst-ip 192.168.0.109
-   action 6 loc
+   action 6 loc <N>
 
 For L3 filters (non-tunneled packets):
  - "user-def 0x8000000000000000" (no Tenant ID/VNI specified in remaining
@@ -947,6 +954,16 @@ And <option> is one or more of:
   d	Hash on the IP destination address of the Rx packet.
   f	Hash on bytes 0 and 1 of the Layer 4 header of the Rx packet.
   n	Hash on bytes 2 and 3 of the Layer 4 header of the Rx packet.
+
+For example, to hash on the source and destination IP address for TCP IPv4
+traffic, use the following:
+
+# ethtool -N <ethX> rx-flow-hash tcp4 sd
+
+To hash on the source and destination ports for UDP IPv6 traffic, use the
+following:
+
+# ethtool -N <ethX> rx-flow-hash udp6 sdfn
 
 
 Application Device Queues (ADQ)
@@ -1061,8 +1078,24 @@ throughput and lowering latency in certain networking environments.
 The i40e driver supports the following RDMA protocols:
 - iWARP (Internet Wide Area RDMA Protocol)
 
-For detailed installation and configuration information, see the README file in
-the RDMA driver tarball.
+- RDMA requires auxiliary bus support. Refer to "Auxiliary Bus" in this
+README for more information.
+
+For detailed installation and configuration information for RDMA, see the
+README file in the irdma driver tarball.
+
+
+Auxiliary Bus
+-------------
+Inter-Driver Communication (IDC) is the mechanism in which LAN drivers (such as
+i40e) communicate with peer drivers (such as irdma). Starting in kernel 5.11,
+Intel LAN and RDMA drivers use an auxiliary bus mechanism for IDC.
+
+RDMA functionality requires use of the auxiliary bus.
+
+If your kernel supports the auxiliary bus, the LAN and RDMA drivers will use
+the inbox auxiliary bus for IDC. For kernels lower than 5.11, the base driver
+will automatically install an out-of-tree auxiliary bus module.
 
 
 EEE (Energy Efficient Ethernet)
@@ -1151,9 +1184,8 @@ For more details, please refer to the ethtool man page.
 
 NAPI
 ----
-This driver supports NAPI (Rx polling mode).
-For more information on NAPI, see
-https://www.linuxfoundation.org/collaborate/workgroups/networking/napi
+This driver supports NAPI (Rx polling mode). For more information on NAPI, see
+https://www.linuxfoundation.org/collaborate/workgroups/networking/napi.
 
 
 IEEE 802.1ad (QinQ) Support

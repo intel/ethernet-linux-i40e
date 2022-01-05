@@ -4,6 +4,7 @@
 #ifndef _KCOMPAT_H_
 #define _KCOMPAT_H_
 
+#include "kcompat_gcc.h"
 #ifndef LINUX_VERSION_CODE
 #include <linux/version.h>
 #else
@@ -947,23 +948,8 @@ struct _kc_ethtool_pauseparam {
 #define SLE_LOCALVERSION_CODE 0
 #endif /* SLE_LOCALVERSION_CODE */
 
-/*
- * Include the definitions file for HAVE/NEED flags for the standard upstream
- * kernels.
- *
- * Then, based on the distribution we detect, load the distribution specific
- * definitions file that customizes the definitions for the target
- * distribution.
- */
-#include "kcompat_std_defs.h"
-
-#ifdef CONFIG_SUSE_KERNEL
-#include "kcompat_sles_defs.h"
-#elif UBUNTU_VERSION_CODE
-#include "kcompat_ubuntu_defs.h"
-#elif RHEL_RELEASE_CODE
-#include "kcompat_rhel_defs.h"
-#endif
+/* Include definitions from the new kcompat layout */
+#include "kcompat_defs.h"
 
 /*
  * ADQ depends on __TC_MQPRIO_MODE_MAX and related kernel code
@@ -4315,9 +4301,11 @@ void _kc_skb_add_rx_frag(struct sk_buff * skb, int i, struct page *page,
 /*****************************************************************************/
 #if ( LINUX_VERSION_CODE >= KERNEL_VERSION(3,0,0) ) || \
     ( RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(6,4) )
-#if !defined(NO_PTP_SUPPORT) && IS_ENABLED(CONFIG_PTP_1588_CLOCK)
+#ifndef NO_PTP_SUPPORT
+#if IS_ENABLED(CONFIG_PTP_1588_CLOCK)
 #define HAVE_PTP_1588_CLOCK
-#endif /* !NO_PTP_SUPPORT && IS_ENABLED(CONFIG_PTP_1588_CLOCK) */
+#endif /* CONFIG_PTP_1588_CLOCK */
+#endif /* !NO_PTP_SUPPORT */
 #endif /* >= 3.0.0 || RHEL_RELEASE > 6.4 */
 
 /*****************************************************************************/
@@ -6089,6 +6077,11 @@ static inline void page_ref_inc(struct page *page)
 #define HAVE_TC_SETUP_CLSFLOWER
 #endif
 
+#ifndef kstrtobool
+#define kstrtobool _kc_kstrtobool
+int _kc_kstrtobool(const char *s, bool *res);
+#endif
+
 #else /* >= 4.6.0 */
 #define HAVE_PAGE_COUNT_BULK_UPDATE
 #define HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC
@@ -6429,7 +6422,6 @@ static inline void _kc_dev_consume_skb_any(struct sk_buff *skb)
 	} while (0)
 #endif /* !NL_SET_ERR_MSG_MOD */
 #else /* >= 4.12 */
-#define HAVE_NAPI_BUSY_LOOP
 #define HAVE_MIN_NAPI_ID
 #endif /* 4.12 */
 
@@ -6733,7 +6725,6 @@ void bitmap_from_arr32(unsigned long *bitmap, const u32 *buf, unsigned int nbits
 #endif /* !(RHEL >= 8.0) && !(SLES >= 12.5 && SLES < 15.0 || SLES >= 15.1) */
 #else /* >= 4.16 */
 #include <linux/nospec.h>
-#define HAVE_XDP_BUFF_RXQ
 #define HAVE_TC_FLOWER_OFFLOAD_COMMON_EXTACK
 #define HAVE_TCF_MIRRED_DEV
 #define HAVE_VF_STATS_DROPPED
@@ -7013,12 +7004,6 @@ static inline bool flow_rule_match_key(const struct flow_rule *rule,
 #endif /* HAVE_TC_SETUP_CLSFLOWER */
 
 #endif /* RHEL < 8.1 */
-
-#if (!(RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,1)))
-#define devlink_params_publish(devlink) do { } while (0)
-#define devlink_params_unpublish(devlink) do { } while (0)
-#endif
-
 #else /* >= 5.1.0 */
 #define HAVE_NDO_FDB_ADD_EXTACK
 #define NO_XDP_QUERY_XSK_UMEM
@@ -7250,25 +7235,6 @@ static inline u32 _xsk_umem_get_rx_frame_size(struct xdp_umem *umem)
 
 /*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5,10,0))
-#if (SLE_VERSION_CODE && SLE_VERSION_CODE >= SLE_VERSION(15,3,0))
-#define HAVE_DEVLINK_REGION_OPS_SNAPSHOT_OPS
-#define HAVE_DEVLINK_FLASH_UPDATE_PARAMS
-#else /* SLE >= 15.3 */
-struct devlink_flash_update_params {
-	const char *file_name;
-	const char *component;
-	u32 overwrite_mask;
-};
-
-#ifndef DEVLINK_FLASH_OVERWRITE_SETTINGS
-#define DEVLINK_FLASH_OVERWRITE_SETTINGS BIT(0)
-#endif
-
-#ifndef DEVLINK_FLASH_OVERWRITE_IDENTIFIERS
-#define DEVLINK_FLASH_OVERWRITE_IDENTIFIERS BIT(1)
-#endif
-#endif /* !(SLE >= 15.3) */
-
 #if (!(SLE_VERSION_CODE && (SLE_VERSION_CODE >= SLE_VERSION(15,3,0))))
 #define XDP_SETUP_XSK_POOL XDP_SETUP_XSK_UMEM
 #define xsk_get_pool_from_qid xdp_get_umem_from_qid
@@ -7280,6 +7246,7 @@ struct devlink_flash_update_params {
 #define xsk_tx_release xsk_umem_consume_tx_done
 #define xsk_tx_completed xsk_umem_complete_tx
 #define xsk_uses_need_wakeup xsk_umem_uses_need_wakeup
+
 #ifdef HAVE_MEM_TYPE_XSK_BUFF_POOL
 #include <net/xdp_sock_drv.h>
 static inline void
@@ -7292,14 +7259,14 @@ _kc_xsk_buff_dma_sync_for_cpu(struct xdp_buff *xdp,
 #define xsk_buff_dma_sync_for_cpu(xdp, pool) \
 	_kc_xsk_buff_dma_sync_for_cpu(xdp, pool)
 #endif /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
+
 #else /* SLE >= 15.3 */
 #define HAVE_NETDEV_BPF_XSK_POOL
 #endif /* SLE >= 15.3 */
 #else /* >= 5.10.0 */
-#define HAVE_DEVLINK_REGION_OPS_SNAPSHOT_OPS
-#define HAVE_DEVLINK_FLASH_UPDATE_PARAMS
 #define HAVE_NETDEV_BPF_XSK_POOL
-#endif /* 5.10.0 */
+#endif /* <5.10.0 */
+
 
 /*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5,11,0))
@@ -7331,10 +7298,7 @@ _kc_napi_busy_loop(unsigned int napi_id,
 	_kc_napi_busy_loop(napi_id, loop_end, loop_end_arg, prefer_busy_poll, budget)
 #endif /* CONFIG_NET_RX_BUSY_POLL */
 #endif /* HAVE_NAPI_BUSY_LOOP */
-#define HAVE_DEVLINK_FLASH_UPDATE_BEGIN_END_NOTIFY
-#else /* >= 5.11.0 */
-#define HAVE_DEVLINK_FLASH_UPDATE_PARAMS_FW
-#endif /* 5.11.0 */
+#endif /* <5.11.0 */
 
 /*
  * Load the implementations file which actually defines kcompat backports.

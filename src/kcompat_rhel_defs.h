@@ -26,9 +26,16 @@
 
 /*****************************************************************************/
 #if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7,3))
+#define NEED_NETDEV_TXQ_BQL_PREFETCH
 #else /* >= 7.3 */
 #undef NEED_DEV_PRINTK_ONCE
 #endif /* 7.3 */
+
+/*****************************************************************************/
+#if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7,4))
+#else /* >= 7.4 */
+#define HAVE_RHEL7_EXTENDED_OFFLOAD_STATS
+#endif /* 7.4 */
 
 /*****************************************************************************/
 #if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7,5))
@@ -48,6 +55,7 @@
 #else /* >= 7.7 */
 #define HAVE_DEVLINK_PORT_ATTRS_SET_PORT_FLAVOUR
 #define HAVE_ETHTOOL_NEW_100G_BITS
+#undef NEED_NETDEV_TX_SENT_QUEUE
 #endif /* 7.7 */
 
 /*****************************************************************************/
@@ -55,8 +63,12 @@
 #else /* >= 8.0 */
 #undef HAVE_TCF_EXTS_TO_LIST
 #undef HAVE_ETHTOOL_NEW_100G_BITS
+#define HAVE_NDO_OFFLOAD_STATS
+#undef HAVE_RHEL7_EXTENDED_OFFLOAD_STATS
 #define HAVE_TCF_EXTS_FOR_EACH_ACTION
-#endif /* 7.5 */
+/* 7.7 undefs it due to a backport in 7.7+, but 8.0 needs it still */
+#define NEED_NETDEV_TX_SENT_QUEUE
+#endif /* 8.0 */
 
 /*****************************************************************************/
 #if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(8,1))
@@ -64,6 +76,8 @@
 #else /* >= 8.1 */
 #define HAVE_ETHTOOL_NEW_100G_BITS
 #undef NEED_IDA_ALLOC_MIN_MAX_RANGE_FREE
+#define HAVE_DEVLINK_PARAMS_PUBLISH
+#undef NEED_NETDEV_TX_SENT_QUEUE
 #endif /* 8.1 */
 
 /*****************************************************************************/
@@ -71,8 +85,10 @@
 #else /* >= 8.2 */
 #undef NEED_BUS_FIND_DEVICE_CONST_DATA
 #undef NEED_DEVLINK_FLASH_UPDATE_STATUS_NOTIFY
-#undef NEED_SKB_FRAG_OFF_ACCESSORS
+#undef NEED_SKB_FRAG_OFF
+#undef NEED_SKB_FRAG_OFF_ADD
 #undef NEED_FLOW_INDR_BLOCK_CB_REGISTER
+#define HAVE_FLOW_INDR_BLOCK_LOCK
 #define HAVE_DEVLINK_PORT_ATTRS_SET_SWITCH_ID
 #endif /* 8.2 */
 
@@ -90,5 +106,15 @@
 #undef NEED_DEVLINK_FLASH_UPDATE_TIMEOUT_NOTIFY
 #undef HAVE_XDP_QUERY_PROG
 #endif /* 8.4 */
+
+/*****************************************************************************/
+#if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(8,5))
+#else /* >= 8.5 */
+#define HAVE_DEVLINK_FLASH_UPDATE_PARAMS
+#define HAVE_DEVLINK_FLASH_UPDATE_PARAMS_FW
+#undef HAVE_DEVLINK_FLASH_UPDATE_BEGIN_END_NOTIFY
+#undef HAVE_XDP_BUFF_RXQ
+#undef HAVE_NAPI_BUSY_LOOP
+#endif /* 8.5 */
 
 #endif /* _KCOMPAT_RHEL_DEFS_H_ */
