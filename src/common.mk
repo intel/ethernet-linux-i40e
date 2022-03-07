@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
-# Copyright(c) 2013 - 2021 Intel Corporation.
+# Copyright(c) 2013 - 2022 Intel Corporation.
 
 #
 # common Makefile rules useful for out-of-tree Linux driver builds
@@ -104,7 +104,7 @@ CSP :=  ${KOBJ}/include/generated/autoconf.h \
 
 # System.map Search Path (for depmod)
 MSP := ${KSRC}/System.map \
-       /usr/lib/debug/boot/System-map-${BUILD_KERNEL} \
+       /usr/lib/debug/boot/System.map-${BUILD_KERNEL} \
        /boot/System.map-${BUILD_KERNEL}
 
 # prune the lists down to only files that exist

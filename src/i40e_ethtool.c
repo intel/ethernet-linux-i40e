@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2013 - 2021 Intel Corporation. */
+/* Copyright(c) 2013 - 2022 Intel Corporation. */
 
 /* ethtool support for i40e */
 
 #include "i40e.h"
 #include "i40e_diag.h"
+#include "i40e_txrx_common.h"
 
 #ifdef SIOCETHTOOL
 #ifndef ETH_GSTRING_LEN
@@ -2302,6 +2303,15 @@ static int i40e_set_ringparam(struct net_device *netdev,
 	    (new_rx_count == vsi->rx_rings[0]->count))
 		return 0;
 
+	/* If there is a AF_XDP page pool attached to any of Rx rings,
+	 * disallow changing the number of descriptors -- regardless
+	 * if the netdev is running or not.
+	 */
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+	if (i40e_xsk_any_rx_ring_enabled(vsi))
+		return -EBUSY;
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
+
 	while (test_and_set_bit(__I40E_CONFIG_BUSY, pf->state)) {
 		timeout--;
 		if (!timeout)
@@ -3320,13 +3330,21 @@ static int __i40e_get_coalesce(struct net_device *netdev,
  * i40e_get_coalesce - get a netdev's coalesce settings
  * @netdev: the netdev to check
  * @ec: ethtool coalesce data structure
+ * @kec: kernel coalesce parameter
+ * @extack: kernel extack parameter
  *
  * Gets the coalesce settings for a particular netdev. Note that if user has
  * modified per-queue settings, this only guarantees to represent queue 0. See
  * __i40e_get_coalesce for more details.
  **/
+#ifdef HAVE_ETHTOOL_COALESCE_EXTACK
+static int i40e_get_coalesce(struct net_device *netdev, struct ethtool_coalesce *ec,
+		  struct kernel_ethtool_coalesce __maybe_unused *kec,
+		  struct netlink_ext_ack __maybe_unused *extack)
+#else
 static int i40e_get_coalesce(struct net_device *netdev,
 			     struct ethtool_coalesce *ec)
+#endif /* HAVE_ETHTOOL_COALESCE_EXTACK */
 {
 	return __i40e_get_coalesce(netdev, ec, -1);
 }
@@ -3545,11 +3563,19 @@ static int __i40e_set_coalesce(struct net_device *netdev,
  * i40e_set_coalesce - set coalesce settings for every queue on the netdev
  * @netdev: the netdev to change
  * @ec: ethtool coalesce settings
+ * @kec: kernel coalesce parameter
+ * @extack: kernel extack parameter
  *
  * This will set each queue to the same coalesce settings.
  **/
+#ifdef HAVE_ETHTOOL_COALESCE_EXTACK
+static int i40e_set_coalesce(struct net_device *netdev, struct ethtool_coalesce *ec,
+		  struct kernel_ethtool_coalesce __maybe_unused *kec,
+		  struct netlink_ext_ack __maybe_unused *extack)
+#else
 static int i40e_set_coalesce(struct net_device *netdev,
 			     struct ethtool_coalesce *ec)
+#endif /* HAVE_ETHTOOL_COALESCE_EXTACK */
 {
 	return __i40e_set_coalesce(netdev, ec, -1);
 }
@@ -5544,7 +5570,7 @@ static int i40e_check_fdir_input_set(struct i40e_vsi *vsi,
 	switch (fsp->flow_type & ~FLOW_EXT) {
 	case SCTP_V4_FLOW:
 		new_mask &= ~I40E_VERIFY_TAG_MASK;
-		/* Fall through */
+		fallthrough;
 	case TCP_V4_FLOW:
 	case UDP_V4_FLOW:
 		tcp_ip4_spec = &fsp->m_u.tcp_ip4_spec;
@@ -5588,7 +5614,7 @@ static int i40e_check_fdir_input_set(struct i40e_vsi *vsi,
 		break;
 	case SCTP_V6_FLOW:
 		new_mask &= ~I40E_VERIFY_TAG_MASK;
-		/* Fall through */
+		fallthrough;
 	case TCP_V6_FLOW:
 	case UDP_V6_FLOW:
 #ifdef HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC
@@ -6004,14 +6030,8 @@ static int i40e_add_fdir_ethtool(struct i40e_vsi *vsi,
 	if (!(pf->flags & I40E_FLAG_FD_SB_ENABLED))
 		return -EOPNOTSUPP;
 
-	if (test_bit(__I40E_FD_SB_AUTO_DISABLED, pf->state))
-		return -ENOSPC;
-
 	if (test_bit(__I40E_RESET_RECOVERY_PENDING, pf->state) ||
 	    test_bit(__I40E_RESET_INTR_RECEIVED, pf->state))
-		return -EBUSY;
-
-	if (test_bit(__I40E_FD_FLUSH_REQUESTED, pf->state))
 		return -EBUSY;
 
 	fsp = (struct ethtool_rx_flow_spec *)&cmd->fs;
@@ -6023,6 +6043,12 @@ static int i40e_add_fdir_ethtool(struct i40e_vsi *vsi,
 
 	if (userdef.cloud_filter)
 		return i40e_add_cloud_filter_ethtool(vsi, cmd, &userdef);
+
+	if (test_bit(__I40E_FD_SB_AUTO_DISABLED, pf->state))
+		return -ENOSPC;
+
+	if (test_bit(__I40E_FD_FLUSH_REQUESTED, pf->state))
+		return -EBUSY;
 
 	/* Extended MAC field is not supported */
 	if (fsp->flow_type & FLOW_MAC_EXT)

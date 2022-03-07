@@ -2,8 +2,8 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet 700 Series
 ============================================================
 
-November 4, 2021
-Copyright(c) 2014 - 2021 Intel Corporation.
+January 19, 2022
+Copyright(c) 2014 - 2022 Intel Corporation.
 
 Contents
 ========
@@ -988,8 +988,16 @@ Bridging (DCB), Multiple Functions per Port (MFP), or Sideband Filters.
 - If another driver (for example, DPDK) has set cloud filters, you cannot
 enable ADQ.
 
+
+
+Creating traffic classes
+------------------------
+Run all TC commands from the ../iproute2/tc/ directory.
+If you set max_rate to less than 50Mbps, then max_rate is rounded up to 50Mbps
+and a warning is logged in dmesg.
+
 To create traffic classes (TCs) on the interface:
-NOTE: Run all TC commands from the ../iproute2/tc/ directory.
+
 1. Use the tc command to create traffic classes. You can create a maximum of
    8 TCs per interface.
 
@@ -1873,8 +1881,8 @@ When a packet is received with more than one error, two bad packets may be
 reported. This affects all devices based on 10G, or faster, controllers.
 
 
-Linux bonding fails with VFs bound to an Intel(R) Ethernet 700 Series device
-----------------------------------------------------------------------------
+Linux bonding failures with VFs
+-------------------------------
 If you bind Virtual Functions (VFs) to an Intel(R) Ethernet 700 Series device,
 the VF targets may fail when they become the active target. If the MAC address
 of the VF is set by the PF (Physical Function) of the device, when you add a
@@ -2161,6 +2169,18 @@ the ones provided by the installed kernel RPM. This results in dependency
 conflicts that prevent the RPM from compiling and installing.
 
 
+VLAN pruning doesn't work when traffic is sent from local system
+----------------------------------------------------------------
+VLAN tagged traffic sent from other VFs attached to a NIC can be seen on other
+VFs. This is due to an issue with NIC settings and offload settings of VFs.
+
+To work around this issue, disable Tx VLAN offload on VFs:
+
+# ethtool -K <ethX> tx-vlan-offload off
+
+This does not affect egress traffic from the outside NIC.
+
+
 SR-IOV virtual functions have identical MAC addresses
 -----------------------------------------------------
 When you create multiple SR-IOV virtual functions, the VFs may have identical
@@ -2227,7 +2247,7 @@ St - Fifth Floor, Boston, MA 02110-1301 USA.
 The full GNU General Public License is included in this distribution in the
 file called "COPYING".
 
-Copyright(c) 2014 - 2021 Intel Corporation.
+Copyright(c) 2014 - 2022 Intel Corporation.
 
 
 Trademarks

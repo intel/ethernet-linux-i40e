@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2021 Intel Corporation. */
+/* Copyright(c) 2013 - 2022 Intel Corporation. */
 
 #ifndef _KCOMPAT_IMPL_H_
 #define _KCOMPAT_IMPL_H_
@@ -783,5 +783,44 @@ cpu_latency_qos_remove_request(struct pm_qos_request *req)
 #define DECLARE_STATIC_KEY_FALSE(name)	\
 	extern struct static_key_false name
 #endif /* NEED_DECLARE_STATIC_KEY_FALSE */
+
+#ifdef NEED_DEFINE_STATIC_KEY_FALSE
+/* NEED_DEFINE_STATIC_KEY_FALSE
+ *
+ * DEFINE_STATIC_KEY_FALSE was added by upstream commit
+ * 11276d5306b8 ("locking/static_keys: Add a new
+ * static_key interface")
+ *
+ * The definition is now necessary to handle
+ * the xdpdrv work with more than 64 cpus
+ */
+#define DECLARE_STATIC_KEY_FALSE(name) extern struct static_key name
+
+#define DEFINE_STATIC_KEY_FALSE(name) \
+	struct static_key name = STATIC_KEY_INIT_FALSE
+#endif /* NEED_DEFINE_STATIC_KEY_FALSE */
+
+#ifdef NEED_STATIC_BRANCH
+/* NEED_STATIC_BRANCH
+ *
+ * static_branch_likely, static_branch_unlikely,
+ * static_branch_inc, static_branch_dec was added by upstream commit
+ * 11276d5306b8 ("locking/static_keys: Add a new
+ * static_key interface")
+ *
+ * The definition is now necessary to handle
+ * the xdpdrv work with more than 64 cpus
+ */
+#define static_branch_likely(x)		likely(static_key_enabled(x))
+#define static_branch_unlikely(x)	unlikely(static_key_enabled(x))
+
+#define static_branch_inc(x)		static_key_slow_inc(x)
+#define static_branch_dec(x)		static_key_slow_dec(x)
+
+#endif /* NEED_STATIC_BRANCH */
+
+#ifdef NEED_NETDEV_XDP_STRUCT
+#define netdev_bpf netdev_xdp
+#endif /* NEED_NETDEV_XDP_STRUCT */
 
 #endif /* _KCOMPAT_IMPL_H_ */

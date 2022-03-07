@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2021 Intel Corporation. */
+/* Copyright(c) 2013 - 2022 Intel Corporation. */
 
 #ifndef _I40E_TXRX_H_
 #define _I40E_TXRX_H_
@@ -304,17 +304,29 @@ struct i40e_tx_buffer {
 
 struct i40e_rx_buffer {
 	dma_addr_t dma;
+	union {
+		struct {
 #ifdef CONFIG_I40E_DISABLE_PACKET_SPLIT
-	struct sk_buff *skb;
+			struct sk_buff *skb;
 #else
-	struct page *page;
+			struct page *page;
 #if (BITS_PER_LONG > 32) || (PAGE_SIZE >= 65536)
-	__u32 page_offset;
+			__u32 page_offset;
 #else
-	__u16 page_offset;
+			__u16 page_offset;
 #endif
-	__u16 pagecnt_bias;
+			__u16 pagecnt_bias;
 #endif /* CONFIG_I40E_DISABLE_PACKET_SPLIT */
+		};
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+#ifndef HAVE_MEM_TYPE_XSK_BUFF_POOL
+		struct {
+			void *addr;
+			u64 handle;
+		};
+#endif /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
+	};
 };
 
 struct i40e_queue_stats {
@@ -377,6 +389,9 @@ struct i40e_ring {
 	union {
 		struct i40e_tx_buffer *tx_bi;
 		struct i40e_rx_buffer *rx_bi;
+#ifdef HAVE_MEM_TYPE_XSK_BUFF_POOL
+		struct xdp_buff **rx_bi_zc;
+#endif /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
 	};
 	DECLARE_BITMAP(state, __I40E_RING_STATE_NBITS);
 	u16 queue_index;		/* Queue number of ring */
@@ -397,6 +412,7 @@ struct i40e_ring {
 	/* used in interrupt processing */
 	u16 next_to_use;
 	u16 next_to_clean;
+	u16 xdp_tx_active;
 
 	u8 atr_sample_rate;
 	u8 atr_count;
@@ -444,6 +460,17 @@ struct i40e_ring {
 #ifdef HAVE_XDP_BUFF_RXQ
 	struct xdp_rxq_info xdp_rxq;
 #endif
+
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+#ifdef HAVE_NETDEV_BPF_XSK_POOL
+	struct xsk_buff_pool *xsk_pool;
+#else
+struct xdp_umem *xsk_umem;
+#endif /* HAVE_NETDEV_BFP_XSK_POOL */
+#ifndef HAVE_MEM_TYPE_XSK_BUFF_POOL
+struct zero_copy_allocator zca; /* ZC allocator anchor */
+#endif /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
+#endif /* HAVE_AF_XD_ZC_SUPPORT */
 } ____cacheline_internodealigned_in_smp;
 
 static inline bool ring_uses_build_skb(struct i40e_ring *ring)
@@ -548,6 +575,10 @@ int i40e_xdp_xmit(struct net_device *dev, int n, struct xdp_frame **frames,
 #else
 int i40e_xdp_xmit(struct net_device *dev, struct xdp_buff *xdp);
 #endif
+#ifdef HAVE_MEM_TYPE_XSK_BUFF_POOL
+int i40e_alloc_rx_bi(struct i40e_ring *rx_ring);
+#endif /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
+
 void i40e_xdp_flush(struct net_device *dev);
 
 #ifdef HAVE_XDP_SUPPORT

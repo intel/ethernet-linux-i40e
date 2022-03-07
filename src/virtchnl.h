@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2021 Intel Corporation. */
+/* Copyright(c) 2013 - 2022 Intel Corporation. */
 
 #ifndef _VIRTCHNL_H_
 #define _VIRTCHNL_H_
@@ -22,7 +22,7 @@
  *
  * The PF is required to return a status code in v_retval for all messages
  * except RESET_VF, which does not require any response. The returned value
- * is of virtchnl_status_code type, defined in the shared type.h.
+ * is of virtchnl_status_code type, defined here.
  *
  * In general, VF driver initialization should roughly follow the order of
  * these opcodes. The VF driver must first validate the API version of the
@@ -37,7 +37,21 @@
  * value in current and future projects
  */
 
-/* Error Codes */
+/* These macros are used to generate compilation errors if a structure/union
+ * is not exactly the correct length. It gives a divide by zero error if the
+ * structure/union is not of the correct size, otherwise it creates an enum
+ * that is never used.
+ */
+#define VIRTCHNL_CHECK_STRUCT_LEN(n, X) enum virtchnl_static_assert_enum_##X \
+	{ virtchnl_static_assert_##X = (n)/((sizeof(struct X) == (n)) ? 1 : 0) }
+#define VIRTCHNL_CHECK_UNION_LEN(n, X) enum virtchnl_static_asset_enum_##X \
+	{ virtchnl_static_assert_##X = (n)/((sizeof(union X) == (n)) ? 1 : 0) }
+
+/* Error Codes
+ * Note that many older versions of various iAVF drivers convert the reported
+ * status code directly into an iavf_status enumeration. For this reason, it
+ * is important that the values of these enumerations line up.
+ */
 enum virtchnl_status_code {
 	VIRTCHNL_STATUS_SUCCESS				= 0,
 	VIRTCHNL_STATUS_ERR_PARAM			= -5,
@@ -87,7 +101,6 @@ enum virtchnl_rx_hsplit {
 enum virtchnl_bw_limit_type {
 	VIRTCHNL_BW_SHAPER = 0,
 };
-
 /* END GENERIC DEFINES */
 
 /* Opcodes for VF-PF communication. These are placed in the v_opcode field
@@ -99,6 +112,7 @@ enum virtchnl_ops {
  * VFs send requests to the PF using the other ops.
  * Use of "advanced opcode" features must be negotiated as part of capabilities
  * exchange and are not considered part of base mode feature set.
+ *
  */
 	VIRTCHNL_OP_UNKNOWN = 0,
 	VIRTCHNL_OP_VERSION = 1, /* must ALWAYS be 1 */
@@ -156,7 +170,7 @@ enum virtchnl_ops {
 	/* opcodes 60 through 65 are reserved */
 	VIRTCHNL_OP_GET_QOS_CAPS = 66,
 	VIRTCHNL_OP_CONFIG_QUEUE_TC_MAP = 67,
-	/* opcode 68, 69 are reserved */
+	/* opcode 68 through 70 are reserved */
 	VIRTCHNL_OP_ENABLE_QUEUES_V2 = 107,
 	VIRTCHNL_OP_DISABLE_QUEUES_V2 = 108,
 	VIRTCHNL_OP_MAP_QUEUE_VECTOR = 111,
@@ -240,12 +254,6 @@ static inline const char *virtchnl_op_str(enum virtchnl_ops v_opcode)
 		return "VIRTCHNL_OP_DEL_FDIR_FILTER";
 	case VIRTCHNL_OP_GET_MAX_RSS_QREGION:
 		return "VIRTCHNL_OP_GET_MAX_RSS_QREGION";
-	case VIRTCHNL_OP_ENABLE_QUEUES_V2:
-		return "VIRTCHNL_OP_ENABLE_QUEUES_V2";
-	case VIRTCHNL_OP_DISABLE_QUEUES_V2:
-		return "VIRTCHNL_OP_DISABLE_QUEUES_V2";
-	case VIRTCHNL_OP_MAP_QUEUE_VECTOR:
-		return "VIRTCHNL_OP_MAP_QUEUE_VECTOR";
 	case VIRTCHNL_OP_GET_OFFLOAD_VLAN_V2_CAPS:
 		return "VIRTCHNL_OP_GET_OFFLOAD_VLAN_V2_CAPS";
 	case VIRTCHNL_OP_ADD_VLAN_V2:
@@ -264,6 +272,12 @@ static inline const char *virtchnl_op_str(enum virtchnl_ops v_opcode)
 		return "VIRTCHNL_OP_ENABLE_VLAN_FILTERING_V2";
 	case VIRTCHNL_OP_DISABLE_VLAN_FILTERING_V2:
 		return "VIRTCHNL_OP_DISABLE_VLAN_FILTERING_V2";
+	case VIRTCHNL_OP_ENABLE_QUEUES_V2:
+		return "VIRTCHNL_OP_ENABLE_QUEUES_V2";
+	case VIRTCHNL_OP_DISABLE_QUEUES_V2:
+		return "VIRTCHNL_OP_DISABLE_QUEUES_V2";
+	case VIRTCHNL_OP_MAP_QUEUE_VECTOR:
+		return "VIRTCHNL_OP_MAP_QUEUE_VECTOR";
 	case VIRTCHNL_OP_MAX:
 		return "VIRTCHNL_OP_MAX";
 	default:
@@ -271,15 +285,29 @@ static inline const char *virtchnl_op_str(enum virtchnl_ops v_opcode)
 	}
 }
 
-/* These macros are used to generate compilation errors if a structure/union
- * is not exactly the correct length. It gives a divide by zero error if the
- * structure/union is not of the correct size, otherwise it creates an enum
- * that is never used.
- */
-#define VIRTCHNL_CHECK_STRUCT_LEN(n, X) enum virtchnl_static_assert_enum_##X \
-	{ virtchnl_static_assert_##X = (n)/((sizeof(struct X) == (n)) ? 1 : 0) }
-#define VIRTCHNL_CHECK_UNION_LEN(n, X) enum virtchnl_static_asset_enum_##X \
-	{ virtchnl_static_assert_##X = (n)/((sizeof(union X) == (n)) ? 1 : 0) }
+static inline const char *virtchnl_stat_str(enum virtchnl_status_code v_status)
+{
+	switch (v_status) {
+	case VIRTCHNL_STATUS_SUCCESS:
+		return "VIRTCHNL_STATUS_SUCCESS";
+	case VIRTCHNL_STATUS_ERR_PARAM:
+		return "VIRTCHNL_STATUS_ERR_PARAM";
+	case VIRTCHNL_STATUS_ERR_NO_MEMORY:
+		return "VIRTCHNL_STATUS_ERR_NO_MEMORY";
+	case VIRTCHNL_STATUS_ERR_OPCODE_MISMATCH:
+		return "VIRTCHNL_STATUS_ERR_OPCODE_MISMATCH";
+	case VIRTCHNL_STATUS_ERR_CQP_COMPL_ERROR:
+		return "VIRTCHNL_STATUS_ERR_CQP_COMPL_ERROR";
+	case VIRTCHNL_STATUS_ERR_INVALID_VF_ID:
+		return "VIRTCHNL_STATUS_ERR_INVALID_VF_ID";
+	case VIRTCHNL_STATUS_ERR_ADMIN_QUEUE_ERROR:
+		return "VIRTCHNL_STATUS_ERR_ADMIN_QUEUE_ERROR";
+	case VIRTCHNL_STATUS_ERR_NOT_SUPPORTED:
+		return "VIRTCHNL_STATUS_ERR_NOT_SUPPORTED";
+	default:
+		return "Unknown status code (update virtchnl.h)";
+	}
+}
 
 /* Message descriptions and data structures. */
 
@@ -1311,13 +1339,6 @@ struct virtchnl_pf_event {
 			u8 link_status;
 			u8 pad[3];
 		} link_event_adv;
-		struct {
-			/* link_speed provided in Mbps */
-			u32 link_speed;
-			u16 vport_id;
-			u8 link_status;
-			u8 pad;
-		} link_event_adv_vport;
 	} event_data;
 
 	s32 severity;
@@ -1760,18 +1781,10 @@ struct virtchnl_queue_tc_mapping {
 
 VIRTCHNL_CHECK_STRUCT_LEN(12, virtchnl_queue_tc_mapping);
 
-/* TX and RX queue types are valid in legacy as well as split queue models.
- * With Split Queue model, 2 additional types are introduced - TX_COMPLETION
- * and RX_BUFFER. In split queue model, RX corresponds to the queue where HW
- * posts completions.
- */
+/* queue types */
 enum virtchnl_queue_type {
 	VIRTCHNL_QUEUE_TYPE_TX			= 0,
 	VIRTCHNL_QUEUE_TYPE_RX			= 1,
-	VIRTCHNL_QUEUE_TYPE_TX_COMPLETION	= 2,
-	VIRTCHNL_QUEUE_TYPE_RX_BUFFER		= 3,
-	VIRTCHNL_QUEUE_TYPE_CONFIG_TX		= 4,
-	VIRTCHNL_QUEUE_TYPE_CONFIG_RX		= 5
 };
 
 /* structure to specify a chunk of contiguous queues */
@@ -1795,19 +1808,13 @@ VIRTCHNL_CHECK_STRUCT_LEN(12, virtchnl_queue_chunks);
 
 /* VIRTCHNL_OP_ENABLE_QUEUES_V2
  * VIRTCHNL_OP_DISABLE_QUEUES_V2
- * VIRTCHNL_OP_DEL_QUEUES
  *
- * If VIRTCHNL version was negotiated in VIRTCHNL_OP_VERSION as 2.0
- * then all of these ops are available.
+ * These opcodes can be used if VIRTCHNL_VF_LARGE_NUM_QPAIRS was negotiated in
+ * VIRTCHNL_OP_GET_VF_RESOURCES
  *
- * If VIRTCHNL_VF_LARGE_NUM_QPAIRS was negotiated in VIRTCHNL_OP_GET_VF_RESOURCES
- * then VIRTCHNL_OP_ENABLE_QUEUES_V2 and VIRTCHNL_OP_DISABLE_QUEUES_V2 are
- * available.
- *
- * PF sends these messages to enable, disable or delete queues specified in
- * chunks. PF sends virtchnl_del_ena_dis_queues struct to specify the queues
- * to be enabled/disabled/deleted. Also applicable to single queue RX or
- * TX. CP performs requested action and returns status.
+ * VF sends virtchnl_ena_dis_queues struct to specify the queues to be
+ * enabled/disabled in chunks. Also applicable to single queue RX or
+ * TX. PF performs requested action and returns status.
  */
 struct virtchnl_del_ena_dis_queues {
 	u16 vport_id;
@@ -1841,13 +1848,13 @@ VIRTCHNL_CHECK_STRUCT_LEN(16, virtchnl_queue_vector);
 
 /* VIRTCHNL_OP_MAP_QUEUE_VECTOR
  *
- * If VIRTCHNL_VF_LARGE_NUM_QPAIRS was negotiated in VIRTCHNL_OP_GET_VF_RESOURCES
- * then only VIRTCHNL_OP_MAP_QUEUE_VECTOR is available.
+ * This opcode can be used only if VIRTCHNL_VF_LARGE_NUM_QPAIRS was negotiated
+ * in VIRTCHNL_OP_GET_VF_RESOURCES
  *
- * PF sends this message to map or unmap queues to vectors and ITR index
- * registers. External data buffer contains virtchnl_queue_vector_maps structure
+ * VF sends this message to map queues to vectors and ITR index registers.
+ * External data buffer contains virtchnl_queue_vector_maps structure
  * that contains num_qv_maps of virtchnl_queue_vector structures.
- * CP maps the requested queue vector maps after validating the queue and vector
+ * PF maps the requested queue vector maps after validating the queue and vector
  * ids and returns a status code.
  */
 struct virtchnl_queue_vector_maps {

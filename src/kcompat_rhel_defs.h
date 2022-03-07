@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2021 Intel Corporation. */
+/* Copyright(c) 2013 - 2022 Intel Corporation. */
 
 #ifndef _KCOMPAT_RHEL_DEFS_H_
 #define _KCOMPAT_RHEL_DEFS_H_
@@ -78,6 +78,7 @@
 #undef NEED_IDA_ALLOC_MIN_MAX_RANGE_FREE
 #define HAVE_DEVLINK_PARAMS_PUBLISH
 #undef NEED_NETDEV_TX_SENT_QUEUE
+#define HAVE_DEVLINK_HEALTH
 #endif /* 8.1 */
 
 /*****************************************************************************/
@@ -96,6 +97,8 @@
 #if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(8,3))
 #else /* >= 8.3 */
 #undef NEED_CPU_LATENCY_QOS_RENAME
+#define HAVE_DEVLINK_HEALTH_OPS_EXTACK
+#define HAVE_DEVLINK_HEALTH_DEFAULT_AUTO_RECOVER
 #endif /* 8.3 */
 
 /*****************************************************************************/
@@ -105,6 +108,7 @@
 #undef NEED_NET_PREFETCH
 #undef NEED_DEVLINK_FLASH_UPDATE_TIMEOUT_NOTIFY
 #undef HAVE_XDP_QUERY_PROG
+#define HAVE_ETHTOOL_COALESCE_PARAMS_SUPPORT
 #endif /* 8.4 */
 
 /*****************************************************************************/

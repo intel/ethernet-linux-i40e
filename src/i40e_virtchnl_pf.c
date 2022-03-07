@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2013 - 2021 Intel Corporation. */
+/* Copyright(c) 2013 - 2022 Intel Corporation. */
 
 #include "i40e.h"
 
@@ -1505,7 +1505,7 @@ static int i40e_alloc_vsi_res(struct i40e_vf *vf, u8 idx)
 		u16 vid;
 
 		for_each_set_bit(vid, vf->trunk_vlans, VLAN_N_VID) {
-			if (vid != vf->port_vlan_id)
+			if (vid != (vf->port_vlan_id & I40E_VLAN_MASK))
 				trunk_conf = true;
 		}
 		vf->lan_vsi_idx = vsi->idx;
@@ -3013,6 +3013,12 @@ static int i40e_vc_get_vf_resources_msg(struct i40e_vf *vf, u8 *msg)
 		/* VFs only use TC 0 */
 		vfres->vsi_res[0].qset_handle
 					  = LE16_TO_CPU(vsi->info.qs_handle[0]);
+		if (!(vf->driver_caps & VIRTCHNL_VF_OFFLOAD_USO || 
+		    vf->pf_set_mac)) {
+			i40e_del_mac_filter(vsi, vf->default_lan_addr.addr);
+			memset(vf->default_lan_addr.addr, 0, 
+			       sizeof(vf->default_lan_addr.addr));
+		}
 		ether_addr_copy(vfres->vsi_res[0].default_mac_addr,
 				vf->default_lan_addr.addr);
 	}
@@ -5708,7 +5714,8 @@ int i40e_ndo_set_vf_port_vlan(struct net_device *netdev,
 		}
 #ifdef HAVE_NDO_SET_VF_LINK_STATE
 		/* only pvid should be present in trunk */
-		clear_bit(le16_to_cpu(*pvid), vf->trunk_vlans);
+		clear_bit((le16_to_cpu(*pvid) & I40E_VLAN_MASK),
+			  vf->trunk_vlans);
 		for_each_set_bit(tmp, vf->trunk_vlans,
 				 BITS_TO_LONGS(VLAN_N_VID) * sizeof(long)) {
 			if (tmp != 0)
@@ -5716,7 +5723,7 @@ int i40e_ndo_set_vf_port_vlan(struct net_device *netdev,
 		}
 		memset(vf->trunk_vlans, 0,
 		       BITS_TO_LONGS(VLAN_N_VID) * sizeof(long));
-		set_bit(le16_to_cpu(*pvid), vf->trunk_vlans);
+		set_bit((le16_to_cpu(*pvid) & I40E_VLAN_MASK), vf->trunk_vlans);
 
 		vf->allow_untagged = false;
 		vsi->flags |= I40E_VSI_FLAG_FILTER_CHANGED;
@@ -6110,7 +6117,8 @@ int i40e_get_vf_stats(struct net_device *netdev, int vf_id,
 
 	vf = &pf->vf[vf_id];
 	if (!test_bit(I40E_VF_STATE_INIT, &vf->vf_states)) {
-		dev_err(&pf->pdev->dev, "VF %d in reset. Try again.\n", vf_id);
+		dev_info(&pf->pdev->dev,
+			 "VF %d in reset. Try again.\n", vf_id);
 		return -EBUSY;
 	}
 
@@ -6327,9 +6335,11 @@ static int i40e_get_trunk(struct pci_dev *pdev, int vf_id,
 		memset(trunk_vlans, 0,
 		       BITS_TO_LONGS(VLAN_N_VID) * sizeof(long));
 		if (vsi->info.pvid)
-			set_bit(le16_to_cpu(vsi->info.pvid), trunk_vlans);
+			set_bit((le16_to_cpu(vsi->info.pvid) & I40E_VLAN_MASK),
+				trunk_vlans);
 		else
-			set_bit(le16_to_cpu(vsi->info.outer_vlan), trunk_vlans);
+			set_bit((le16_to_cpu(vsi->info.outer_vlan) &
+				I40E_VLAN_MASK), trunk_vlans);
 	} else {
 		bitmap_copy(trunk_vlans, vf->trunk_vlans, VLAN_N_VID);
 	}
@@ -6379,7 +6389,7 @@ static int i40e_set_trunk(struct pci_dev *pdev, int vf_id,
 	if (vid) {
 		i40e_vsi_remove_pvid(vsi);
 		/* Remove pvid and vlan 0 from trunk */
-		clear_bit(vid, vf->trunk_vlans);
+		clear_bit(vid & I40E_VLAN_MASK, vf->trunk_vlans);
 		clear_bit(0, vf->trunk_vlans);
 	}
 
@@ -6388,7 +6398,7 @@ static int i40e_set_trunk(struct pci_dev *pdev, int vf_id,
 
 	/* Add vlans */
 	for_each_set_bit(vid, vlan_bitmap, VLAN_N_VID) {
-		if (!test_bit(vid, vf->trunk_vlans)) {
+		if (!test_bit(vid & I40E_VLAN_MASK, vf->trunk_vlans)) {
 			ret = i40e_vsi_add_vlan(vsi, vid);
 			if (ret)
 				goto out;
@@ -6417,7 +6427,7 @@ static int i40e_set_trunk(struct pci_dev *pdev, int vf_id,
 
 	/* Del vlans */
 	for_each_set_bit(vid, vf->trunk_vlans, VLAN_N_VID) {
-		if (!test_bit(vid, vlan_bitmap))
+		if (!test_bit(vid & I40E_VLAN_MASK, vlan_bitmap))
 			i40e_vsi_kill_vlan(vsi, vid);
 	}
 	/* Copy over the updated bitmap */

@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0
-# Copyright(c) 2013 - 2021 Intel Corporation.
+# Copyright(c) 2013 - 2022 Intel Corporation.
 
 ifneq ($(KERNELRELEASE),)
 # kbuild part of makefile
@@ -14,6 +14,7 @@ obj-m += i40e.o
 
 i40e-y := i40e_main.o \
 	i40e_ethtool.o \
+	i40e_xsk.o \
 	i40e_adminq.o \
 	i40e_common.o \
 	i40e_hmc.o \

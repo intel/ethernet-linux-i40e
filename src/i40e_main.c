@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2013 - 2021 Intel Corporation. */
+/* Copyright(c) 2013 - 2022 Intel Corporation. */
 
 #ifdef HAVE_XDP_SUPPORT
 #include <linux/bpf.h>
@@ -31,6 +31,15 @@
 #define CREATE_TRACE_POINTS
 #include "i40e_trace.h"
 
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+#include "i40e_xsk.h"
+#ifndef HAVE_MEM_TYPE_XSK_BUFF_POOL
+#include <net/xdp_sock.h>
+#else
+#include <net/xdp_sock_drv.h>
+#endif
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
+
 char i40e_driver_name[] = "i40e";
 static const char i40e_driver_string[] =
 		"Intel(R) 40-10 Gigabit Ethernet Connection Network Driver";
@@ -42,15 +51,15 @@ static const char i40e_driver_string[] =
 #define DRV_VERSION_DESC ""
 
 #define DRV_VERSION_MAJOR 2
-#define DRV_VERSION_MINOR 17
-#define DRV_VERSION_BUILD 15
+#define DRV_VERSION_MINOR 18
+#define DRV_VERSION_BUILD 9
 #define DRV_VERSION_SUBBUILD 0
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
 	__stringify(DRV_VERSION_BUILD) \
 	DRV_VERSION_DESC __stringify(DRV_VERSION_LOCAL)
 const char i40e_driver_version_str[] = DRV_VERSION;
-static const char i40e_copyright[] = "Copyright(c) 2013 - 2021 Intel Corporation.";
+static const char i40e_copyright[] = "Copyright(c) 2013 - 2022 Intel Corporation.";
 
 /* a bit of forward declarations */
 static void i40e_vsi_reinit_locked(struct i40e_vsi *vsi);
@@ -172,6 +181,19 @@ static int i40e_get_lump(struct i40e_pf *pf, struct i40e_lump_tracking *pile,
 			 "param err: pile=%s needed=%d id=0x%04x\n",
 			 pile ? "<valid>" : "<null>", needed, id);
 		return -EINVAL;
+	}
+
+	/* Allocate last queue in the pile for FDIR VSI queue
+	 * so it doesn't fragment the qp_pile */
+	if (pile == pf->qp_pile && pf->vsi[id]->type == I40E_VSI_FDIR) {
+		if (pile->list[pile->num_entries-1] & I40E_PILE_VALID_BIT) {
+			dev_err(&pf->pdev->dev,
+				"Cannot allocate queue %d for I40E_VSI_FDIR\n",
+				pile->num_entries-1);
+			return -ENOMEM;
+		}
+		pile->list[pile->num_entries-1] = id | I40E_PILE_VALID_BIT;
+		return pile->num_entries - 1;
 	}
 
 	/* start from beginning because earlier areas may have been freed */
@@ -640,6 +662,52 @@ void i40e_pf_reset_stats(struct i40e_pf *pf)
 }
 
 /**
+ * i40e_compute_pci_to_hw_id - compute index form PCI function.
+ * @vsi: ptr to the VSI to read from.
+ * @hw: ptr to the hardware info.
+ **/
+static u8 i40e_compute_pci_to_hw_id(struct i40e_vsi *vsi, struct i40e_hw *hw) {
+	int pf_count;
+
+	pf_count = i40e_get_pf_count(hw);
+
+	if (vsi->type == I40E_VSI_SRIOV)
+		return hw->port * BIT(7) / pf_count + vsi->vf_id;
+
+	return hw->port + BIT(7);
+}
+
+/**
+ * i40e_stat_update64 - read and update a 64 bit stat from the chip.
+ * @hw: ptr to the hardware info.
+ * @hireg: the high 32 bit reg to read.
+ * @loreg: the low 32 bit reg to read.
+ * @offset_loaded: has the initial offset been loaded yet.
+ * @offset: ptr to current offset value.
+ * @stat: ptr to the stat.
+ *
+ * Since the device stats are not reset at PFReset, they likely will not
+ * be zeroed when the driver starts.  We'll save the first values read
+ * and use them as offsets to be subtracted from the raw values in order
+ * to report stats that count from zero.
+ **/
+static void i40e_stat_update64(struct i40e_hw *hw, u32 hireg, u32 loreg,
+			       bool offset_loaded, u64 *offset, u64 *stat)
+{
+	u64 new_data;
+
+	if (hw->device_id == I40E_DEV_ID_QEMU) {
+		new_data = rd32(hw, loreg);
+		new_data |= ((u64)(rd32(hw, hireg))) << 32;
+	} else {
+		new_data = rd64(hw, loreg);
+	}
+	if (!offset_loaded || new_data < *offset)
+		*offset = new_data;
+	*stat = new_data - *offset;
+}
+
+/**
  * i40e_stat_update48 - read and update a 48 bit stat from the chip
  * @hw: ptr to the hardware info
  * @hireg: the high 32 bit reg to read
@@ -711,6 +779,33 @@ static void i40e_stat_update_and_clear32(struct i40e_hw *hw, u32 reg, u64 *stat)
 }
 
 /**
+ * i40e_stats_update_rx_discards - update rx_discards.
+ * @vsi: ptr to the VSI to be updated.
+ * @hw: ptr to the hardware info.
+ * @stat_idx: VSI's stat_counter_idx.
+ * @offset_loaded: ptr to the VSI's stat_offsets_loaded.
+ * @stat_offset: ptr to stat_offset to store first read of specific register.
+ * @stat: ptr to VSI's stat to be updated.
+ **/
+static void i40e_stats_update_rx_discards(struct i40e_vsi *vsi,
+			struct i40e_hw *hw, int stat_idx, bool offset_loaded,
+			struct i40e_eth_stats *stat_offset,
+			struct i40e_eth_stats *stat)
+{
+	u64 rx_rdpc, rx_rxerr;
+
+	i40e_stat_update32(hw, I40E_GLV_RDPC(stat_idx), offset_loaded,
+			   &stat_offset->rx_discards, &rx_rdpc);
+	i40e_stat_update64(hw,
+			   I40E_GL_RXERR1H(i40e_compute_pci_to_hw_id(vsi, hw)),
+			   I40E_GL_RXERR1L(i40e_compute_pci_to_hw_id(vsi, hw)),
+			   offset_loaded, &stat_offset->rx_discards_other,
+			   &rx_rxerr);
+
+	stat->rx_discards = rx_rdpc + rx_rxerr;
+}
+
+/**
  * i40e_update_eth_stats - Update VSI-specific ethernet statistics counters.
  * @vsi: the VSI to be updated
  **/
@@ -769,6 +864,9 @@ void i40e_update_eth_stats(struct i40e_vsi *vsi)
 			   I40E_GLV_BPTCL(stat_idx),
 			   vsi->stat_offsets_loaded,
 			   &oes->tx_broadcast, &es->tx_broadcast);
+
+	i40e_stats_update_rx_discards(vsi, hw, stat_idx,
+			   vsi->stat_offsets_loaded, oes, es);
 	vsi->stat_offsets_loaded = true;
 }
 
@@ -1465,7 +1563,7 @@ static s16 i40e_get_vf_new_vlan(struct i40e_vsi *vsi,
 				int vlan_filters,
 				bool trusted)
 {
-	s16 *pvid = i40e_get_current_vid(vsi);
+	__le16 *pvid = i40e_get_current_vid(vsi);
 	struct i40e_pf *pf = vsi->back;
 	bool is_any;
 
@@ -1745,7 +1843,8 @@ struct i40e_mac_filter *i40e_add_mac_filter(struct i40e_vsi *vsi,
 		 * VLAN 0 will be corrected to active or inactive state based
 		 * on allow_untagged flag
 		 */
-		return i40e_add_filter(vsi, macaddr, le16_to_cpu(vid));
+		return i40e_add_filter(vsi, macaddr,
+				       le16_to_cpu(vid) & I40E_VLAN_MASK);
 	}
 
 	if (!i40e_is_vsi_in_vlan(vsi))
@@ -2067,6 +2166,9 @@ static void i40e_vsi_setup_queue_map(struct i40e_vsi *vsi,
 			vsi->num_queue_pairs = vsi->req_queue_pairs;
 		else if (pf->flags & I40E_FLAG_MSIX_ENABLED)
 			vsi->num_queue_pairs = pf->num_lan_msix;
+		else
+			/* We need at least one queue pair for the interface to be usable */
+			vsi->num_queue_pairs = 1;
 	}
 
 	/* Number of queues per enabled TC */
@@ -2094,10 +2196,6 @@ static void i40e_vsi_setup_queue_map(struct i40e_vsi *vsi,
 	vsi->tc_config.numtc = numtc;
 	vsi->tc_config.enabled_tc = enabled_tc ? enabled_tc : 1;
 
-	/* Do not allow use more TC queue pairs than MSI-X vectors exist */
-	if (pf->flags & I40E_FLAG_MSIX_ENABLED)
-		num_tc_qps = min_t(int, num_tc_qps, pf->num_lan_msix);
-
 	/* Setup queue offset/count for all TCs for given VSI */
 	for (i = 0; i < I40E_MAX_TRAFFIC_CLASS; i++) {
 		/* See if the given TC is enabled for the given VSI */
@@ -2113,14 +2211,13 @@ static void i40e_vsi_setup_queue_map(struct i40e_vsi *vsi,
 						       num_tc_qps);
 					break;
 				}
-				/* fall through */
+				fallthrough;
 			case I40E_VSI_SRIOV:
 				/* Do not warn on SRIOV VSIs, map
 				 * queues anyway
 				 */
 				qcount = num_tc_qps;
 				break;
-				/* fall through */
 			case I40E_VSI_FDIR:
 			case I40E_VSI_VMDQ2:
 			default:
@@ -3884,6 +3981,50 @@ static void i40e_config_xps_tx_ring(struct i40e_ring *ring)
 #endif /* !HAVE_NETIF_SET_XPS_QUEUE_CONST_MASK */
 }
 
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+#ifdef HAVE_NETDEV_BPF_XSK_POOL
+/**
+ * i40e_xsk_pool - Retrieve the AF_XDP buffer pool if XDP and ZC is enabled
+ * @ring: The Tx or Rx ring
+ *
+ * Returns the AF_XDP buffer pool or NULL.
+ **/
+static inline struct xsk_buff_pool *i40e_xsk_pool(struct i40e_ring *ring)
+#else
+/**
+ * i40e_xsk_umem - Retrieve the AF_XDP ZC if XDP and ZC is enabled
+ * @ring: The Tx or Rx ring
+ *
+ * Returns the UMEM or NULL.
+ **/
+static inline struct xdp_umem *i40e_xsk_umem(struct i40e_ring *ring)
+#endif /* HAVE_NETDEV_BPF_XSK_POOL */
+{
+	bool xdp_on = i40e_enabled_xdp_vsi(ring->vsi);
+	int qid = ring->queue_index;
+
+	if (ring_is_xdp(ring))
+		qid -= ring->vsi->alloc_queue_pairs;
+
+#ifdef HAVE_AF_XDP_NETDEV_UMEM
+	if (!xdp_on || !test_bit(qid, ring->vsi->af_xdp_zc_qps))
+#else
+	if (!ring->vsi->xsk_umems || !ring->vsi->xsk_umems[qid] || !xdp_on)
+#endif /* HAVE_AF_XDP_NETDEV_UMEM */
+		return NULL;
+
+#ifdef HAVE_AF_XDP_NETDEV_UMEM
+#ifdef HAVE_NETDEV_BPF_XSK_POOL
+	return xdp_get_xsk_pool_from_qid(ring->vsi->netdev, qid);
+#else
+	return xdp_get_umem_from_qid(ring->vsi->netdev, qid);
+#endif /* HAVE_NETDEV_BPF_XSK_POOL */
+#else
+	return ring->vsi->xsk_umems[qid];
+#endif /* HAVE_AF_XDP_NETDEV_UMEM */
+}
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
+
 /**
  * i40e_configure_tx_ring - Configure a transmit ring context and rest
  * @ring: The Tx ring to configure
@@ -3898,6 +4039,15 @@ static int i40e_configure_tx_ring(struct i40e_ring *ring)
 	struct i40e_hmc_obj_txq tx_ctx;
 	i40e_status err = I40E_SUCCESS;
 	u32 qtx_ctl = 0;
+
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+	if (ring_is_xdp(ring))
+#ifdef HAVE_NETDEV_BPF_XSK_POOL
+		ring->xsk_pool = i40e_xsk_pool(ring);
+#else
+		ring->xsk_umem = i40e_xsk_umem(ring);
+#endif /* HAVE_NETDEV_BPF_XSK_POOL */
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
 
 	/* some ATR related tx ring init */
 	if (vsi->back->flags & I40E_FLAG_FD_ATR_ENABLED) {
@@ -4009,13 +4159,89 @@ static int i40e_configure_rx_ring(struct i40e_ring *ring)
 	struct i40e_hw *hw = &vsi->back->hw;
 	struct i40e_hmc_obj_rxq rx_ctx;
 	i40e_status err = I40E_SUCCESS;
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+	bool ok;
+	int ret;
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
 
 	bitmap_zero(ring->state, __I40E_RING_STATE_NBITS);
 
 	/* clear the context structure first */
 	memset(&rx_ctx, 0, sizeof(rx_ctx));
 
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+	if (ring->vsi->type == I40E_VSI_MAIN)
+		xdp_rxq_info_unreg_mem_model(&ring->xdp_rxq);
+
+#ifdef HAVE_MEM_TYPE_XSK_BUFF_POOL
+	kfree(ring->rx_bi);
+#endif /* HAVE_MEM_TYPEW_XSK_BUFF_POOL */
+#ifdef HAVE_NETDEV_BPF_XSK_POOL
+	ring->xsk_pool = i40e_xsk_pool(ring);
+	if (ring->xsk_pool) {
+#else
+	ring->xsk_umem = i40e_xsk_umem(ring);
+	if (ring->xsk_umem) {
+#endif /* HAVE_NETDEV_BPF_XSK_POOL */
+#ifdef HAVE_MEM_TYPE_XSK_BUFF_POOL
+		ret = i40e_alloc_rx_bi_zc(ring);
+		if (ret)
+			return ret;
+#ifdef HAVE_NETDEV_BPF_XSK_POOL
+		ring->rx_buf_len =
+		 xsk_umem_get_rx_frame_size(ring->xsk_pool->umem);
+#else
+		ring->rx_buf_len = xsk_umem_get_rx_frame_size(ring->xsk_umem);
+#endif /* HAVE_NETDEV_BPF_XSK_POOL */
+#else /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
+		ring->rx_buf_len = ring->xsk_umem->chunk_size_nohr -
+			XDP_PACKET_HEADROOM;
+#endif /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
+	/* For AF_XDP ZC, we disallow packets to span on
+	 * multiple buffers, thus letting us skip that
+	 * handling in the fast-path.
+	 */
+		chain_len = 1;
+#ifndef HAVE_MEM_TYPE_XSK_BUFF_POOL
+		ring->zca.free = i40e_zca_free;
+#endif /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
+		ret = xdp_rxq_info_reg_mem_model(&ring->xdp_rxq,
+#ifdef HAVE_MEM_TYPE_XSK_BUFF_POOL
+						 MEM_TYPE_XSK_BUFF_POOL,
+						 NULL);
+#else
+						 MEM_TYPE_ZERO_COPY,
+						 &ring->zca);
+#endif /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
+		if (ret)
+			return ret;
+
+		dev_info(&vsi->back->pdev->dev,
+#ifdef HAVE_MEM_TYPE_XSK_BUFF_POOL
+			 "Registered XDP mem model MEM_TYPE_XSK_BUFF_POOL on Rx ring %d\n",
+#else
+			 "Registered XDP mem model MEM_TYPE_ZERO_COPY on Rx ring %d\n",
+#endif /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
+			 ring->queue_index);
+	} else {
+#ifdef HAVE_MEM_TYPE_XSK_BUFF_POOL
+		ret = i40e_alloc_rx_bi(ring);
+		if (ret)
+			return ret;
+#endif /* HAVE_MEM_TYPEW_XSK_BUFF_POOL */
+		ring->rx_buf_len = vsi->rx_buf_len;
+		if (ring->vsi->type == I40E_VSI_MAIN) {
+			ret = xdp_rxq_info_reg_mem_model(&ring->xdp_rxq,
+							 MEM_TYPE_PAGE_SHARED,
+							 NULL);
+			if (ret)
+				return ret;
+		}
+	}
+#else
 	ring->rx_buf_len = vsi->rx_buf_len;
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
+
 
 	rx_ctx.dbuff = DIV_ROUND_UP(ring->rx_buf_len,
 				    BIT_ULL(I40E_RXQ_CTX_DBUFF_SHIFT));
@@ -4073,8 +4299,40 @@ static int i40e_configure_rx_ring(struct i40e_ring *ring)
 	ring->tail = hw->hw_addr + I40E_QRX_TAIL(pf_q);
 	writel(0, ring->tail);
 
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+#ifdef HAVE_MEM_TYPE_XSK_BUFF_POOL
+#ifdef HAVE_NETDEV_BPF_XSK_POOL
+	if (ring->xsk_pool) {
+		xsk_buff_set_rxq_info(ring->xsk_pool->umem, &ring->xdp_rxq);
+#else
+	if (ring->xsk_umem) {
+		xsk_buff_set_rxq_info(ring->xsk_umem, &ring->xdp_rxq);
+#endif /* HAVE_NETDEV_BPF_XSK_POOL */
+		ok = i40e_alloc_rx_buffers_zc(ring, I40E_DESC_UNUSED(ring));
+	} else {
+		ok = !i40e_alloc_rx_buffers(ring, I40E_DESC_UNUSED(ring));
+	}
+#else
+	ok = ring->xsk_umem ?
+		i40e_alloc_rx_buffers_zc(ring, I40E_DESC_UNUSED(ring)) :
+		!i40e_alloc_rx_buffers(ring, I40E_DESC_UNUSED(ring));
+#endif /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
+	if (!ok) {
+		/* Log this in case the user has forgotten to give the kernel
+		 * any buffers, even later in the application.
+		 */
+		dev_info(&vsi->back->pdev->dev,
+			 "Failed to allocate some buffers on %sRx ring %d (pf_q %d)\n",
+#ifdef HAVE_NETDEV_BPF_XSK_POOL
+			 ring->xsk_pool ? "AF_XDP ZC enabled " : "",
+#else
+			 ring->xsk_umem ? "UMEM enabled " : "",
+#endif /* HAVE_NETDEV_BPF_XSK_POOL */
+			 ring->queue_index, pf_q);
+	}
+#else
 	i40e_alloc_rx_buffers(ring, I40E_DESC_UNUSED(ring));
-
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
 	return 0;
 }
 
@@ -4865,7 +5123,8 @@ static void i40e_free_misc_vector(struct i40e_pf *pf)
 	wr32(&pf->hw, I40E_PFINT_ICR0_ENA, 0);
 	i40e_flush(&pf->hw);
 
-	if (pf->flags & I40E_FLAG_MSIX_ENABLED && pf->msix_entries) {
+	if (pf->flags & I40E_FLAG_MSIX_ENABLED && pf->msix_entries &&
+	    test_bit(__I40E_MISC_IRQ_REQUESTED, pf->state)) {
 		synchronize_irq(pf->msix_entries[0].vector);
 		free_irq(pf->msix_entries[0].vector, pf);
 		clear_bit(__I40E_MISC_IRQ_REQUESTED, pf->state);
@@ -6618,6 +6877,11 @@ int i40e_vsi_config_tc(struct i40e_vsi *vsi, u8 enabled_tc)
 	/* Update the netdev TC setup */
 	i40e_vsi_config_netdev_tc(vsi, enabled_tc);
 
+#ifdef __TC_MQPRIO_MODE_MAX
+	/* After distroying qdisc, resets all stats of the vsi */
+	if (!vsi->mqprio_qopt.qopt.hw)
+		i40e_vsi_reset_stats(vsi);
+#endif /* __TC_MQPRIO_MODE_MAX */
 out:
 	return ret;
 }
@@ -7637,8 +7901,8 @@ void i40e_down(struct i40e_vsi *vsi)
 	for (i = 0; i < vsi->num_queue_pairs; i++) {
 		i40e_clean_tx_ring(vsi->tx_rings[i]);
 		if (i40e_enabled_xdp_vsi(vsi)) {
-			/* Make sure that in-progress ndo_xdp_xmit
-			 * calls are completed.
+			/* Make sure that in-progress ndo_xdp_xmit and
+			 * ndo_xsk_wakeup calls are completed.
 			 */
 			synchronize_rcu();
 			i40e_clean_tx_ring(vsi->xdp_rings[i]);
@@ -7673,6 +7937,28 @@ int i40e_get_link_speed(struct i40e_vsi *vsi)
 	}
 }
 
+#ifdef __TC_MQPRIO_MODE_MAX
+/**
+ * i40e_bw_bytes_to_mbits - Convert max_tx_rate from bytes to mbits
+ * @vsi: Pointer to vsi structure
+ * @max_tx_rate: max TX rate in bytes to be converted into Mbits
+ *
+ * Helper function to convert units before send to set BW limit
+ **/
+static u64 i40e_bw_bytes_to_mbits(struct i40e_vsi *vsi, u64 max_tx_rate)
+{
+	if (max_tx_rate < I40E_BW_MBIT_PS_DIVISOR) {
+		dev_warn(&vsi->back->pdev->dev,
+			 "Setting max tx rate to minimum usable value of 50Mbps.\n");
+		max_tx_rate = I40E_MINIMUM_BW_MAX_TX_RATE;
+	} else {
+		max_tx_rate /= I40E_BW_MBIT_PS_DIVISOR;
+	}
+
+	return max_tx_rate;
+}
+
+#endif /* __TC_MQPRIO_MODE_MAX */
 /**
  * i40e_set_bw_limit - setup BW limit for Tx traffic based on max_tx_rate
  * @vsi: VSI to be configured
@@ -7694,10 +7980,10 @@ int i40e_set_bw_limit(struct i40e_vsi *vsi, u16 seid, u64 max_tx_rate)
 			max_tx_rate, seid);
 		return -EINVAL;
 	}
-	if (max_tx_rate && max_tx_rate < 50) {
+	if (max_tx_rate && max_tx_rate < I40E_MINIMUM_BW_MAX_TX_RATE) {
 		dev_warn(&pf->pdev->dev,
 			 "Setting max tx rate to minimum usable value of 50Mbps.\n");
-		max_tx_rate = 50;
+		max_tx_rate = I40E_MINIMUM_BW_MAX_TX_RATE;
 	}
 
 	/* Tx rate credits are in values of 50Mbps, 0 is disabled */
@@ -8885,8 +9171,8 @@ config_tc:
 #ifdef __TC_MQPRIO_MODE_MAX
 	if (pf->flags & I40E_FLAG_TC_MQPRIO) {
 		if (vsi->mqprio_qopt.max_rate[0]) {
-			u64 max_tx_rate = vsi->mqprio_qopt.max_rate[0] /
-								(1000000 / 8);
+			u64 max_tx_rate = i40e_bw_bytes_to_mbits(vsi, vsi->mqprio_qopt.max_rate[0]);
+
 			ret = i40e_set_bw_limit(vsi, vsi->seid, max_tx_rate);
 			if (!ret) {
 				dev_dbg(&vsi->back->pdev->dev,
@@ -11351,8 +11637,8 @@ static void i40e_rebuild(struct i40e_pf *pf, bool reinit, bool lock_acquired)
 
 #ifdef __TC_MQPRIO_MODE_MAX
 	if (vsi->mqprio_qopt.max_rate[0]) {
-		u64 max_tx_rate = vsi->mqprio_qopt.max_rate[0] / (1000000 / 8);
-
+		u64 max_tx_rate = i40e_bw_bytes_to_mbits(vsi, vsi->mqprio_qopt.max_rate[0]);
+		
 		ret = i40e_set_bw_limit(vsi, vsi->seid, max_tx_rate);
 		if (!ret)
 			dev_dbg(&vsi->back->pdev->dev,
@@ -11500,6 +11786,9 @@ static void i40e_reset_and_rebuild(struct i40e_pf *pf, bool reinit,
 				   bool lock_acquired)
 {
 	int ret;
+
+	if (test_bit(__I40E_IN_REMOVE, pf->state))
+		return;
 	/* Now we wait for GRST to settle out.
 	 * We don't have to delete the VEBs or VSIs from the hw switch
 	 * because the reset will make them disappear.
@@ -11977,6 +12266,14 @@ int i40e_vsi_mem_alloc(struct i40e_pf *pf, enum i40e_vsi_type type)
 	hash_init(vsi->mac_filter_hash);
 	vsi->irqs_ready = false;
 
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+	if (type == I40E_VSI_MAIN) {
+		vsi->af_xdp_zc_qps = bitmap_zalloc(pf->num_lan_qps, GFP_KERNEL);
+		if (!vsi->af_xdp_zc_qps)
+			goto err_rings;
+	}
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
+
 	ret = i40e_set_num_rings_in_vsi(vsi);
 	if (ret)
 		goto err_rings;
@@ -11998,6 +12295,9 @@ int i40e_vsi_mem_alloc(struct i40e_pf *pf, enum i40e_vsi_type type)
 	goto unlock_pf;
 
 err_rings:
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+	bitmap_free(vsi->af_xdp_zc_qps);
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
 	pf->next_vsi = i - 1;
 	kfree(vsi);
 unlock_pf:
@@ -12061,6 +12361,9 @@ static int i40e_vsi_clear(struct i40e_vsi *vsi)
 	i40e_put_lump(pf->qp_pile, vsi->base_queue, vsi->idx);
 	i40e_put_lump(pf->irq_pile, vsi->base_vector, vsi->idx);
 
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+	bitmap_free(vsi->af_xdp_zc_qps);
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
 	i40e_vsi_free_arrays(vsi, true);
 	i40e_clear_rss_config_user(vsi);
 
@@ -12979,6 +13282,8 @@ int i40e_reconfig_rss_queues(struct i40e_pf *pf, int queue_count)
 
 		vsi->req_queue_pairs = queue_count;
 		i40e_prep_for_reset(pf);
+		if (test_bit(__I40E_IN_REMOVE, pf->state))
+			return pf->alloc_rss_size;
 
 		pf->alloc_rss_size = new_rss_size;
 
@@ -13537,7 +13842,8 @@ static int i40e_set_features(struct net_device *netdev,
 		i40e_vlan_stripping_disable(vsi);
 
 #ifdef NETIF_F_HW_TC
-	if (!(features & NETIF_F_HW_TC) && pf->num_cloud_filters) {
+	if (!(features & NETIF_F_HW_TC) &&
+	    (netdev->features & NETIF_F_HW_TC) && pf->num_cloud_filters) {
 		dev_err(&pf->pdev->dev,
 			"Offloaded tc filters active, can't turn hw_tc_offload off");
 		return -EINVAL;
@@ -14190,22 +14496,54 @@ static int i40e_xdp_setup(struct i40e_vsi *vsi, struct bpf_prog *prog,
 	need_reset = (i40e_enabled_xdp_vsi(vsi) != !!prog);
 
 	if (need_reset) {
-		if (!!prog)
+		if (!!prog) {
+			if (vsi->alloc_queue_pairs > i40e_max_lump_qp(pf)) {
+				NL_SET_ERR_MSG_MOD(extack,
+						   "Not enough resources on the NIC to enable XDP");
+				return -ENOMEM;
+			}
 			dev_info(&pf->pdev->dev,
 				 "Loading XDP program, please note: XDP_REDIRECT action requires the same number of queues on both interfaces\n");
+		}
 		i40e_prep_for_reset(pf);
 	}
 
+	/* VSI shall be deleted in a moment, just return EINVAL */
+	if (test_bit(__I40E_IN_REMOVE, pf->state))
+		return -EINVAL;
+
 	old_prog = xchg(&vsi->xdp_prog, prog);
 
-	if (need_reset)
+	if (need_reset) {
+		if (!prog)
+			/* wait until ndo_xsk_wakeup completes */
+			synchronize_rcu();
 		i40e_reset_and_rebuild(pf, true, true);
+	}
 
 	for (i = 0; i < vsi->num_queue_pairs; i++)
 		WRITE_ONCE(vsi->rx_rings[i]->xdp_prog, vsi->xdp_prog);
 
 	if (old_prog)
 		bpf_prog_put(old_prog);
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+	/* Kick start the NAPI context if there is an AF_XDP socket open
+	 * on that queue id. This so that receiving will start.
+	 */
+	if (need_reset && prog)
+		for (i = 0; i < vsi->num_queue_pairs; i++)
+#ifdef HAVE_NETDEV_BPF_XSK_POOL
+			if (vsi->xdp_rings[i]->xsk_pool)
+#else
+			if (vsi->xdp_rings[i]->xsk_umem)
+#endif /* HAVE_NETDEV_BPF_XSK_POOL */
+#ifdef HAVE_NDO_XSK_WAKEUP
+				(void)i40e_xsk_wakeup(vsi->netdev, i,
+						      XDP_WAKEUP_RX);
+#else
+				(void)i40e_xsk_async_xmit(vsi->netdev, i);
+#endif /* HAVE_NDO_XSK_WAKEUP */
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
 
 	return 0;
 }
@@ -14240,6 +14578,22 @@ static int i40e_xdp(struct net_device *dev,
 		xdp->prog_id = vsi->xdp_prog ? vsi->xdp_prog->aux->id : 0;
 		return 0;
 #endif /* HAVE_XDP_QUERY_PROG */
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+#ifndef NO_XDP_QUERY_XSK_UMEM
+	case XDP_QUERY_XSK_UMEM:
+		return i40e_xsk_umem_query(vsi, &xdp->xsk.umem,
+					   xdp->xsk.queue_id);
+#endif /* NO_XDP_QUERY_UMEM */
+#ifdef HAVE_NETDEV_BPF_XSK_POOL
+	case XDP_SETUP_XSK_POOL:
+		return i40e_xsk_pool_setup(vsi, xdp->xsk.pool,
+					   xdp->xsk.queue_id);
+#else
+	case XDP_SETUP_XSK_UMEM:
+		return i40e_xsk_umem_setup(vsi, xdp->xsk.umem,
+					   xdp->xsk.queue_id);
+#endif /* HAVE_NETDEV_BPF_XSK_POOL */
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
 	default:
 		return -EINVAL;
 	}
@@ -14577,6 +14931,13 @@ static const struct net_device_ops i40e_netdev_ops = {
 	.ndo_xdp_xmit		= i40e_xdp_xmit,
 	.ndo_xdp_flush		= i40e_xdp_flush,
 #endif /* HAVE_NDO_BPF */
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+#ifdef HAVE_NDO_XSK_WAKEUP
+	.ndo_xsk_wakeup         = i40e_xsk_wakeup,
+#else
+	.ndo_xsk_async_xmit     = i40e_xsk_async_xmit,
+#endif /* HAVE_NDO_XSK_WAKEUP */
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
 #endif /* HAVE_XDP_SUPPORT */
 #ifdef HAVE_RHEL6_NET_DEVICE_OPS_EXT
 };
@@ -14771,6 +15132,9 @@ static int i40e_config_netdev(struct i40e_vsi *vsi)
 	netdev->features |= NETIF_F_GRO;
 #endif
 #endif
+#ifdef NETIF_F_HW_TC
+	netdev->features &= ~NETIF_F_HW_TC;
+#endif /*NETIF_F_HW_TC*/
 
 	if (vsi->type == I40E_VSI_MAIN) {
 		SET_NETDEV_DEV(netdev, &pf->pdev->dev);
@@ -15434,6 +15798,25 @@ err_vsi:
 }
 
 /**
+ * i40e_netif_set_realnum_tx_rx_queues - Update number of tx/rx queues
+ * @vsi: vsi structure
+ *
+ * This update netdev's number of tx/rx queues
+ *
+ * Returns status of setting tx/rx queues
+ **/
+static int i40e_netif_set_realnum_tx_rx_queues(struct i40e_vsi *vsi) {
+
+	netif_set_real_num_rx_queues(
+		vsi->netdev,
+		vsi->num_queue_pairs);
+
+	return netif_set_real_num_tx_queues(
+		vsi->netdev,
+		vsi->num_queue_pairs);
+}
+
+/**
  * i40e_vsi_setup - Set up a VSI by a given type
  * @pf: board private structure
  * @type: VSI type
@@ -15563,6 +15946,9 @@ struct i40e_vsi *i40e_vsi_setup(struct i40e_pf *pf, u8 type,
 		ret = i40e_config_netdev(vsi);
 		if (ret)
 			goto err_netdev;
+		ret = i40e_netif_set_realnum_tx_rx_queues(vsi);
+		if (ret)
+			goto err_netdev;
 		ret = register_netdev(vsi->netdev);
 		if (ret)
 			goto err_netdev;
@@ -15576,8 +15962,7 @@ struct i40e_vsi *i40e_vsi_setup(struct i40e_pf *pf, u8 type,
 		i40e_dcbnl_setup(vsi);
 #endif /* HAVE_DCBNL_IEEE */
 #endif /* CONFIG_DCB */
-		/* fall through */
-
+		fallthrough;
 	case I40E_VSI_FDIR:
 		/* set up vectors and rings if needed */
 		ret = i40e_vsi_setup_vectors(vsi);
@@ -16977,10 +17362,6 @@ static int i40e_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	}
 #endif /* CONFIG_DCB */
 
-#ifdef NETIF_F_HW_TC
-	pf->flags |= I40E_FLAG_CLS_FLOWER;
-#endif /* NET_F_HW_TC */
-
 	/* set up periodic task facility */
 	timer_setup(&pf->service_timer, i40e_service_timer, 0);
 	pf->service_timer_period = HZ;
@@ -17394,8 +17775,13 @@ static void i40e_remove(struct pci_dev *pdev)
 	i40e_write_rx_ctl(hw, I40E_PFQF_HENA(1), 0);
 #endif /* HAVE_PTP_1588_CLOCK */
 
-	while (test_bit(__I40E_RESET_RECOVERY_PENDING, pf->state))
+	/* Grab __I40E_RESET_RECOVERY_PENDING and set __I40E_IN_REMOVE
+	 * flags, once they are set, i40e_rebuild should not be called as
+	 * i40e_prep_for_reset always returns early.
+	 */
+	while (test_and_set_bit(__I40E_RESET_RECOVERY_PENDING, pf->state))
 		usleep_range(1000, 2000);
+	set_bit(__I40E_IN_REMOVE, pf->state);
 
 	if (pf->flags & I40E_FLAG_SRIOV_ENABLED) {
 		set_bit(__I40E_VF_RESETS_DISABLED, pf->state);
@@ -17617,6 +18003,9 @@ static void i40e_pci_error_reset_prepare(struct pci_dev *pdev)
 static void i40e_pci_error_reset_done(struct pci_dev *pdev)
 {
 	struct i40e_pf *pf = pci_get_drvdata(pdev);
+
+	if (test_bit(__I40E_IN_REMOVE, pf->state))
+		return;
 
 	i40e_reset_and_rebuild(pf, false, false);
 

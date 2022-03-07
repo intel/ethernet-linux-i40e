@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2021 Intel Corporation. */
+/* Copyright(c) 2013 - 2022 Intel Corporation. */
 
 #ifndef _KCOMPAT_STD_DEFS_H_
 #define _KCOMPAT_STD_DEFS_H_
@@ -44,17 +44,26 @@
 #endif /* 3,19,0 */
 
 /*****************************************************************************/
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(4,3,0))
+#define NEED_DEFINE_STATIC_KEY_FALSE
+#define NEED_STATIC_BRANCH
+#else /* >= 4,3,0 */
+#define NEED_DECLARE_STATIC_KEY_FALSE
+#endif /* 4,3,0 */
+
+/*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4,8,0))
 #else /* >= 4,8,0 */
 #define HAVE_TCF_EXTS_TO_LIST
+#define HAVE_PCI_ALLOC_IRQ
 #endif /* 4,8,0 */
 
 /*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4,9,0))
-#define NEED_DECLARE_STATIC_KEY_FALSE
 #else /* >= 4,9,0 */
 #define HAVE_KTHREAD_DELAYED_API
 #define HAVE_NDO_OFFLOAD_STATS
+#undef NEED_DECLARE_STATIC_KEY_FALSE
 #endif /* 4,9,0 */
 
 /*****************************************************************************/
@@ -66,8 +75,10 @@
 /*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(4,15,0))
 #define NEED_TC_SETUP_QDISC_MQPRIO
+#define NEED_NETDEV_XDP_STRUCT
 #else /* >= 4,15,0 */
 #define HAVE_TC_CB_AND_SETUP_QDISC_MQPRIO
+#define HAVE_NDO_BPF
 #endif /* 4,15,0 */
 
 /*****************************************************************************/
@@ -112,6 +123,7 @@
 #define HAVE_ETHTOOL_200G_BITS
 #define HAVE_ETHTOOL_NEW_100G_BITS
 #define HAVE_DEVLINK_PARAMS_PUBLISH
+#define HAVE_DEVLINK_HEALTH
 #endif /* 5.1.0 */
 
 /*****************************************************************************/
@@ -147,10 +159,17 @@
 #endif /* 5.4.0 */
 
 /*****************************************************************************/
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5,5,0))
+#else /* >= 5.5.0 */
+#define HAVE_DEVLINK_HEALTH_OPS_EXTACK
+#endif /* 5.5.0 */
+
+/*****************************************************************************/
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5,7,0))
 #define NEED_DEVLINK_REGION_CREATE_OPS
 #define NEED_CPU_LATENCY_QOS_RENAME
 #else /* >= 5.7.0 */
+#define HAVE_DEVLINK_HEALTH_DEFAULT_AUTO_RECOVER
 #endif /* 5.7.0 */
 
 /*****************************************************************************/
@@ -213,5 +232,12 @@
 #define HAVE_ETHTOOL_COALESCE_EXTACK
 #define HAVE_NDO_ETH_IOCTL
 #endif /* 5.15.0 */
+
+/*****************************************************************************/
+#if (LINUX_VERSION_CODE < KERNEL_VERSION(5,16,0))
+#else /* >= 5.16.0 */
+#define HAVE_DEVLINK_SET_FEATURES
+#define HAVE_DEVLINK_NOTIFY_REGISTER
+#endif /* 5.16.0 */
 
 #endif /* _KCOMPAT_STD_DEFS_H_ */

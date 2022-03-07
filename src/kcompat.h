@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2021 Intel Corporation. */
+/* Copyright(c) 2013 - 2022 Intel Corporation. */
 
 #ifndef _KCOMPAT_H_
 #define _KCOMPAT_H_
@@ -6636,7 +6636,6 @@ void _kc_ethtool_intersect_link_masks(struct ethtool_link_ksettings *dst,
 				      struct ethtool_link_ksettings *src);
 #define ethtool_intersect_link_masks _kc_ethtool_intersect_link_masks
 #else /* >= 4.15 */
-#define HAVE_NDO_BPF
 #define HAVE_XDP_BUFF_DATA_META
 #define HAVE_TC_CB_AND_SETUP_QDISC_MQPRIO
 #define HAVE_TCF_BLOCK

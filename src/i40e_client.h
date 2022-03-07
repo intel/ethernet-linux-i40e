@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2021 Intel Corporation. */
+/* Copyright(c) 2013 - 2022 Intel Corporation. */
 
 #ifndef _I40E_CLIENT_H_
 #define _I40E_CLIENT_H_
@@ -13,8 +13,10 @@
 #define I40E_CLIENT_STR_LENGTH 10
 /* Client interface version should be updated anytime there is a change in the
  * existing APIs or data structures.
+ * Note that in-tree i40e has major version of 0 and the structures are not
+ * identical. For example struct i40e_info and i40e_ops are different.
  */
-#define I40E_CLIENT_VERSION_MAJOR 0
+#define I40E_CLIENT_VERSION_MAJOR 1
 #define I40E_CLIENT_VERSION_MINOR 01
 #define I40E_CLIENT_VERSION_BUILD 00
 #define I40E_CLIENT_VERSION_STR     \

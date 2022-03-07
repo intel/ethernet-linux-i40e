@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2013 - 2021 Intel Corporation. */
+/* Copyright(c) 2013 - 2022 Intel Corporation. */
 
 #include "i40e_type.h"
 #include "i40e_adminq.h"
@@ -153,8 +153,8 @@ const char *i40e_stat_str(struct i40e_hw *hw, i40e_status stat_err)
 		return "I40E_ERR_INVALID_MAC_ADDR";
 	case I40E_ERR_DEVICE_NOT_SUPPORTED:
 		return "I40E_ERR_DEVICE_NOT_SUPPORTED";
-	case I40E_ERR_MASTER_REQUESTS_PENDING:
-		return "I40E_ERR_MASTER_REQUESTS_PENDING";
+	case I40E_ERR_PRIMARY_REQUESTS_PENDING:
+		return "I40E_ERR_PRIMARY_REQUESTS_PENDING";
 	case I40E_ERR_INVALID_LINK_SETTINGS:
 		return "I40E_ERR_INVALID_LINK_SETTINGS";
 	case I40E_ERR_AUTONEG_NOT_COMPLETE:
@@ -1487,6 +1487,35 @@ u32 i40e_led_get(struct i40e_hw *hw)
 	}
 
 	return mode;
+}
+
+/**
+ * i40e_led_get_blink - return current LED blink setting
+ * @hw: pointer to the hw struct
+ *
+ * The value returned is the LED_BLINK bit as defined in the
+ * GPIO register definitions (0 = no blink, 1 = do blink).
+ **/
+bool i40e_led_get_blink(struct i40e_hw *hw)
+{
+	bool blink = 0;
+	int i;
+
+	/* as per the documentation GPIO 22-29 are the LED
+	 * GPIO pins named LED0..LED7
+	 */
+	for (i = I40E_LED0; i <= I40E_GLGEN_GPIO_CTL_MAX_INDEX; i++) {
+		u32 gpio_val = i40e_led_is_mine(hw, i);
+
+		if (!gpio_val)
+			continue;
+
+		blink = (gpio_val & I40E_GLGEN_GPIO_CTL_LED_BLINK_MASK) >>
+			I40E_GLGEN_GPIO_CTL_LED_BLINK_SHIFT;
+		break;
+	}
+
+	return blink;
 }
 
 /**
@@ -7001,7 +7030,8 @@ i40e_validate_profile(struct i40e_hw *hw, struct i40e_profile_segment *profile,
 	u32 sec_off;
 	u32 i;
 
-	if (track_id == I40E_DDP_TRACKID_INVALID) {
+	if (track_id == I40E_DDP_TRACKID_INVALID ||
+	    track_id == I40E_DDP_TRACKID_RDONLY) {
 		i40e_debug(hw, I40E_DEBUG_PACKAGE, "Invalid track_id\n");
 		return I40E_NOT_SUPPORTED;
 	}
