@@ -282,10 +282,15 @@ static inline unsigned int i40e_txd_use_count(unsigned int size)
 #endif /* HAVE_PTP_1588_CLOCK */
 #define I40E_TX_FLAGS_FD_SB		BIT(9)
 #define I40E_TX_FLAGS_TUNNEL		BIT(10)
+#define I40E_TX_FLAGS_HW_OUTER_VLAN	BIT(11)
 #define I40E_TX_FLAGS_VLAN_MASK		0xffff0000
 #define I40E_TX_FLAGS_VLAN_PRIO_MASK	0xe0000000
 #define I40E_TX_FLAGS_VLAN_PRIO_SHIFT	29
 #define I40E_TX_FLAGS_VLAN_SHIFT	16
+
+#define I40E_TX_FLAGS_VLAN		(I40E_TX_FLAGS_HW_OUTER_VLAN | \
+					 I40E_TX_FLAGS_HW_VLAN | \
+					 I40E_TX_FLAGS_SW_VLAN)
 
 struct i40e_tx_buffer {
 	struct i40e_tx_desc *next_to_watch;
@@ -425,6 +430,7 @@ struct i40e_ring {
 #define I40E_TXR_FLAGS_WB_ON_ITR		BIT(0)
 #define I40E_RXR_FLAGS_BUILD_SKB_ENABLED	BIT(1)
 #define I40E_TXR_FLAGS_XDP			BIT(2)
+#define I40E_TXR_FLAGS_L2TAG2			BIT(3)
 
 	/* stats structs */
 	struct i40e_queue_stats	stats;
@@ -470,6 +476,9 @@ struct xdp_umem *xsk_umem;
 #ifndef HAVE_MEM_TYPE_XSK_BUFF_POOL
 struct zero_copy_allocator zca; /* ZC allocator anchor */
 #endif /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
+#ifdef HAVE_XSK_BATCHED_DESCRIPTOR_INTERFACES
+	struct xdp_desc *xsk_descs;      /* For storing descriptors in the AF_XDP ZC path */
+#endif /* HAVE_XSK_BATCHED_DESCRIPTOR_INTERFACES */
 #endif /* HAVE_AF_XD_ZC_SUPPORT */
 } ____cacheline_internodealigned_in_smp;
 

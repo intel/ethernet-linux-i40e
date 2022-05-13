@@ -174,3 +174,11 @@
 #endif /* 5.3.18-38 */
 
 #endif /* _KCOMPAT_SLES_DEFS_H_ */
+
+/*****************************************************************************/
+#if (SLE_KERNEL_CODE < SLE_KERNEL_VERSION(5,14,21,9))
+#else /* >= 5.14.21-150400.9 */
+#undef NEED_DEVLINK_ALLOC_SETS_DEV
+#define HAVE_ETHTOOL_COALESCE_EXTACK
+#endif /* 5.14.21-150400.9 */
+

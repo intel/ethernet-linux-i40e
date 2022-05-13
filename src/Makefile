@@ -102,6 +102,15 @@ manfile:
 clean:
 	@+$(call kernelbuild,clean)
 	@-rm -rf *.${MANSECTION}.gz *.ko
+sign:
+	@echo "Signing driver..."
+	@$(call info_signed_modules)
+	@$(call sign_driver)
+
+sign:
+	@echo "Signing driver..."
+	@$(call info_signed_modules)
+	@$(call sign_driver)
 
 mandocs_install: manfile
 	@echo "Copying manpages..."

@@ -51,8 +51,8 @@ static const char i40e_driver_string[] =
 #define DRV_VERSION_DESC ""
 
 #define DRV_VERSION_MAJOR 2
-#define DRV_VERSION_MINOR 18
-#define DRV_VERSION_BUILD 9
+#define DRV_VERSION_MINOR 19
+#define DRV_VERSION_BUILD 3
 #define DRV_VERSION_SUBBUILD 0
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
@@ -103,6 +103,7 @@ static const struct pci_device_id i40e_pci_tbl[] = {
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_QSFP_A), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_QSFP_B), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_QSFP_C), 0},
+	{PCI_VDEVICE(INTEL, I40E_DEV_ID_1G_BASE_T_BC), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_5G_BASE_T_BC), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_10G_BASE_T), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_10G_BASE_T4), 0},
@@ -119,6 +120,7 @@ static const struct pci_device_id i40e_pci_tbl[] = {
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_1G_BASE_T_X722), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_10G_BASE_T_X722), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_SFP_I_X722), 0},
+	{PCI_VDEVICE(INTEL, I40E_DEV_ID_SFP_X722_A), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_25G_B), 0},
 	{PCI_VDEVICE(INTEL, I40E_DEV_ID_25G_SFP28), 0},
 	/* required last entry */
@@ -645,6 +647,7 @@ void i40e_pf_reset_stats(struct i40e_pf *pf)
 	pf->hw_csum_rx_error = 0;
 #ifdef I40E_ADD_PROBES
 	pf->tcp_segs = 0;
+	pf->udp_segs = 0;
 	pf->tx_tcp_cso = 0;
 	pf->tx_udp_cso = 0;
 	pf->tx_sctp_cso = 0;
@@ -1570,8 +1573,8 @@ static s16 i40e_get_vf_new_vlan(struct i40e_vsi *vsi,
 	if (new_mac)
 		f = new_mac->f;
 
-	is_any = (trusted ||
-		  !(pf->flags & I40E_FLAG_VF_VLAN_PRUNING));
+	is_any = ((!vlan_filters) &&
+		  (!(pf->flags & I40E_FLAG_VF_VLAN_PRUNING) || trusted));
 
 	if (!(*pvid) && ((vlan_filters && f->vlan == I40E_VLAN_ANY) ||
 	    (!is_any && !vlan_filters && f->vlan == I40E_VLAN_ANY) ||
@@ -1761,7 +1764,7 @@ struct i40e_mac_filter *i40e_add_filter(struct i40e_vsi *vsi,
 		/* Update the boolean indicating if we need to function in
 		 * vlan mode.
 		 */
-		if (vlan >= 0)
+		if (vlan > 0)
 			vsi->has_vlan_filter = true;
 
 		ether_addr_copy(f->macaddr, macaddr);
@@ -1934,7 +1937,7 @@ static int i40e_set_mac(struct net_device *netdev, void *p)
 
 	spin_lock_bh(&vsi->mac_filter_hash_lock);
 	i40e_del_mac_filter(vsi, netdev->dev_addr);
-	ether_addr_copy(netdev->dev_addr, addr->sa_data);
+	eth_hw_addr_set(netdev, addr->sa_data);
 	i40e_add_mac_filter(vsi, netdev->dev_addr);
 	spin_unlock_bh(&vsi->mac_filter_hash_lock);
 
@@ -2450,8 +2453,9 @@ i40e_update_filter_state(int count,
 			add_head->state = I40E_FILTER_ACTIVE;
 			retval++;
 		}
-
-		add_head = i40e_next_filter(add_head);
+		do {
+			add_head = i40e_next_filter(add_head);
+		} while (add_head && add_head->f->state != I40E_FILTER_NEW);
 		if (!add_head)
 			break;
 	}
@@ -4584,25 +4588,26 @@ int i40e_add_del_cloud_filter_ex(struct i40e_pf *pf,
 {
 	struct i40e_aqc_cloud_filters_element_bb cld_filter;
 	int ret;
-	if (filter->queue_id == I40E_CLOUD_FILTER_ANY_QUEUE ||
-	    !i40e_is_l4mode_enabled()) {
-		struct i40e_vsi *vsi = pf->vsi[pf->lan_vsi];
-
-		return i40e_add_del_cloud_filter(vsi, filter, add);
-	}
 
 	/* Make sure port is specified, otherwise bail out, for channel
 	 * specific cloud filter needs 'L4 port' to be non-zero
 	 */
-	if (!filter->dst_port)
-		return -EINVAL;
+	if (!filter->dst_port || !i40e_is_l4mode_enabled()) {
+		struct i40e_vsi *vsi = pf->vsi[pf->lan_vsi];
+
+		return i40e_add_del_cloud_filter(vsi, filter, add);
+	}
 
 	memset(&cld_filter, 0, sizeof(cld_filter));
 
 	/* Switch is in Mode 1, so this is an L4 port filter */
 	cld_filter.element.flags =
 	cpu_to_le16(I40E_AQC_ADD_CLOUD_FILTER_IP_PORT);
-
+	if (filter->queue_id != I40E_CLOUD_FILTER_ANY_QUEUE) {
+		cld_filter.element.flags |=
+		cpu_to_le16(I40E_AQC_ADD_CLOUD_FLAGS_TO_QUEUE);
+		cld_filter.element.queue_number = filter->queue_id;
+	}
 	/* Now copy L4 port in Byte 6..7 in general fields */
 	cld_filter.general_fields[I40E_AQC_ADD_CLOUD_FV_FLU_0X16_WORD0] =
 	be16_to_cpu(filter->dst_port);
@@ -6352,7 +6357,7 @@ u8 i40e_pf_get_num_tc(struct i40e_pf *pf)
 	struct i40e_dcbx_config *dcbcfg = &hw->local_dcbx_config;
 
 #ifdef __TC_MQPRIO_MODE_MAX
-	if (pf->flags & I40E_FLAG_TC_MQPRIO)
+	if (i40e_is_tc_mqprio_enabled(pf))
 		return pf->vsi[pf->lan_vsi]->mqprio_qopt.qopt.num_tc;
 #endif
 
@@ -6386,7 +6391,7 @@ u8 i40e_pf_get_num_tc(struct i40e_pf *pf)
 static u8 i40e_pf_get_tc_map(struct i40e_pf *pf)
 {
 #ifdef __TC_MQPRIO_MODE_MAX
-	if (pf->flags & I40E_FLAG_TC_MQPRIO)
+	if (i40e_is_tc_mqprio_enabled(pf))
 		return i40e_mqprio_get_enabled_tc(pf);
 #endif
 
@@ -6486,10 +6491,9 @@ static int i40e_vsi_configure_bw_alloc(struct i40e_vsi *vsi, u8 enabled_tc,
 
 #ifdef __TC_MQPRIO_MODE_MAX
 	/* There is no need to reset BW when mqprio mode is on.  */
-	if (pf->flags & I40E_FLAG_TC_MQPRIO)
+	if (i40e_is_tc_mqprio_enabled(pf))
 		return 0;
-	if (!vsi->mqprio_qopt.qopt.hw &&
-	    !(pf->flags & I40E_FLAG_DCB_ENABLED)) {
+	if (!vsi->mqprio_qopt.qopt.hw && !(pf->flags & I40E_FLAG_DCB_ENABLED)) {
 		ret = i40e_set_bw_limit(vsi, vsi->seid, 0);
 		if (ret)
 			dev_info(&pf->pdev->dev,
@@ -6651,7 +6655,7 @@ static void i40e_vsi_config_netdev_tc(struct i40e_vsi *vsi, u8 enabled_tc)
 					vsi->tc_config.tc_info[i].qoffset);
 	}
 
-	if (pf->flags & I40E_FLAG_TC_MQPRIO)
+	if (i40e_is_tc_mqprio_enabled(pf))
 		return;
 
 	/* Assign UP2TC map for the VSI */
@@ -6818,7 +6822,7 @@ int i40e_vsi_config_tc(struct i40e_vsi *vsi, u8 enabled_tc)
 	ctxt.info = vsi->info;
 
 #ifdef __TC_MQPRIO_MODE_MAX
-	if (vsi->back->flags & I40E_FLAG_TC_MQPRIO) {
+	if (i40e_is_tc_mqprio_enabled(pf)) {
 		ret = i40e_vsi_setup_queue_map_mqprio(vsi, &ctxt, enabled_tc);
 		if (ret)
 			goto out;
@@ -8742,7 +8746,7 @@ int i40e_create_queue_channel(struct i40e_vsi *vsi,
 		pf->flags |= I40E_FLAG_VEB_MODE_ENABLED;
 
 		if (vsi->type == I40E_VSI_MAIN) {
-			if (pf->flags & I40E_FLAG_TC_MQPRIO)
+			if (i40e_is_tc_mqprio_enabled(pf))
 				i40e_do_reset(pf, I40E_PF_RESET_FLAG, true);
 			else
 				i40e_do_reset_safe(pf, I40E_PF_RESET_FLAG);
@@ -8847,6 +8851,9 @@ static int i40e_configure_queue_channels(struct i40e_vsi *vsi)
 			vsi->tc_seid_map[i] = ch->seid;
 		}
 	}
+
+	/* reset to reconfigure TX queue contexts */
+	i40e_do_reset(vsi->back, I40E_PF_RESET_FLAG, true);
 	return ret;
 
 err_free:
@@ -9137,7 +9144,7 @@ config_tc:
 	i40e_quiesce_vsi(vsi);
 
 #ifdef __TC_MQPRIO_MODE_MAX
-	if (!hw && !(pf->flags & I40E_FLAG_TC_MQPRIO))
+	if (!hw && !i40e_is_tc_mqprio_enabled(pf))
 		i40e_remove_queue_channels(vsi);
 #endif
 
@@ -9169,7 +9176,7 @@ config_tc:
 		 vsi->seid, vsi->tc_config.tc_info[0].qcount);
 
 #ifdef __TC_MQPRIO_MODE_MAX
-	if (pf->flags & I40E_FLAG_TC_MQPRIO) {
+	if (i40e_is_tc_mqprio_enabled(pf)) {
 		if (vsi->mqprio_qopt.max_rate[0]) {
 			u64 max_tx_rate = i40e_bw_bytes_to_mbits(vsi, vsi->mqprio_qopt.max_rate[0]);
 
@@ -9478,6 +9485,11 @@ static int i40e_configure_clsflower(struct i40e_vsi *vsi,
 
 	if (tc < 0) {
 		dev_err(&vsi->back->pdev->dev, "Invalid traffic class\n");
+		return -EINVAL;
+	}
+
+	if (!tc) {
+		dev_err(&pf->pdev->dev, "Unable to add filter because of invalid destination");
 		return -EINVAL;
 	}
 
@@ -11550,7 +11562,7 @@ static void i40e_rebuild(struct i40e_pf *pf, bool reinit, bool lock_acquired)
 	/* Enable FW to write a default DCB config on link-up
 	 * unless I40E_FLAG_TC_MQPRIO is enabled
 	 */
-	if (pf->flags & I40E_FLAG_TC_MQPRIO) {
+	if (i40e_is_tc_mqprio_enabled(pf)) {
 		i40e_aq_set_dcb_parameters(hw, false, NULL);
 	} else {
 		i40e_aq_set_dcb_parameters(hw, true, NULL);
@@ -12427,6 +12439,8 @@ static int i40e_alloc_rings(struct i40e_vsi *vsi)
 
 		if (vsi->back->hw_features & I40E_HW_WB_ON_ITR_CAPABLE)
 			ring->flags = I40E_TXR_FLAGS_WB_ON_ITR;
+		if (i40e_is_double_vlan(&pf->hw))
+			ring->flags |= I40E_TXR_FLAGS_L2TAG2;
 		ring->itr_setting = pf->tx_itr_default;
 		vsi->tx_rings[i] = ring++;
 
@@ -14477,7 +14491,7 @@ int i40e_queue_pair_enable(struct i40e_vsi *vsi, int queue_pair)
 static int i40e_xdp_setup(struct i40e_vsi *vsi, struct bpf_prog *prog,
 			  struct netlink_ext_ack *extack)
 {
-	int frame_size = vsi->netdev->mtu + ETH_HLEN + ETH_FCS_LEN + VLAN_HLEN;
+	int frame_size = vsi->netdev->mtu + I40E_PACKET_HDR_PAD;
 	struct i40e_pf *pf = vsi->back;
 	struct bpf_prog *old_prog;
 	bool need_reset;
@@ -15059,6 +15073,9 @@ static int i40e_config_netdev(struct i40e_vsi *vsi)
 			  NETIF_F_GSO_UDP_TUNNEL_CSUM	|
 #endif /* HAVE_ENCAP_TSO_OFFLOAD */
 			  NETIF_F_SCTP_CRC		|
+#ifdef NETIF_F_GSO_UDP_L4
+			  NETIF_F_GSO_UDP_L4		|
+#endif
 #ifdef NETIF_F_RXHASH
 			  NETIF_F_RXHASH		|
 #endif
@@ -15187,7 +15204,7 @@ static int i40e_config_netdev(struct i40e_vsi *vsi)
 	i40e_add_mac_filter(vsi, broadcast);
 	spin_unlock_bh(&vsi->mac_filter_hash_lock);
 
-	ether_addr_copy(netdev->dev_addr, mac_addr);
+	eth_hw_addr_set(netdev, mac_addr);
 #ifdef ETHTOOL_GPERMADDR
 	ether_addr_copy(netdev->perm_addr, mac_addr);
 #endif

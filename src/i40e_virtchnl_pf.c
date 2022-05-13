@@ -711,7 +711,6 @@ err_out:
 }
 
 #ifdef HAVE_NDO_SET_VF_LINK_STATE
-
 /**
  * i40e_set_spoof_settings
  * @vsi: VF VSI to configure
@@ -1279,7 +1278,7 @@ static int i40e_restore_vfd_config(struct i40e_vf *vf, struct i40e_vsi *vsi)
 		goto err_out;
 	}
 
-	if (!vf->vlan_stripping) {
+	if (!vf->vlan_stripping && !i40e_get_current_vid(vsi)) {
 		ret = i40e_configure_vf_vlan_stripping(vsi, vf->vf_id, false);
 		if (ret) {
 			vf->vlan_stripping = true;
@@ -2747,19 +2746,17 @@ sriov_configure_out:
 /***********************virtual channel routines******************/
 
 /**
- * i40e_vc_send_msg_to_vf_ex
+ * i40e_vc_send_msg_to_vf
  * @vf: pointer to the VF info
  * @v_opcode: virtual channel opcode
  * @v_retval: virtual channel return value
  * @msg: pointer to the msg buffer
  * @msglen: msg length
- * @is_quiet: true for not printing unsuccessful return values, false otherwise
  *
  * send msg to VF
  **/
-static int i40e_vc_send_msg_to_vf_ex(struct i40e_vf *vf, u32 v_opcode,
-				     u32 v_retval, u8 *msg, u16 msglen,
-				     bool is_quiet)
+static int i40e_vc_send_msg_to_vf(struct i40e_vf *vf, u32 v_opcode,
+				  u32 v_retval, u8 *msg, u16 msglen)
 {
 	struct i40e_pf *pf;
 	struct i40e_hw *hw;
@@ -2774,25 +2771,6 @@ static int i40e_vc_send_msg_to_vf_ex(struct i40e_vf *vf, u32 v_opcode,
 	hw = &pf->hw;
 	abs_vf_id = vf->vf_id + hw->func_caps.vf_base_id;
 
-	/* single place to detect unsuccessful return values */
-	if (v_retval && !is_quiet) {
-		vf->num_invalid_msgs++;
-		dev_info(&pf->pdev->dev, "VF %d failed opcode %d, retval: %d\n",
-			 vf->vf_id, v_opcode, v_retval);
-		if (vf->num_invalid_msgs >
-		    I40E_DEFAULT_NUM_INVALID_MSGS_ALLOWED) {
-			dev_err(&pf->pdev->dev,
-				"Number of invalid messages exceeded for VF %d\n",
-				vf->vf_id);
-			dev_err(&pf->pdev->dev, "Use PF Control I/F to enable the VF\n");
-			set_bit(I40E_VF_STATE_DISABLED, &vf->vf_states);
-		}
-	} else {
-		vf->num_valid_msgs++;
-		/* reset the invalid counter, if a valid message is received. */
-		vf->num_invalid_msgs = 0;
-	}
-
 	aq_ret = i40e_aq_send_msg_to_vf(hw, abs_vf_id, v_opcode, v_retval,
 					msg, msglen, NULL);
 	if (aq_ret) {
@@ -2803,23 +2781,6 @@ static int i40e_vc_send_msg_to_vf_ex(struct i40e_vf *vf, u32 v_opcode,
 	}
 
 	return 0;
-}
-
-/**
- * i40e_vc_send_msg_to_vf
- * @vf: pointer to the VF info
- * @v_opcode: virtual channel opcode
- * @v_retval: virtual channel return value
- * @msg: pointer to the msg buffer
- * @msglen: msg length
- *
- * send msg to VF
- **/
-static int i40e_vc_send_msg_to_vf(struct i40e_vf *vf, u32 v_opcode,
-				  u32 v_retval, u8 *msg, u16 msglen)
-{
-	return i40e_vc_send_msg_to_vf_ex(vf, v_opcode, v_retval,
-					 msg, msglen, false);
 }
 
 /**
@@ -2946,12 +2907,21 @@ static int i40e_vc_get_vf_resources_msg(struct i40e_vf *vf, u8 *msg)
 				  VIRTCHNL_VF_OFFLOAD_RSS_REG |
 				  VIRTCHNL_VF_OFFLOAD_VLAN;
 
-	vfres->vf_cap_flags = VIRTCHNL_VF_OFFLOAD_L2 | VIRTCHNL_VF_OFFLOAD_VLAN;
+	vfres->vf_cap_flags = VIRTCHNL_VF_OFFLOAD_L2;
 #ifdef VIRTCHNL_VF_CAP_ADV_LINK_SPEED
 	vfres->vf_cap_flags |= VIRTCHNL_VF_CAP_ADV_LINK_SPEED;
 #endif /* VIRTCHNL_VF_CAP_ADV_LINK_SPEED */
 
 	vsi = pf->vsi[vf->lan_vsi_idx];
+
+	if (vf->driver_caps & VIRTCHNL_VF_OFFLOAD_VLAN_V2) {
+		if (i40e_is_double_vlan(&pf->hw))
+			vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_VLAN_V2;
+		else
+			vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_VLAN;
+	} else if (vf->driver_caps & VIRTCHNL_VF_OFFLOAD_VLAN) {
+		vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_VLAN;
+	}
 
 	if (vf->driver_caps & VIRTCHNL_VF_OFFLOAD_RSS_PF) {
 		vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_RSS_PF;
@@ -3000,6 +2970,9 @@ static int i40e_vc_get_vf_resources_msg(struct i40e_vf *vf, u8 *msg)
 		vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_ADQ;
 #endif /* __TC_MQPRIO_MODE_MAX */
 
+	if (vf->driver_caps & VIRTCHNL_VF_OFFLOAD_USO)
+		vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_USO;
+
 	vfres->num_vsis = num_vsis;
 	vfres->num_queue_pairs = vf->num_queue_pairs;
 	vfres->max_vectors = pf->hw.func_caps.num_msix_vectors_vf;
@@ -3013,10 +2986,10 @@ static int i40e_vc_get_vf_resources_msg(struct i40e_vf *vf, u8 *msg)
 		/* VFs only use TC 0 */
 		vfres->vsi_res[0].qset_handle
 					  = LE16_TO_CPU(vsi->info.qs_handle[0]);
-		if (!(vf->driver_caps & VIRTCHNL_VF_OFFLOAD_USO || 
-		    vf->pf_set_mac)) {
+		if (!(vf->driver_caps & VIRTCHNL_VF_OFFLOAD_USO ||
+		      vf->pf_set_mac)) {
 			i40e_del_mac_filter(vsi, vf->default_lan_addr.addr);
-			memset(vf->default_lan_addr.addr, 0, 
+			memset(vf->default_lan_addr.addr, 0,
 			       sizeof(vf->default_lan_addr.addr));
 		}
 		ether_addr_copy(vfres->vsi_res[0].default_mac_addr,
@@ -3831,7 +3804,6 @@ error_param:
  * i40e_check_vf_permission
  * @vf: pointer to the VF info
  * @al: MAC address list from virtchnl
- * @is_quiet: set true for printing msg without opcode info, false otherwise
  *
  * Check that the given list of MAC addresses is allowed. Will return -EPERM
  * if any address in the list is not valid. Checks the following conditions:
@@ -3846,8 +3818,7 @@ error_param:
  * addresses might not be accurate.
  **/
 static inline int i40e_check_vf_permission(struct i40e_vf *vf,
-					   struct virtchnl_ether_addr_list *al,
-					   bool *is_quiet)
+					   struct virtchnl_ether_addr_list *al)
 {
 	struct i40e_pf *pf = vf->pf;
 	struct i40e_hw *hw = &pf->hw;
@@ -3855,10 +3826,6 @@ static inline int i40e_check_vf_permission(struct i40e_vf *vf,
 	int mac2add_cnt = 0;
 	int i;
 
-	if (!is_quiet)
-		return -EINVAL;
-
-	*is_quiet = false;
 	for (i = 0; i < al->num_elements; i++) {
 		struct i40e_mac_filter *f;
 		u8 *addr = al->list[i].addr;
@@ -3881,7 +3848,6 @@ static inline int i40e_check_vf_permission(struct i40e_vf *vf,
 		    !ether_addr_equal(addr, vf->default_lan_addr.addr)) {
 			dev_err(&pf->pdev->dev,
 				"VF attempting to override administratively set MAC address\n");
-			*is_quiet = true;
 			return -EPERM;
 		}
 
@@ -4041,12 +4007,11 @@ i40e_update_vf_mac_addr(struct i40e_vf *vf,
 /**
  * i40e_add_vf_mac_filters
  * @vf: pointer to the VF info
- * @is_quiet: set true for printing msg without opcode info, false otherwise
  * @al: pointer to the address list of MACs to add
  *
  * add guest mac address filter
  **/
-static int i40e_add_vf_mac_filters(struct i40e_vf *vf, bool *is_quiet,
+static int i40e_add_vf_mac_filters(struct i40e_vf *vf,
 				   struct virtchnl_ether_addr_list *al)
 {
 	struct i40e_pf *pf = vf->pf;
@@ -4061,7 +4026,7 @@ static int i40e_add_vf_mac_filters(struct i40e_vf *vf, bool *is_quiet,
 	 */
 	spin_lock_bh(&vsi->mac_filter_hash_lock);
 
-	ret = i40e_check_vf_permission(vf, al, is_quiet);
+	ret = i40e_check_vf_permission(vf, al);
 	if (ret) {
 		spin_unlock_bh(&vsi->mac_filter_hash_lock);
 		goto error_param;
@@ -4112,23 +4077,23 @@ error_param:
  **/
 static int i40e_vc_add_mac_addr_msg(struct i40e_vf *vf, u8 *msg)
 {
+	enum virtchnl_status_code v_ret = VIRTCHNL_STATUS_SUCCESS;
 	struct virtchnl_ether_addr_list *al =
 	    (struct virtchnl_ether_addr_list *)msg;
-	bool is_quiet = false;
-	i40e_status ret = I40E_SUCCESS;
 
 	if (!i40e_sync_vf_state(vf, I40E_VF_STATE_ACTIVE) ||
 	    !i40e_vc_isvalid_vsi_id(vf, al->vsi_id)) {
-		ret = I40E_ERR_PARAM;
+		v_ret = VIRTCHNL_ERR_PARAM;
 		goto error_param;
 	}
 
-	ret = i40e_add_vf_mac_filters(vf, &is_quiet, al);
+	if (i40e_add_vf_mac_filters(vf, al))
+		v_ret = VIRTCHNL_ERR_PARAM;
 
 error_param:
 	/* send the response to the VF */
-	return i40e_vc_send_msg_to_vf_ex(vf, VIRTCHNL_OP_ADD_ETH_ADDR,
-					 ret, NULL, 0, is_quiet);
+	return i40e_vc_send_msg_to_vf(vf, VIRTCHNL_OP_ADD_ETH_ADDR,
+				      v_ret, NULL, 0);
 }
 
 /**
@@ -4237,44 +4202,34 @@ error_param:
 }
 
 /**
- * i40e_vc_add_vlan_msg
- * @vf: pointer to the VF info
- * @msg: pointer to the msg buffer
+ * i40e_vc_add_vlans_legacy
+ * @vfl: pointer to legacy VLAN list passed from VF driver
+ * @vsi: pointer to VF VSI being reconfigured
+ * @vf: pointer to VF being reconfigured
  *
- * program guest vlan id
- **/
-static int i40e_vc_add_vlan_msg(struct i40e_vf *vf, u8 *msg)
+ * Add VLANs from msg to VF VSI's MacVLAN list
+ *
+ * Return 0, if added correctly, nonzero on error
+ */
+static i40e_status
+i40e_vc_add_vlans_legacy(struct virtchnl_vlan_filter_list *vfl,
+			 struct i40e_vsi *vsi,
+			 struct i40e_vf *vf)
 {
-	struct virtchnl_vlan_filter_list *vfl =
-	    (struct virtchnl_vlan_filter_list *)msg;
 	i40e_status aq_ret = I40E_SUCCESS;
-	struct i40e_pf *pf = vf->pf;
-	struct i40e_vsi *vsi = NULL;
-	int ret;
-	u16 i;
+	struct i40e_pf *pf = vsi->back;
+	int ret, i;
 
-	if (!i40e_sync_vf_state(vf, I40E_VF_STATE_ACTIVE) ||
-	    !i40e_vc_isvalid_vsi_id(vf, vfl->vsi_id)) {
-		aq_ret = I40E_ERR_PARAM;
-		goto error_param;
-	}
-
-	vsi = pf->vsi[vf->lan_vsi_idx];
 	for (i = 0; i < vfl->num_elements; i++) {
 		if (i40e_is_vid(&vsi->info) &&
-		    vfl->vlan_id[i]) {
-			if (i40e_is_double_vlan(&pf->hw))
-				aq_ret = I40E_SUCCESS;
-			else
-				aq_ret = I40E_ERR_PARAM;
-			goto error_param;
-		}
+		    vfl->vlan_id[i])
+			return i40e_is_double_vlan(&pf->hw) ? I40E_SUCCESS :
+							      I40E_ERR_PARAM;
 
 		if (vfl->vlan_id[i] > I40E_MAX_VLANID) {
-			aq_ret = I40E_ERR_PARAM;
 			dev_err(&pf->pdev->dev,
 				"invalid VF VLAN id %d\n", vfl->vlan_id[i]);
-			goto error_param;
+			return I40E_ERR_PARAM;
 		}
 	}
 
@@ -4283,22 +4238,21 @@ static int i40e_vc_add_vlan_msg(struct i40e_vf *vf, u8 *msg)
 	for (i = 0; i < vfl->num_elements; i++) {
 		aq_ret = i40e_check_vf_vlan_cap(vf);
 		if (aq_ret)
-			goto error_param;
+			return aq_ret;
 		/* VLANs are configured by PF, omit check VLAN 0
 		 * as it's already added by HW.
 		 */
 		if (vfl->vlan_id[i] && vf->trunk_set_by_pf) {
 			dev_err(&pf->pdev->dev, "Failed to add VLAN id %d for VF %d, as PF has already configured VF's trunk\n",
 				vfl->vlan_id[i], vf->vf_id);
-			aq_ret = I40E_ERR_CONFIG;
-			goto error_param;
+			return I40E_ERR_CONFIG;
 		}
 		ret = i40e_vsi_add_vlan(vsi, vfl->vlan_id[i]);
 
 		if (!ret && vfl->vlan_id[i]) {
 			aq_ret = i40e_add_vmvlan_to_list(vf, vfl, i);
 			if (aq_ret)
-				goto error_param;
+				return aq_ret;
 		}
 		if (test_bit(I40E_VF_STATE_UC_PROMISC, &vf->vf_states))
 			i40e_aq_set_vsi_uc_promisc_on_vlan(&pf->hw, vsi->seid,
@@ -4316,52 +4270,79 @@ static int i40e_vc_add_vlan_msg(struct i40e_vf *vf, u8 *msg)
 				"Unable to add VLAN filter %d for VF %d, error %d\n",
 				vfl->vlan_id[i], vf->vf_id, ret);
 	}
-error_param:
-	/* send the response to the VF */
-	return i40e_vc_send_resp_to_vf(vf, VIRTCHNL_OP_ADD_VLAN, aq_ret);
+
+	return aq_ret;
 }
 
 /**
- * i40e_vc_remove_vlan_msg
+ * i40e_vc_add_vlan_msg
  * @vf: pointer to the VF info
  * @msg: pointer to the msg buffer
  *
- * remove programmed guest vlan id
- **/
-static int i40e_vc_remove_vlan_msg(struct i40e_vf *vf, u8 *msg)
+ * program guest vlan id and send response to VF
+ *
+ * return 0, if successfully sent msg to VF, nonzero otherwise
+ */
+static int i40e_vc_add_vlan_msg(struct i40e_vf *vf, u8 *msg)
 {
+	enum virtchnl_status_code v_ret = VIRTCHNL_STATUS_SUCCESS;
 	struct virtchnl_vlan_filter_list *vfl =
 	    (struct virtchnl_vlan_filter_list *)msg;
-	i40e_status aq_ret = I40E_SUCCESS;
 	struct i40e_pf *pf = vf->pf;
 	struct i40e_vsi *vsi = NULL;
-	u16 i;
 
 	if (!i40e_sync_vf_state(vf, I40E_VF_STATE_ACTIVE) ||
 	    !i40e_vc_isvalid_vsi_id(vf, vfl->vsi_id)) {
-		aq_ret = I40E_ERR_PARAM;
+		v_ret = VIRTCHNL_ERR_PARAM;
 		goto error_param;
 	}
+
+	vsi = pf->vsi[vf->lan_vsi_idx];
+	if (i40e_vc_add_vlans_legacy(vfl, vsi, vf))
+		v_ret = VIRTCHNL_ERR_PARAM;
+
+error_param:
+	/* send the response to the VF */
+	return i40e_vc_send_resp_to_vf(vf, VIRTCHNL_OP_ADD_VLAN, v_ret);
+}
+
+/**
+ * i40e_vc_del_vlans_legacy
+ * @vfl: pointer to legacy VLAN list passed from VF driver
+ * @vf: pointer to VF being reconfigured
+ *
+ * Remove VLANs from msg to VF VSI's MacVLAN list, do not serve VLAN id 0,
+ * as FVL uses it internally
+ *
+ * return 0, if successfully removed VLANs from VF, nonzero otherwise
+ */
+static i40e_status
+i40e_vc_del_vlans_legacy(struct virtchnl_vlan_filter_list *vfl,
+			 struct i40e_vf *vf)
+{
+	struct i40e_pf *pf = vf->pf;
+	struct i40e_vsi *vsi;
+	int i;
 
 	if (!test_bit(I40E_VIRTCHNL_VF_CAP_PRIVILEGE, &vf->vf_caps) &&
 	    bitmap_weight(vf->trunk_vlans, VLAN_N_VID))
 		/* Silently fail the request if the VF is untrusted and trunk
 		 * VLANs are configured.
 		 */
-		goto error_param;
+		return I40E_SUCCESS;
 
-	for (i = 0; i < vfl->num_elements; i++) {
-		if (vfl->vlan_id[i] > I40E_MAX_VLANID) {
-			aq_ret = I40E_ERR_PARAM;
-			goto error_param;
-		}
-	}
+	for (i = 0; i < vfl->num_elements; i++)
+		if (vfl->vlan_id[i] > I40E_MAX_VLANID)
+			return I40E_ERR_PARAM;
 
 	vsi = pf->vsi[vf->lan_vsi_idx];
+	if (!vsi)
+		return I40E_ERR_PARAM;
+
 	if (i40e_is_vid(&vsi->info)) {
 		if (vfl->num_elements > 1 || vfl->vlan_id[0])
-			aq_ret = I40E_ERR_PARAM;
-		goto error_param;
+			return I40E_ERR_PARAM;
+		return I40E_SUCCESS;
 	}
 
 	for (i = 0; i < vfl->num_elements; i++) {
@@ -4378,6 +4359,30 @@ static int i40e_vc_remove_vlan_msg(struct i40e_vf *vf, u8 *msg)
 							   vfl->vlan_id[i],
 							   NULL);
 	}
+
+	return I40E_SUCCESS;
+}
+
+/**
+ * i40e_vc_remove_vlan_msg
+ * @vf: pointer to the VF info
+ * @msg: pointer to the msg buffer
+ *
+ * remove programmed guest vlan id
+ */
+static int i40e_vc_remove_vlan_msg(struct i40e_vf *vf, u8 *msg)
+{
+	struct virtchnl_vlan_filter_list *vfl =
+		(struct virtchnl_vlan_filter_list *)msg;
+	i40e_status aq_ret = I40E_SUCCESS;
+
+	if (!i40e_sync_vf_state(vf, I40E_VF_STATE_ACTIVE) ||
+	    !i40e_vc_isvalid_vsi_id(vf, vfl->vsi_id)) {
+		aq_ret = I40E_ERR_PARAM;
+		goto error_param;
+	}
+
+	aq_ret = i40e_vc_del_vlans_legacy(vfl, vf);
 
 error_param:
 	/* send the response to the VF */
@@ -4911,7 +4916,6 @@ static int i40e_vc_add_cloud_filter(struct i40e_vf *vf, u8 *msg)
 	struct i40e_pf *pf = vf->pf;
 	struct i40e_vsi *vsi = NULL;
 	char err_msg_buf[100];
-	bool is_quiet = false;
 	u16 err_msglen = 0;
 	u8 *err_msg = NULL;
 	int i, ret;
@@ -4936,7 +4940,6 @@ static int i40e_vc_add_cloud_filter(struct i40e_vf *vf, u8 *msg)
 				     "Flow Director Sideband filters exists, turn ntuple off to configure cloud filters",
 				     sizeof(err_msg_buf));
 		err_msg = err_msg_buf;
-		is_quiet = true;
 		goto err_out;
 	}
 
@@ -5017,9 +5020,8 @@ static int i40e_vc_add_cloud_filter(struct i40e_vf *vf, u8 *msg)
 err_free:
 	kfree(cfilter);
 err_out:
-	return i40e_vc_send_msg_to_vf_ex(vf, VIRTCHNL_OP_ADD_CLOUD_FILTER,
-					 aq_ret, err_msg, err_msglen,
-					 is_quiet);
+	return i40e_vc_send_msg_to_vf(vf, VIRTCHNL_OP_ADD_CLOUD_FILTER,
+					 aq_ret, err_msg, err_msglen);
 }
 
 /**
@@ -5241,6 +5243,438 @@ err:
 #endif /* __TC_MQPRIO_MODE_MAX */
 
 /**
+ * i40e_vc_set_dvm_caps - set VLAN capabilities when the device is in DVM
+ * @vf: VF that capabilities are being set for
+ * @caps: VLAN capabilities to populate
+ *
+ * Determine VLAN capabilities support based on whether a port VLAN is
+ * configured. If a port VLAN is configured then the VF should use the inner
+ * filtering/offload capabilities since the port VLAN is using the outer VLAN
+ * capabilies.
+ */
+static void
+i40e_vc_set_dvm_caps(struct i40e_vf *vf, struct virtchnl_vlan_caps *caps)
+{
+	struct virtchnl_vlan_supported_caps *supported_caps;
+	struct i40e_vsi *vsi = vf->pf->vsi[vf->lan_vsi_idx];
+	struct i40e_pf *pf = vf->pf;
+
+	if (i40e_is_vid(&vsi->info)) {
+		supported_caps = &caps->filtering.filtering_support;
+		supported_caps->inner = VIRTCHNL_VLAN_UNSUPPORTED;
+		supported_caps->outer = VIRTCHNL_VLAN_UNSUPPORTED;
+
+		supported_caps = &caps->offloads.stripping_support;
+		supported_caps->inner = VIRTCHNL_VLAN_UNSUPPORTED;
+		supported_caps->outer = VIRTCHNL_VLAN_UNSUPPORTED;
+
+		supported_caps = &caps->offloads.insertion_support;
+		supported_caps->inner = VIRTCHNL_VLAN_UNSUPPORTED;
+		supported_caps->outer = VIRTCHNL_VLAN_UNSUPPORTED;
+
+		caps->offloads.ethertype_init = VIRTCHNL_VLAN_ETHERTYPE_8100;
+		caps->offloads.ethertype_match =
+			VIRTCHNL_ETHERTYPE_STRIPPING_MATCHES_INSERTION;
+	} else {
+		supported_caps = &caps->filtering.filtering_support;
+		supported_caps->inner = VIRTCHNL_VLAN_UNSUPPORTED;
+
+		supported_caps->outer = VIRTCHNL_VLAN_ETHERTYPE_8100 |
+					VIRTCHNL_VLAN_ETHERTYPE_88A8 |
+					VIRTCHNL_VLAN_ETHERTYPE_AND;
+
+		caps->filtering.ethertype_init = supported_caps->outer;
+
+		supported_caps = &caps->offloads.stripping_support;
+		if (pf->hw.second_tag == ETH_P_8021Q)
+			supported_caps->inner = VIRTCHNL_VLAN_ETHERTYPE_8100;
+		else
+			supported_caps->inner = VIRTCHNL_VLAN_ETHERTYPE_88A8;
+		supported_caps->inner |= VIRTCHNL_VLAN_TAG_LOCATION_L2TAG1;
+
+		if (pf->hw.first_tag == ETH_P_8021Q)
+			supported_caps->outer = VIRTCHNL_VLAN_ETHERTYPE_8100;
+		else
+			supported_caps->outer = VIRTCHNL_VLAN_ETHERTYPE_88A8;
+		supported_caps->outer |= VIRTCHNL_VLAN_TOGGLE |
+					 VIRTCHNL_VLAN_ETHERTYPE_XOR |
+					 VIRTCHNL_VLAN_TAG_LOCATION_L2TAG1 |
+					 VIRTCHNL_VLAN_TAG_LOCATION_L2TAG2_2;
+
+		supported_caps = &caps->offloads.insertion_support;
+		supported_caps->inner = VIRTCHNL_VLAN_UNSUPPORTED;
+
+		if (pf->hw.first_tag == ETH_P_8021Q)
+			supported_caps->outer = VIRTCHNL_VLAN_ETHERTYPE_8100;
+		else
+			supported_caps->outer = VIRTCHNL_VLAN_ETHERTYPE_88A8;
+		supported_caps->outer |= VIRTCHNL_VLAN_TOGGLE |
+					 VIRTCHNL_VLAN_TAG_LOCATION_L2TAG2;
+
+		if (pf->hw.first_tag == ETH_P_8021Q)
+			caps->offloads.ethertype_init =
+				VIRTCHNL_VLAN_ETHERTYPE_8100;
+		else
+			caps->offloads.ethertype_init =
+				VIRTCHNL_VLAN_ETHERTYPE_88A8;
+
+		caps->offloads.ethertype_match =
+			VIRTCHNL_ETHERTYPE_STRIPPING_MATCHES_INSERTION;
+	}
+
+	if (vf->trusted)
+		caps->filtering.max_filters =
+			I40E_VC_MAX_MACVLAN_PER_TRUSTED_VF(pf->num_alloc_vfs,
+							   pf->hw.num_ports);
+	else
+		caps->filtering.max_filters = I40E_VC_MAX_VLAN_PER_VF;
+}
+
+/**
+ * i40e_vc_get_offload_vlan_v2 - handle response for VLAN V2 offloads
+ * @vf: VF that capabilities are being set for
+ *
+ * Handle response for VIRTCHNL_OP_GET_OFFLOAD_VLAN_V2_CAPS
+ *
+ * Return 0 if successfully sent msg to VF, error otherwise
+ */
+static int i40e_vc_get_offload_vlan_v2(struct i40e_vf *vf)
+{
+	enum virtchnl_status_code v_ret = VIRTCHNL_STATUS_SUCCESS;
+	struct virtchnl_vlan_caps *caps = NULL;
+	struct i40e_pf *pf = vf->pf;
+	int err, len = 0;
+
+	if (!i40e_sync_vf_state(vf, I40E_VF_STATE_ACTIVE)) {
+		v_ret = VIRTCHNL_STATUS_ERR_PARAM;
+		goto out;
+	}
+
+	caps = kzalloc(sizeof(*caps), GFP_KERNEL);
+	if (!caps) {
+		v_ret = VIRTCHNL_STATUS_ERR_NO_MEMORY;
+		goto out;
+	}
+	len = sizeof(*caps);
+
+	/* Double VLAN mode is configured by default and VLAN V2 is
+	 * supported only if double VLAN is configured
+	 */
+	if (!i40e_is_double_vlan(&pf->hw)) {
+		dev_warn(&pf->pdev->dev,
+			 "VLAN V2 should be supported with double VLAN mode.\n");
+		v_ret = VIRTCHNL_STATUS_ERR_PARAM;
+		goto out;
+	}
+
+	/* As we configure only with double VLAN mode, always respond with DVM
+	 * capabilities
+	 */
+	i40e_vc_set_dvm_caps(vf, caps);
+
+	/* store negotiated caps to prevent invalid VF messages */
+	memcpy(&vf->vlan_v2_caps, caps, sizeof(*caps));
+
+out:
+	err = i40e_vc_send_msg_to_vf(vf, VIRTCHNL_OP_GET_OFFLOAD_VLAN_V2_CAPS,
+				     v_ret, (u8 *)caps, len);
+	kfree(caps);
+	return err;
+}
+
+/**
+ * i40e_vc_chng_vlan_insertion_v2_msg - handle response for VLAN V2 insertion
+ * @vf: VF that capabilities are being set for
+ * @msg: message to validate
+ * @vops: virtchnl ops to send response for
+ *
+ * Handle response for VIRTCHNL_OP_ENABLE_VLAN_INSERTION_V2, always respond
+ * with okay, since FVL doesn't require to reconfigure VF in any way
+ *
+ * Return 0 if successfully sent msg to VF, error otherwise
+ */
+static int i40e_vc_chng_vlan_insertion_v2_msg(struct i40e_vf *vf, u8 *msg,
+					      enum virtchnl_ops vops)
+{
+	struct virtchnl_vlan_setting *insertion_msg =
+		(struct virtchnl_vlan_setting *)msg;
+	i40e_status aq_ret = I40E_SUCCESS;
+
+	if (!i40e_sync_vf_state(vf, I40E_VF_STATE_ACTIVE) ||
+	    !i40e_vc_isvalid_vsi_id(vf, insertion_msg->vport_id))
+		aq_ret = I40E_ERR_PARAM;
+
+	/* No need to check for DVM, as it's currently not possible to
+	 * change it in runtime
+	 */
+	return i40e_vc_send_resp_to_vf(vf, vops, aq_ret);
+}
+
+/**
+ * i40e_vc_valid_vlan_setting - validate VLAN setting
+ * @negotiated_settings: negotiated VLAN settings during VF init
+ * @ethertype_setting: ethertype(s) requested for the VLAN setting
+ *
+ * Returns true if correctly validated, false otherwise
+ */
+static bool
+i40e_vc_valid_vlan_setting(u32 negotiated_settings, u32 ethertype_setting)
+{
+	if (ethertype_setting && !(negotiated_settings & ethertype_setting))
+		return false;
+
+	/* only allow a single VIRTCHNL_VLAN_ETHERTYPE if
+	 * VIRTHCNL_VLAN_ETHERTYPE_AND is not negotiated/supported
+	 */
+	if (!(negotiated_settings & VIRTCHNL_VLAN_ETHERTYPE_AND) &&
+	    hweight32(ethertype_setting) > 1)
+		return false;
+
+	/* ability to modify the VLAN setting was not negotiated */
+	if (!(negotiated_settings & VIRTCHNL_VLAN_TOGGLE))
+		return false;
+
+	return true;
+}
+
+/**
+ * i40e_vc_valid_vlan_setting_msg - validate the VLAN setting message
+ * @caps: negotiated VLAN settings during VF init
+ * @msg: message to validate
+ *
+ * Used to validate any VLAN virtchnl message sent as a
+ * virtchnl_vlan_setting structure. Validates the message against the
+ * negotiated/supported caps during VF driver init.
+ *
+ * Returns true if correctly validated, false otherwise
+ */
+static bool
+i40e_vc_valid_vlan_setting_msg(struct virtchnl_vlan_supported_caps *caps,
+			       struct virtchnl_vlan_setting *msg)
+{
+	if ((!msg->outer_ethertype_setting &&
+	     !msg->inner_ethertype_setting) ||
+	    (!caps->outer && !caps->inner))
+		return false;
+
+	if (msg->outer_ethertype_setting &&
+	    !i40e_vc_valid_vlan_setting(caps->outer,
+					msg->outer_ethertype_setting))
+		return false;
+
+	if (msg->inner_ethertype_setting &&
+	    !i40e_vc_valid_vlan_setting(caps->inner,
+					msg->inner_ethertype_setting))
+		return false;
+
+	return true;
+}
+
+/**
+ * i40e_vc_validate_stripping_v2_msg - validate stripping settings
+ * @vf: VF being reconfigured
+ * @strip_msg: message to validate
+ *
+ * Validate settings for both enable and disable
+ *
+ * Return 0 if successfully validated, error otherwise
+ */
+static enum virtchnl_status_code
+i40e_vc_validate_stripping_v2_msg(struct i40e_vf *vf,
+				  struct virtchnl_vlan_setting *strip_msg)
+{
+	struct virtchnl_vlan_supported_caps *stripping_support;
+
+	if (!i40e_sync_vf_state(vf, I40E_VF_STATE_ACTIVE) ||
+	    !i40e_vc_isvalid_vsi_id(vf, strip_msg->vport_id))
+		return VIRTCHNL_STATUS_ERR_PARAM;
+
+	stripping_support = &vf->vlan_v2_caps.offloads.stripping_support;
+	if (!i40e_vc_valid_vlan_setting_msg(stripping_support, strip_msg))
+		return VIRTCHNL_STATUS_ERR_PARAM;
+
+	return VIRTCHNL_STATUS_SUCCESS;
+}
+
+/**
+ * i40e_vc_chng_vlan_stripping_v2_msg - handle response for VLAN V2 stripping
+ * @vf: VF that capabilities are being set for
+ * @msg: message to validate
+ * @vops: virtchnl ops to send response for
+ *
+ * Handle response for VIRTCHNL_OP_ENABLE_VLAN_STRIPPING_V2 and
+ * VIRTCHNL_OP_DISABLE_VLAN_STRIPPING_V2
+ *
+ * Return 0 if successfully configured and sent msg to VF, error otherwise
+ */
+static int i40e_vc_chng_vlan_stripping_v2_msg(struct i40e_vf *vf, u8 *msg,
+					      enum virtchnl_ops vops)
+{
+	struct virtchnl_vlan_setting *strip_msg =
+		(struct virtchnl_vlan_setting *)msg;
+	int ret = VIRTCHNL_STATUS_ERR_PARAM;
+	enum virtchnl_status_code v_ret;
+	struct i40e_pf *pf = vf->pf;
+	struct i40e_vsi *vsi;
+
+	v_ret = i40e_vc_validate_stripping_v2_msg(vf, strip_msg);
+	if (v_ret)
+		goto err;
+
+	vsi = pf->vsi[vf->lan_vsi_idx];
+
+	/* No outer VLAN tagging, can change stripping */
+	if (vops == VIRTCHNL_OP_ENABLE_VLAN_STRIPPING_V2)
+		ret = i40e_configure_vf_vlan_stripping(vsi, vf->vf_id,
+						       true);
+	else if (vops == VIRTCHNL_OP_DISABLE_VLAN_STRIPPING_V2)
+		ret = i40e_configure_vf_vlan_stripping(vsi, vf->vf_id,
+						       false);
+
+	if (ret) {
+		v_ret = VIRTCHNL_STATUS_ERR_PARAM;
+	} else {
+		if (vops == VIRTCHNL_OP_ENABLE_VLAN_STRIPPING_V2)
+			vf->vlan_stripping = true;
+		else if (vops == VIRTCHNL_OP_DISABLE_VLAN_STRIPPING_V2)
+			vf->vlan_stripping = false;
+	}
+err:
+	return i40e_vc_send_msg_to_vf(vf, vops, v_ret, NULL, 0);
+}
+
+/**
+ * i40e_vc_to_vlan - transform from struct virtchnl_vlan to VLAN tci
+ * @vc_vlan: struct virtchnl_vlan to transform
+ *
+ * in VLAN V2, iavf sends information for whole VLAN header, FVL uses
+ * only VLAN id, extract it here
+ *
+ * return only VLAN id bits
+ */
+static inline u16 i40e_vc_to_vlan(struct virtchnl_vlan *vc_vlan)
+{
+	return vc_vlan->tci & VLAN_VID_MASK;
+}
+
+/**
+ * i40e_vc_convert_v2_to_legacy - transform V2 VLAN msg to legacy
+ * @vfl_v2: VLAN V2 list
+ * @vfl: VLAN legacy list
+ *
+ * FVL uses internally only vid for bookkeeping of VLANs per VSI,
+ * translate V2 msg to legacy, by extracting VLAN from V2 msg.
+ */
+static void
+i40e_vc_convert_v2_to_legacy(struct virtchnl_vlan_filter_list_v2 *vfl_v2,
+			     struct virtchnl_vlan_filter_list *vfl)
+{
+	int i;
+
+	if (!vfl_v2->num_elements)
+		return;
+
+	vfl->vsi_id = vfl_v2->vport_id;
+	vfl->num_elements = vfl_v2->num_elements;
+	for (i = 0; i < vfl->num_elements; i++) {
+		struct virtchnl_vlan *vc_vlan = &vfl_v2->filters[i].outer;
+		u16 vid = i40e_vc_to_vlan(vc_vlan);
+
+		vfl->vlan_id[i] = vid;
+	}
+}
+
+/**
+ * i40e_vc_add_vlan_v2_msg - virtchnl handler for VIRTCHNL_OP_ADD_VLAN_V2
+ * @vf: VF the message was received from
+ * @msg: message received from the VF
+ *
+ * Add VLANs per VF request.
+ *
+ * Return 0 if successfully configured and sent msg to VF, error otherwise
+ */
+static int i40e_vc_add_vlan_v2_msg(struct i40e_vf *vf, u8 *msg)
+{
+	enum virtchnl_status_code v_ret = VIRTCHNL_STATUS_SUCCESS;
+	struct virtchnl_vlan_filter_list_v2 *vfl_v2 =
+		(struct virtchnl_vlan_filter_list_v2 *)msg;
+	struct virtchnl_vlan_filter_list *vfl;
+	struct i40e_pf *pf = vf->pf;
+	struct i40e_vsi *vsi;
+
+	if (!i40e_sync_vf_state(vf, I40E_VF_STATE_ACTIVE) ||
+	    !i40e_vc_isvalid_vsi_id(vf, vfl_v2->vport_id)) {
+		v_ret = VIRTCHNL_STATUS_ERR_PARAM;
+		goto out;
+	}
+
+	vsi = pf->vsi[vf->lan_vsi_idx];
+	if (!vsi) {
+		v_ret = VIRTCHNL_STATUS_ERR_PARAM;
+		goto out;
+	}
+
+	vfl = kzalloc(sizeof(*vfl) + vfl_v2->num_elements * sizeof(u16),
+		      GFP_KERNEL);
+	if (!vfl) {
+		v_ret = VIRTCHNL_STATUS_ERR_NO_MEMORY;
+		goto out;
+	}
+
+	i40e_vc_convert_v2_to_legacy(vfl_v2, vfl);
+	if (i40e_vc_add_vlans_legacy(vfl, vsi, vf))
+		v_ret = VIRTCHNL_ERR_PARAM;
+	kfree(vfl);
+out:
+	return i40e_vc_send_msg_to_vf(vf, VIRTCHNL_OP_ADD_VLAN_V2, v_ret, NULL,
+				      0);
+}
+
+/**
+ * i40e_vc_del_vlan_v2_msg - virtchnl handler for VIRTCHNL_OP_DEL_VLAN_V2
+ * @vf: VF the message was received from
+ * @msg: message received from the VF
+ *
+ * Remove existing VLANs per VF request.
+ *
+ * Return 0 if successfully configured and sent msg to VF, error otherwise
+ */
+static int i40e_vc_del_vlan_v2_msg(struct i40e_vf *vf, u8 *msg)
+{
+	enum virtchnl_status_code v_ret = VIRTCHNL_STATUS_SUCCESS;
+	struct virtchnl_vlan_filter_list_v2 *vfl_v2 =
+		(struct virtchnl_vlan_filter_list_v2 *)msg;
+	struct virtchnl_vlan_filter_list *vfl;
+	i40e_status aq_ret = I40E_SUCCESS;
+
+	if (!i40e_sync_vf_state(vf, I40E_VF_STATE_ACTIVE) ||
+	    !i40e_vc_isvalid_vsi_id(vf, vfl_v2->vport_id)) {
+		v_ret = VIRTCHNL_ERR_PARAM;
+		goto error_param;
+	}
+
+	vfl = kzalloc(sizeof(*vfl) + vfl_v2->num_elements * sizeof(u16),
+		      GFP_KERNEL);
+
+	if (!vfl) {
+		v_ret = VIRTCHNL_STATUS_ERR_NO_MEMORY;
+		goto error_param;
+	}
+
+	i40e_vc_convert_v2_to_legacy(vfl_v2, vfl);
+
+	aq_ret = i40e_vc_del_vlans_legacy(vfl, vf);
+	if (aq_ret)
+		v_ret = VIRTCHNL_ERR_PARAM;
+
+	kfree(vfl);
+error_param:
+	/* send the response to the VF */
+	return i40e_vc_send_msg_to_vf(vf, VIRTCHNL_OP_DEL_VLAN_V2, v_ret,
+				      NULL, 0);
+}
+
+/**
  * i40e_vc_process_vf_msg
  * @pf: pointer to the PF structure
  * @vf_id: source VF id
@@ -5363,6 +5797,31 @@ int i40e_vc_process_vf_msg(struct i40e_pf *pf, s16 vf_id, u32 v_opcode,
 		ret = i40e_vc_del_cloud_filter(vf, msg);
 		break;
 #endif /* __TC_MQPRIO_MODE_MAX */
+	case VIRTCHNL_OP_GET_OFFLOAD_VLAN_V2_CAPS:
+		ret = i40e_vc_get_offload_vlan_v2(vf);
+		break;
+	case VIRTCHNL_OP_ADD_VLAN_V2:
+		ret = i40e_vc_add_vlan_v2_msg(vf, msg);
+		break;
+	case VIRTCHNL_OP_DEL_VLAN_V2:
+		ret = i40e_vc_del_vlan_v2_msg(vf, msg);
+		break;
+	case VIRTCHNL_OP_ENABLE_VLAN_STRIPPING_V2:
+		ret = i40e_vc_chng_vlan_stripping_v2_msg
+			(vf, msg, VIRTCHNL_OP_ENABLE_VLAN_STRIPPING_V2);
+		break;
+	case VIRTCHNL_OP_DISABLE_VLAN_STRIPPING_V2:
+		ret = i40e_vc_chng_vlan_stripping_v2_msg
+			(vf, msg, VIRTCHNL_OP_DISABLE_VLAN_STRIPPING_V2);
+		break;
+	case VIRTCHNL_OP_ENABLE_VLAN_INSERTION_V2:
+		ret = i40e_vc_chng_vlan_insertion_v2_msg
+			(vf, msg, VIRTCHNL_OP_ENABLE_VLAN_INSERTION_V2);
+		break;
+	case VIRTCHNL_OP_DISABLE_VLAN_INSERTION_V2:
+		ret = i40e_vc_chng_vlan_insertion_v2_msg
+			(vf, msg, VIRTCHNL_OP_DISABLE_VLAN_INSERTION_V2);
+		break;
 	case VIRTCHNL_OP_UNKNOWN:
 	default:
 		dev_err(&pf->pdev->dev, "Unsupported opcode %d from VF %d\n",
@@ -5752,6 +6211,12 @@ int i40e_ndo_set_vf_port_vlan(struct net_device *netdev,
 			dev_err(&pf->pdev->dev, "Unable to config vf promiscuous mode\n");
 			goto error_pvid;
 		}
+	}
+	/* Virtchnl VLAN V2 require additional reset for reconfiguration */
+	if (i40e_is_double_vlan(&pf->hw)) {
+		vf->vlan_stripping = false;
+		i40e_vc_reset_vf(vf, true);
+		vsi = pf->vsi[vf->lan_vsi_idx];
 	}
 
 	/* Schedule the worker thread to take care of applying changes */
@@ -6432,6 +6897,9 @@ static int i40e_set_trunk(struct pci_dev *pdev, int vf_id,
 	}
 	/* Copy over the updated bitmap */
 	bitmap_copy(vf->trunk_vlans, vlan_bitmap, VLAN_N_VID);
+	/* Virtchnl VLAN V2 require additional reset for reconfiguration */
+	if (vid && i40e_is_double_vlan(&pf->hw))
+		i40e_vc_reset_vf(vf, true);
 out:
 	clear_bit(__I40E_VIRTCHNL_OP_PENDING, pf->state);
 	return ret;
@@ -8133,8 +8601,15 @@ static int i40e_get_pf_tpid(struct pci_dev *pdev, u16 *tp_id)
 	if (!(pf->hw.flags & I40E_HW_FLAG_802_1AD_CAPABLE))
 		return -EOPNOTSUPP;
 
-	*tp_id = (u16)(rd32(&pf->hw, I40E_GL_SWT_L2TAGCTRL(OUTER_TAG_IDX)) >>
-		      I40E_GL_SWT_L2TAGCTRL_ETHERTYPE_SHIFT);
+	/* Return true tpid only for PF0, other PFs should return their
+	 * local values, which should be aligned to PF0
+	 */
+	if (pf->hw.pf_id == 0)
+		*tp_id = (u16)(rd32(&pf->hw,
+			       I40E_GL_SWT_L2TAGCTRL(OUTER_TAG_IDX)) >>
+			       I40E_GL_SWT_L2TAGCTRL_ETHERTYPE_SHIFT);
+	else
+		*tp_id = pf->hw.first_tag;
 
 	return 0;
 }
@@ -8154,6 +8629,10 @@ static int i40e_set_pf_tpid(struct pci_dev *pdev, u16 tp_id)
 		return -EINVAL;
 	}
 
+	/* TPID is already set to requested value */
+	if (tp_id == pf->hw.first_tag)
+		return ret;
+
 	pf->hw.first_tag = tp_id;
 	dev_info(&pdev->dev,
 		 "TPID configuration only supported for PF 0. Please ensure to manually set same TPID on all PFs.\n");
@@ -8166,6 +8645,12 @@ static int i40e_set_pf_tpid(struct pci_dev *pdev, u16 tp_id)
 				 "couldn't set switch config bits, err %s\n",
 				 i40e_stat_str(&pf->hw, ret));
 	}
+
+	/* in case PF is configured to double VLAN mode, then VFs need to be
+	 * reset in order to renegotiate TPID for VFs
+	 */
+	if (i40e_is_double_vlan(&pf->hw))
+		i40e_reset_all_vfs(pf, false);
 
 	return ret;
 }

@@ -869,6 +869,12 @@ void i40e_free_tx_resources(struct i40e_ring *tx_ring)
 	i40e_clean_tx_ring(tx_ring);
 	kfree(tx_ring->tx_bi);
 	tx_ring->tx_bi = NULL;
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+#ifdef HAVE_XSK_BATCHED_DESCRIPTOR_INTERFACES
+	kfree(tx_ring->xsk_descs);
+	tx_ring->xsk_descs = NULL;
+#endif /* HAVE_XSK_BATCHED_DESCRIPTOR_INTERFACES */
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
 
 	if (tx_ring->desc) {
 		dma_free_coherent(tx_ring->dev, tx_ring->size,
@@ -1557,6 +1563,17 @@ int i40e_setup_tx_descriptors(struct i40e_ring *tx_ring)
 	if (!tx_ring->tx_bi)
 		goto err;
 
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+#ifdef HAVE_XSK_BATCHED_DESCRIPTOR_INTERFACES
+	if (ring_is_xdp(tx_ring)) {
+		tx_ring->xsk_descs = kcalloc(I40E_MAX_NUM_DESCRIPTORS, sizeof(*tx_ring->xsk_descs),
+					     GFP_KERNEL);
+		if (!tx_ring->xsk_descs)
+			goto err;
+	}
+#endif /* HAVE_XSK_BATCHED_DESCRIPTOR_INTERFACES */
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
+
 	/* round up to nearest 4K */
 	tx_ring->size = tx_ring->count * sizeof(struct i40e_tx_desc);
 	/* add u32 for head writeback, align after this takes care of
@@ -1578,6 +1595,12 @@ int i40e_setup_tx_descriptors(struct i40e_ring *tx_ring)
 	return 0;
 
 err:
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+#ifdef HAVE_XSK_BATCHED_DESCRIPTOR_INTERFACES
+	kfree(tx_ring->xsk_descs);
+	tx_ring->xsk_descs = NULL;
+#endif /* HAVE_XSK_BATCHED_DESCRIPTOR_INTERFACES */
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
 	kfree(tx_ring->tx_bi);
 	tx_ring->tx_bi = NULL;
 	return -ENOMEM;
@@ -2783,7 +2806,7 @@ static struct sk_buff *i40e_run_xdp(struct i40e_ring *rx_ring,
 		result = I40E_XDP_REDIR;
 		break;
 	default:
-		bpf_warn_invalid_xdp_action(act);
+		bpf_warn_invalid_xdp_action(rx_ring->netdev, xdp_prog, act);
 		fallthrough; /* abort and drop */
 	case XDP_ABORTED:
 out_failure:
@@ -3453,7 +3476,6 @@ static void i40e_atr(struct i40e_ring *tx_ring, struct sk_buff *skb,
  * @skb:        send buffer
  * @tx_ring:    ring to send buffer on
  * @flags:      the tx flags to be set
- * @outer_vlan: VLAN tag returned in case of double vlan
  *
  * Checks the skb and set up correspondingly several generic transmit flags
  * related to VLAN tagging for the HW, such as VLAN, DCB, etc.
@@ -3463,8 +3485,7 @@ static void i40e_atr(struct i40e_ring *tx_ring, struct sk_buff *skb,
  **/
 static inline int i40e_tx_prepare_vlan_flags(struct sk_buff *skb,
 					     struct i40e_ring *tx_ring,
-					     u32 *flags,
-					     u32 *outer_vlan)
+					     u32 *flags)
 {
 	__be16 protocol = skb->protocol;
 	u32  tx_flags = 0;
@@ -3489,15 +3510,11 @@ static inline int i40e_tx_prepare_vlan_flags(struct sk_buff *skb,
 
 	/* if we have a HW VLAN tag being added, default to the HW one */
 	if (skb_vlan_tag_present(skb)) {
-		/* Only offload on outer, if there is a vlan header in skb */
-		if (i40e_is_double_vlan(&tx_ring->vsi->back->hw) &&
-		    eth_type_vlan(skb->protocol)) {
-			*outer_vlan = skb_vlan_tag_get(skb);
-		} else {
-			tx_flags |= skb_vlan_tag_get(skb) <<
-				I40E_TX_FLAGS_VLAN_SHIFT;
+		tx_flags |= skb_vlan_tag_get(skb) << I40E_TX_FLAGS_VLAN_SHIFT;
+		if (tx_ring->flags & I40E_TXR_FLAGS_L2TAG2)
+			tx_flags |= I40E_TX_FLAGS_HW_OUTER_VLAN;
+		else
 			tx_flags |= I40E_TX_FLAGS_HW_VLAN;
-		}
 	/* else if it is a SW VLAN, check the next protocol and store the tag */
 	} else if (protocol == htons(ETH_P_8021Q)) {
 		struct vlan_hdr *vhdr, _vhdr;
@@ -3515,8 +3532,8 @@ static inline int i40e_tx_prepare_vlan_flags(struct sk_buff *skb,
 		goto out;
 
 	/* Insert 802.1p priority into VLAN header */
-	if ((tx_flags & (I40E_TX_FLAGS_HW_VLAN | I40E_TX_FLAGS_SW_VLAN)) ||
-	    (skb->priority != TC_PRIO_CONTROL)) {
+	if ((tx_flags & (I40E_TX_FLAGS_VLAN)) ||
+	    skb->priority != TC_PRIO_CONTROL) {
 		tx_flags &= ~I40E_TX_FLAGS_VLAN_PRIO_MASK;
 		tx_flags |= (skb->priority & 0x7) <<
 				I40E_TX_FLAGS_VLAN_PRIO_SHIFT;
@@ -3530,6 +3547,8 @@ static inline int i40e_tx_prepare_vlan_flags(struct sk_buff *skb,
 			vhdr = (struct vlan_ethhdr *)skb->data;
 			vhdr->h_vlan_TCI = htons(tx_flags >>
 						 I40E_TX_FLAGS_VLAN_SHIFT);
+		} else if (tx_ring->flags & I40E_TXR_FLAGS_L2TAG2) {
+			tx_flags |= I40E_TX_FLAGS_HW_OUTER_VLAN;
 		} else {
 			tx_flags |= I40E_TX_FLAGS_HW_VLAN;
 		}
@@ -3652,10 +3671,25 @@ static int i40e_tso(struct i40e_tx_buffer *first, u8 *hdr_len,
 
 	/* remove payload length from inner checksum */
 	paylen = skb->len - l4_offset;
-	csum_replace_by_diff(&l4.tcp->check, (__force __wsum)htonl(paylen));
 
+#ifdef NETIF_F_GSO_UDP_L4
+	if (skb_shinfo(skb)->gso_type & SKB_GSO_UDP_L4) {
+		csum_replace_by_diff(&l4.udp->check,
+				     (__force __wsum)htonl(paylen));
+		/* compute length of segmentation header */
+		*hdr_len = sizeof(*l4.udp) + l4_offset;
+	} else {
+		csum_replace_by_diff(&l4.tcp->check,
+				     (__force __wsum)htonl(paylen));
+		/* compute length of segmentation header */
+		*hdr_len = (l4.tcp->doff * 4) + l4_offset;
+	}
+#else
+	csum_replace_by_diff(&l4.tcp->check, (__force __wsum)htonl(paylen));
 	/* compute length of segmentation header */
 	*hdr_len = (l4.tcp->doff * 4) + l4_offset;
+#endif
+
 
 	/* pull values out of skb_shinfo */
 	gso_size = skb_shinfo(skb)->gso_size;
@@ -4117,10 +4151,17 @@ static inline int i40e_tx_map(struct i40e_ring *tx_ring, struct sk_buff *skb,
 	}
 
 #ifdef I40E_ADD_PROBES
+#ifdef NETIF_F_GSO_UDP_L4
+	if (skb_shinfo(skb)->gso_type & SKB_GSO_UDP_L4)
+		tx_ring->vsi->back->udp_segs += first->gso_segs;
+	else
+		tx_ring->vsi->back->tcp_segs += first->gso_segs;
+#else
 	if (tx_flags & (I40E_TX_FLAGS_TSO | I40E_TX_FLAGS_FSO))
 		tx_ring->vsi->back->tcp_segs += first->gso_segs;
 
-#endif
+#endif /* NETIF_F_GSO_UDP_L4 */
+#endif /* I40E_ADD_PROBES */
 	first->tx_flags = tx_flags;
 
 	dma = dma_map_single(tx_ring->dev, skb->data, size, DMA_TO_DEVICE);
@@ -4395,7 +4436,8 @@ u16 i40e_lan_select_queue(struct net_device *netdev,
 	u8 prio;
 
 	/* is DCB enabled at all? */
-	if (vsi->tc_config.numtc == 1)
+	if (vsi->tc_config.numtc == 1 ||
+	    i40e_is_tc_mqprio_enabled(vsi->back))
 #if defined(HAVE_NDO_SELECT_QUEUE_FALLBACK_REMOVED)
 		return netdev_pick_tx(netdev, skb, sb_dev);
 #elif defined(HAVE_NDO_SELECT_QUEUE_SB_DEV)
@@ -4542,7 +4584,7 @@ static netdev_tx_t i40e_xmit_frame_ring(struct sk_buff *skb,
 	first->gso_segs = 1;
 
 	/* prepare the xmit flags */
-	if (i40e_tx_prepare_vlan_flags(skb, tx_ring, &tx_flags, &cd_l2tag2))
+	if (i40e_tx_prepare_vlan_flags(skb, tx_ring, &tx_flags))
 		goto out_drop;
 
 	/* obtain protocol of skb */
@@ -4577,6 +4619,10 @@ static netdev_tx_t i40e_xmit_frame_ring(struct sk_buff *skb,
 
 	/* always enable CRC insertion offload */
 	td_cmd |= I40E_TX_DESC_CMD_ICRC;
+
+	if (tx_flags & I40E_TX_FLAGS_HW_OUTER_VLAN)
+		cd_l2tag2 = (tx_flags & I40E_TX_FLAGS_VLAN_MASK) >>
+			    I40E_TX_FLAGS_VLAN_SHIFT;
 
 	i40e_create_tx_ctx(tx_ring, cd_type_cmd_tso_mss,
 			   cd_tunneling, cd_l2tag2);

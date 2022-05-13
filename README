@@ -2,7 +2,7 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet 700 Series
 ============================================================
 
-January 19, 2022
+February 24, 2022
 Copyright(c) 2014 - 2022 Intel Corporation.
 
 Contents
@@ -54,6 +54,7 @@ not support the following features:
 Identifying Your Adapter
 ========================
 This driver is compatible with devices based on the following:
+  * Intel(R) Ethernet Controller I710
   * Intel(R) Ethernet Controller X710
   * Intel(R) Ethernet Controller XL710
   * Intel(R) Ethernet Network Connection X722
@@ -806,6 +807,9 @@ UDP filters.
 
 NOTE: Cloud filters can be used as a method for implementing queue splitting in
 the PF.
+
+NOTE: Queue 0xffff, set through either 'queue 0xffff' or 'action 0x1000ffff',
+is used for RSS.
 
 The following filters are supported:
   Cloud Filters

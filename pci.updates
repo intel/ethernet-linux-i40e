@@ -11,6 +11,16 @@
 #             the string is consumed by the tools using it.
 #
 8086  Intel Corporation
+	0dd2  Ethernet Network Adapter I710
+		1137 0000  I710T4LG 4x1 GbE RJ45 PCIe NIC
+		1137 02e3  I710T4LG 4x1 GbE RJ45 PCIe NIC
+		8086 0000  Ethernet Network Adapter I710-T4L
+		8086 000d  Ethernet Network Adapter I710-T4L
+		8086 0010  Ethernet Network Adapter I710-T4L for OCP 3.0
+		8086 401a  Ethernet Network Adapter I710-T4L
+		8086 401b  Ethernet Network Adapter I710-T4L for OCP 3.0
+	0dda  Ethernet Connection X722 for 10GbE SFP+
+		1bd4 0076  Ethernet Connection F102IX722 for 10GbE SFP
 	1572  Ethernet Controller X710 for 10GbE SFP+
 		1028 0000  Ethernet 10G X710 rNDC
 		1028 1f99  Ethernet 10G 4P X710/I350 rNDC

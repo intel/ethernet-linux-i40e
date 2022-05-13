@@ -153,6 +153,7 @@ static const struct i40e_stats i40e_gstrings_stats[] = {
 	I40E_PF_STAT("port.fdir_sb_status", stats.fd_sb_status),
 #ifdef I40E_ADD_PROBES
 	I40E_PF_STAT("port.tx_tcp_segments", tcp_segs),
+	I40E_PF_STAT("port.tx_udp_segments", udp_segs),
 	I40E_PF_STAT("port.tx_tcp_cso", tx_tcp_cso),
 	I40E_PF_STAT("port.tx_udp_cso", tx_udp_cso),
 	I40E_PF_STAT("port.tx_sctp_cso", tx_sctp_cso),
@@ -2240,8 +2241,16 @@ static void i40e_get_drvinfo(struct net_device *netdev,
 #endif
 }
 
+#ifdef HAVE_ETHTOOL_EXTENDED_RINGPARAMS
+static void
+i40e_get_ringparam(struct net_device *netdev,
+		   struct ethtool_ringparam *ring,
+		   struct kernel_ethtool_ringparam __always_unused *ker,
+		   struct netlink_ext_ack __always_unused *extack)
+#else
 static void i40e_get_ringparam(struct net_device *netdev,
 			       struct ethtool_ringparam *ring)
+#endif /* HAVE_ETHTOOL_EXTENDED_RINGPARAMS */
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_pf *pf = np->vsi->back;
@@ -2268,8 +2277,16 @@ static bool i40e_active_tx_ring_index(struct i40e_vsi *vsi, u16 index)
 	return index < vsi->num_queue_pairs;
 }
 
+#ifdef HAVE_ETHTOOL_EXTENDED_RINGPARAMS
+static int
+i40e_set_ringparam(struct net_device *netdev,
+		   struct ethtool_ringparam *ring,
+		   struct kernel_ethtool_ringparam __always_unused *ker,
+		   struct netlink_ext_ack __always_unused *extack)
+#else
 static int i40e_set_ringparam(struct net_device *netdev,
 			      struct ethtool_ringparam *ring)
+#endif /* HAVE_ETHTOOL_EXTENDED_RINGPARAMS */
 {
 	struct i40e_ring *tx_rings = NULL, *rx_rings = NULL;
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
@@ -3180,6 +3197,7 @@ static int i40e_set_phys_id(struct net_device *netdev,
 	case ETHTOOL_ID_ACTIVE:
 		if (!(pf->hw_features & I40E_HW_PHY_CONTROLS_LEDS)) {
 			pf->led_status = i40e_led_get(hw);
+			pf->led_status_blink = i40e_led_get_blink(hw);
 		} else {
 			if (!(hw->flags & I40E_HW_FLAG_AQ_PHY_ACCESS_CAPABLE))
 				i40e_aq_set_phy_debug(hw, I40E_PHY_DEBUG_ALL,
@@ -3203,7 +3221,7 @@ static int i40e_set_phys_id(struct net_device *netdev,
 		break;
 	case ETHTOOL_ID_INACTIVE:
 		if (!(pf->hw_features & I40E_HW_PHY_CONTROLS_LEDS)) {
-			i40e_led_set(hw, pf->led_status, false);
+			i40e_led_set(hw, pf->led_status, pf->led_status_blink);
 		} else {
 			ret = i40e_led_set_phy(hw, false, pf->led_status,
 					       (pf->phy_led_val |
@@ -6278,7 +6296,7 @@ static int i40e_set_channels(struct net_device *dev,
 	/* We do not support setting channels via ethtool when TCs are
 	 * configured through mqprio
 	 */
-	if (pf->flags & I40E_FLAG_TC_MQPRIO)
+	if (i40e_is_tc_mqprio_enabled(pf))
 		return -EINVAL;
 
 	/* verify they are not requesting separate vectors */
@@ -6691,6 +6709,15 @@ flags_complete:
 			"vf-vlan-pruning: VLAN pruning cannot be changed while VFs are active.\n");
 		return -EOPNOTSUPP;
 	}
+
+#ifdef __TC_MQPRIO_MODE_MAX
+	if ((changed_flags & I40E_FLAG_DISABLE_FW_LLDP) &&
+	    (orig_flags & I40E_FLAG_TC_MQPRIO)) {
+		dev_err(&pf->pdev->dev,
+			"disable-fw-lldp: FW LLDP cannot be changed while ADQ is configured.\n");
+		return -EOPNOTSUPP;
+	}
+#endif
 
 	if ((changed_flags & I40E_FLAG_DISABLE_FW_LLDP) ||
 	    (changed_flags & I40E_FLAG_MULTIPLE_TRAFFIC_CLASSES)) {

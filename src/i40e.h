@@ -684,6 +684,7 @@ struct i40e_pf {
 	u32 tx_sluggish_count;
 	u32 hw_csum_rx_error;
 	u32 led_status;
+	bool led_status_blink;
 	u16 corer_count; /* Core reset count */
 	u16 globr_count; /* Global reset count */
 	u16 empr_count; /* EMP reset count */
@@ -829,6 +830,7 @@ struct i40e_pf {
 #endif /* HAVE_PTP_1588_CLOCK */
 #ifdef I40E_ADD_PROBES
 	u64 tcp_segs;
+	u64 udp_segs;
 	u64 tx_tcp_cso;
 	u64 tx_udp_cso;
 	u64 tx_sctp_cso;
@@ -1494,6 +1496,19 @@ static inline struct xdp_umem *i40e_xsk_umem(struct i40e_ring *ring)
 static inline int i40e_get_pf_count(struct i40e_hw *hw) {
 	return rd32(hw, I40E_GLGEN_PCIFCNCNT)
 		& I40E_GLGEN_PCIFCNCNT_PCIPFCNT_MASK;
+}
+
+/**
+ * i40e_is_tc_mqprio_enabled - check if TC MQPRIO is enabled on PF
+ * @pf: pointer to a pf.
+ *
+ * Check and return value of flag I40E_FLAG_TC_MQPRIO.
+ *
+ * Return: I40E_FLAG_TC_MQPRIO set state.
+ **/
+static inline u32 i40e_is_tc_mqprio_enabled(struct i40e_pf *pf)
+{
+	return pf->flags & I40E_FLAG_TC_MQPRIO;
 }
 
 #endif /* _I40E_H_ */

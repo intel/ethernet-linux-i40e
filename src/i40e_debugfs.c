@@ -907,10 +907,8 @@ static void i40e_dbg_dump_vf(struct i40e_pf *pf, int vf_id)
 		vsi = pf->vsi[vf->lan_vsi_idx];
 		dev_info(&pf->pdev->dev, "vf %2d: VSI id=%d, seid=%d, qps=%d\n",
 			 vf_id, vf->lan_vsi_id, vsi->seid, vf->num_queue_pairs);
-		dev_info(&pf->pdev->dev, "       num MDD=%lld, invalid msg=%lld, valid msg=%lld\n",
-			 vf->num_mdd_events,
-			 vf->num_invalid_msgs,
-			 vf->num_valid_msgs);
+		dev_info(&pf->pdev->dev, "       num MDD=%lld",
+			 vf->num_mdd_events);
 	} else {
 		dev_info(&pf->pdev->dev, "invalid VF id %d\n", vf_id);
 	}
@@ -1710,7 +1708,7 @@ static ssize_t i40e_dbg_command_write(struct file *filp,
 		}
 		pf->flags &= ~I40E_FLAG_DCB_ENABLED;
 	} else if (strncmp(cmd_buf, "dcb on", 6) == 0) {
-		if (pf->flags & I40E_FLAG_TC_MQPRIO) {
+		if (i40e_is_tc_mqprio_enabled(pf)) {
 			dev_info(&pf->pdev->dev,
 				 "Failed to enable DCB when TCs are configured through mqprio\n");
 			goto command_write_done;
