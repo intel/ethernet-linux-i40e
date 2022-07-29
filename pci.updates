@@ -131,6 +131,7 @@
 		8086 000a  Ethernet Network Adapter X710-T4L for OCP 3.0
 		8086 000b  Ethernet Network Adapter X710-T2L for OCP 3.0
 		8086 000c  Ethernet Network Adapter X710-T2L for OCP 3.0
+		8086 000d  Ethernet 10G 2P X710-T2L-t OCP
 		8086 000f  Ethernet Network Adapter X710-T2L for OCP 3.0
 		8086 4009  Ethernet Network Adapter X710-T2L
 		8086 4012  Ethernet Network Adapter X710-T4L for OCP 3.0

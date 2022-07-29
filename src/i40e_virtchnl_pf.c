@@ -6227,6 +6227,7 @@ error_pvid:
 	return ret;
 }
 
+
 /**
  * i40e_ndo_set_vf_bw
  * @netdev: network interface device structure

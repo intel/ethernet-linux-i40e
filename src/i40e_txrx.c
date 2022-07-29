@@ -1484,7 +1484,7 @@ static void i40e_reuse_rx_skb(struct i40e_ring *rx_ring,
 	new_buff->dma		= old_buff->dma;
 	new_buff->skb		= old_buff->skb;
 
-	rx_buffer->skb = NULL;
+	old_buff->skb = NULL;
 }
 
 #endif /* CONFIG_I40E_DISABLE_PACKET_SPLIT */
@@ -2755,6 +2755,7 @@ static int i40e_xmit_xdp_ring(struct xdp_buff *xdp,
 #endif
 #endif
 
+#ifndef CONFIG_I40E_DISABLE_PACKET_SPLIT
 /**
  * i40e_run_xdp - run an XDP program
  * @rx_ring: Rx ring being processed
@@ -2850,6 +2851,7 @@ static void i40e_rx_buffer_flip(struct i40e_ring *rx_ring,
 	rx_buffer->page_offset += truesize;
 #endif
 }
+#endif /* CONFIG_I40E_DISABLE_PACKET_SPLIT */
 
 /**
  * i40e_update_rx_stats - Update Rx ring statistics

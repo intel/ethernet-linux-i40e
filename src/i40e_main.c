@@ -51,8 +51,8 @@ static const char i40e_driver_string[] =
 #define DRV_VERSION_DESC ""
 
 #define DRV_VERSION_MAJOR 2
-#define DRV_VERSION_MINOR 19
-#define DRV_VERSION_BUILD 3
+#define DRV_VERSION_MINOR 20
+#define DRV_VERSION_BUILD 12
 #define DRV_VERSION_SUBBUILD 0
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
@@ -132,6 +132,13 @@ MODULE_DEVICE_TABLE(pci, i40e_pci_tbl);
 #define OPTION_UNSET    -1
 #define I40E_PARAM_INIT { [0 ... I40E_MAX_NIC] = OPTION_UNSET}
 #define I40E_MAX_NIC 64
+
+/* TODO: this should be moved to i40e_register.h */
+#undef I40E_PFPM_APM
+#undef I40E_PFPM_WUFC
+#define I40E_PFPM_APM(_PF)	(0x000B8080 + ((_PF) * 4))
+#define I40E_PFPM_WUFC(_PF)	(0x0006B400 + ((_PF) * 4))
+
 #if !defined(HAVE_SRIOV_CONFIGURE) && !defined(HAVE_RHEL6_SRIOV_CONFIGURE)
 #ifdef CONFIG_PCI_IOV
 static int max_vfs[I40E_MAX_NIC+1] = I40E_PARAM_INIT;
@@ -14835,7 +14842,11 @@ static const struct net_device_ops i40e_netdev_ops = {
 	.ndo_change_mtu		= i40e_change_mtu,
 #endif /* HAVE_RHEL7_EXTENDED_MIN_MAX_MTU */
 #if defined(HAVE_PTP_1588_CLOCK) || defined(HAVE_I40E_INTELCIM_IOCTL)
+#ifdef HAVE_NDO_ETH_IOCTL
+	.ndo_eth_ioctl		= i40e_ioctl,
+#else
 	.ndo_do_ioctl		= i40e_ioctl,
+#endif /* HAVE_NDO_ETH_IOCTL */
 #endif
 	.ndo_tx_timeout		= i40e_tx_timeout,
 #ifdef HAVE_VLAN_RX_REGISTER
@@ -14939,12 +14950,13 @@ static const struct net_device_ops i40e_netdev_ops = {
 #ifdef HAVE_XDP_SUPPORT
 #ifdef HAVE_NDO_BPF
 	.ndo_bpf		= i40e_xdp,
-	.ndo_xdp_xmit		= i40e_xdp_xmit,
 #else
 	.ndo_xdp                = i40e_xdp,
-	.ndo_xdp_xmit		= i40e_xdp_xmit,
 	.ndo_xdp_flush		= i40e_xdp_flush,
 #endif /* HAVE_NDO_BPF */
+#ifndef CONFIG_I40E_DISABLE_PACKET_SPLIT
+	.ndo_xdp_xmit		= i40e_xdp_xmit,
+#endif /* CONFIG_I40E_DISABLE_PACKET_SPLIT */
 #ifdef HAVE_AF_XDP_ZC_SUPPORT
 #ifdef HAVE_NDO_XSK_WAKEUP
 	.ndo_xsk_wakeup         = i40e_xsk_wakeup,
@@ -17386,12 +17398,14 @@ static int i40e_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 	INIT_WORK(&pf->service_task, i40e_service_task);
 	clear_bit(__I40E_SERVICE_SCHED, pf->state);
 
-	/* NVM bit on means WoL disabled for the port */
+	/* NVM bit on means WoL not supported for the port */
 	i40e_read_nvm_word(hw, I40E_SR_NVM_WAKE_ON_LAN, &wol_nvm_bits);
 	if (BIT(hw->port) & wol_nvm_bits || hw->partition_id != 1)
 		pf->wol_en = false;
 	else
-		pf->wol_en = true;
+		pf->wol_en = !!rd32(hw, I40E_PFPM_APM(pf->hw.pf_id))
+			     & I40E_PFPM_APM_APME_MASK;
+
 	device_set_wakeup_enable(&pf->pdev->dev, pf->wol_en);
 
 	/* set up the main switch operations */
@@ -18160,20 +18174,22 @@ static void i40e_shutdown(struct pci_dev *pdev)
 
 			i40e_prep_for_reset(pf);
 
-			wr32(hw, I40E_PFPM_APM, I40E_PFPM_APM_APME_MASK);
-			wr32(hw, I40E_PFPM_WUFC, I40E_PFPM_WUFC_MAG_MASK);
+			wr32(hw, I40E_PFPM_APM(pf->hw.pf_id),
+			     I40E_PFPM_APM_APME_MASK);
+			wr32(hw, I40E_PFPM_WUFC(pf->hw.pf_id),
+			     I40E_PFPM_WUFC_MAG_MASK);
 		} else {
 			i40e_prep_for_reset(pf);
 
-			wr32(hw, I40E_PFPM_APM, 0);
-			wr32(hw, I40E_PFPM_WUFC, 0);
+			wr32(hw, I40E_PFPM_APM(pf->hw.pf_id), 0);
+			wr32(hw, I40E_PFPM_WUFC(pf->hw.pf_id), 0);
 		}
 	} else {
 		i40e_prep_for_reset(pf);
 
-		wr32(hw, I40E_PFPM_APM,
+		wr32(hw, I40E_PFPM_APM(pf->hw.pf_id),
 		     (pf->wol_en ? I40E_PFPM_APM_APME_MASK : 0));
-		wr32(hw, I40E_PFPM_WUFC,
+		wr32(hw, I40E_PFPM_WUFC(pf->hw.pf_id),
 		     (pf->wol_en ? I40E_PFPM_WUFC_MAG_MASK : 0));
 	}
 
@@ -18247,8 +18263,10 @@ static int i40e_suspend(struct device *dev)
 
 	i40e_prep_for_reset(pf);
 
-	wr32(hw, I40E_PFPM_APM, (pf->wol_en ? I40E_PFPM_APM_APME_MASK : 0));
-	wr32(hw, I40E_PFPM_WUFC, (pf->wol_en ? I40E_PFPM_WUFC_MAG_MASK : 0));
+	wr32(hw, I40E_PFPM_APM(pf->hw.pf_id),
+	     (pf->wol_en ? I40E_PFPM_APM_APME_MASK : 0));
+	wr32(hw, I40E_PFPM_WUFC(pf->hw.pf_id),
+	     (pf->wol_en ? I40E_PFPM_WUFC_MAG_MASK : 0));
 
 	/* Clear the interrupt scheme and release our IRQs so that the system
 	 * can safely hibernate even when there are a large number of CPUs.

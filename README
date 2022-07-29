@@ -2,7 +2,7 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet 700 Series
 ============================================================
 
-February 24, 2022
+July 5, 2022
 Copyright(c) 2014 - 2022 Intel Corporation.
 
 Contents
@@ -123,14 +123,16 @@ Once the VM shuts down, or otherwise releases the VF, the command will complete.
 Configuring SR-IOV for improved network security
 ------------------------------------------------
 In a virtualized environment, on Intel(R) Ethernet Network Adapters that
-support SR-IOV, the virtual function (VF) may be subject to malicious behavior.
+support SR-IOV or Intel(R) Scalable I/O Virtualization (Intel(R) Scalable IOV),
+the virtual function (VF) may be subject to malicious behavior.
 Software-generated layer two frames, like IEEE 802.3x (link flow control), IEEE
 802.1Qbb (priority based flow-control), and others of this type, are not
 expected and can throttle traffic between the host and the virtual switch,
 reducing performance. To resolve this issue, and to ensure isolation from
-unintended traffic streams, configure all SR-IOV enabled ports for VLAN tagging
-from the administrative interface on the PF. This configuration allows
-unexpected, and potentially malicious, frames to be dropped.
+unintended traffic streams, configure all SR-IOV or Intel Scalable IOV enabled
+ports for VLAN tagging from the administrative interface on the PF. This
+configuration allows unexpected, and potentially malicious, frames to be
+dropped.
 
 See "Configuring VLAN Tagging on SR-IOV Enabled Adapter Ports" later in this
 README for configuration instructions.
@@ -241,10 +243,18 @@ Note: RPM functionality has only been tested in Red Hat distributions.
        or
    # dnf/yum localinstall <i40e RPM> <auxiliary RPM>
 
+NOTE: On some distributions, the auxiliary RPM may fail to install due to
+missing kernel-devel headers. To workaround this issue, specify '--excludepath'
+during installation. For example:
+
+# rpm -Uvh auxiliary-1.0.0-1.x86_64.rpm
+--excludepath=/lib/modules/3.10.0-957.el7.x86_64/source/include/linux/auxiliary_
+bus.h
+
 NOTES:
 - To compile the driver on some kernel/arch combinations, you may need to
 install a package with the development version of libelf (e.g. libelf-dev,
-libelf-devel, elfutilsl-libelf-devel).
+libelf-devel, elfutils-libelf-devel).
 - When compiling an out-of-tree driver, details will vary by distribution.
 However, you will usually need a kernel-devel RPM or some RPM that provides the
 kernel headers at a minimum. The RPM kernel-devel will usually fill in the link
@@ -467,7 +477,7 @@ ingress traffic, use the following command:
 
 The vf-true-promisc-support private flag does not enable promiscuous mode;
 rather, it designates which type of promiscuous mode (limited or true) you will
-get when you enable promiscuous mode using the ip link commands above. Note
+get when you enable promiscuous mode using the 'ip link' commands above. Note
 that this is a global setting that affects the entire device. However, the
 vf-true-promisc-support private flag is only exposed to the first PF of the
 device. The PF remains in limited promiscuous mode (unless it is in MFP mode)
@@ -543,10 +553,8 @@ the flag you set.
 
 Intel(R) Ethernet Flow Director
 -------------------------------
-NOTE: Intel Ethernet Flow Director parameters are only supported on kernel
-versions 2.6.30 or newer.
-
-The Intel Ethernet Flow Director performs the following tasks:
+The Intel(R) Ethernet Flow Director (Intel(R) Ethernet FD) performs the
+following tasks:
 
 - Directs receive packets according to their flows to different queues
 - Enables tight control on routing a flow in the platform
@@ -720,8 +728,34 @@ The i40e driver does not support matching on a subportion of a field, thus
 partial mask fields are not supported.
 
 
-Flex Byte Flow Director Filters
--------------------------------
+Filters to Direct Traffic to a Specific VF
+------------------------------------------
+It is possible to create filters that direct traffic to a specific Virtual
+Function. For older versions of ethtool, this depends on the "action"
+parameter. Specify the action as a 64-bit value, where the lower 32 bits
+represent the queue number, while the next 8 bits represent the VF ID. Note
+that 0 is the PF, so the VF identifier is offset by 1. For example:
+
+# ethtool -U <ethX> flow-type tcp4 src-ip 192.168.10.1 dst-ip \
+192.168.10.2 src-port 2000 dst-port 2001 action 0x800000002 [loc 1]
+
+The action field specifies to direct traffic to Virtual Function 7 (8 minus 1)
+into queue 2 of that VF.
+
+Newer versions of ethtool (version 4.11 and later) use "vf" and "queue"
+parameters instead of the "action" parameter. Note that using the new ethtool
+"vf" parameter does not require the value to be offset by 1. This command is
+equivalent to the above example:
+
+# ethtool -U <ethX> flow-type tcp4 src-ip 192.168.10.1 dst-ip \
+192.168.10.2 src-port 2000 dst-port 2001 vf 7 queue 2 [loc 1]
+
+Note that these filters will not break internal routing rules, and will not
+route traffic that otherwise would not have been sent to the specified VF.
+
+
+Flex Byte Intel Ethernet Flow Director Filters
+----------------------------------------------
 The driver also supports matching user-defined data within the packet payload.
 This flexible data is specified using the "user-def" field of the ethtool
 command in the following way:
@@ -756,32 +790,6 @@ The user-defined flexible offset is also considered part of the input set and
 cannot be programmed separately for multiple filters of the same type. However,
 the flexible data is not part of the input set and multiple filters may use the
 same offset but match against different data.
-
-
-Filters to Direct Traffic to a Specific VF
-------------------------------------------
-It is possible to create filters that direct traffic to a specific Virtual
-Function. For older versions of ethtool, this depends on the "action"
-parameter. Specify the action as a 64-bit value, where the lower 32 bits
-represent the queue number, while the next 8 bits represent the VF ID. Note
-that 0 is the PF, so the VF identifier is offset by 1. For example:
-
-# ethtool -U <ethX> flow-type tcp4 src-ip 192.168.10.1 dst-ip \
-192.168.10.2 src-port 2000 dst-port 2001 action 0x800000002 [loc 1]
-
-The action field specifies to direct traffic to Virtual Function 7 (8 minus 1)
-into queue 2 of that VF.
-
-Newer versions of ethtool (version 4.11 and later) use "vf" and "queue"
-parameters instead of the "action" parameter. Note that using the new ethtool
-"vf" parameter does not require the value to be offset by 1. This command is
-equivalent to the above example:
-
-# ethtool -U <ethX> flow-type tcp4 src-ip 192.168.10.1 dst-ip \
-192.168.10.2 src-port 2000 dst-port 2001 vf 7 queue 2 [loc 1]
-
-Note that these filters will not break internal routing rules, and will not
-route traffic that otherwise would not have been sent to the specified VF.
 
 
 Cloud Filter Support
@@ -981,11 +989,13 @@ Requirements:
 - The sch_mqprio, act_mirred and cls_flower modules must be loaded. For example:
 # modprobe sch_mqprio
 # modprobe act_mirred
-# modprove cls_flower
+# modprobe cls_flower
 - The latest version of iproute2
+We recommend the following installation method:
 # cd iproute2
 # ./configure
 # make DESTDIR=/opt/iproute2 install
+# ln -s /opt/iproute2/sbin/tc /usr/local/sbin/tc
 - NVM version 6.01 or later
 - ADQ cannot be enabled when the following features are enabled: Data Center
 Bridging (DCB), Multiple Functions per Port (MFP), or Sideband Filters.
@@ -996,11 +1006,10 @@ enable ADQ.
 
 Creating traffic classes
 ------------------------
-Run all TC commands from the ../iproute2/tc/ directory.
-If you set max_rate to less than 50Mbps, then max_rate is rounded up to 50Mbps
-and a warning is logged in dmesg.
+NOTE: These instructions are not specific to ADQ configuration. Refer to the tc
+and tc-flower man pages for more information on creating traffic classes (TCs).
 
-To create traffic classes (TCs) on the interface:
+To create traffic classes on the interface:
 
 1. Use the tc command to create traffic classes. You can create a maximum of
    8 TCs per interface.
@@ -1036,9 +1045,44 @@ TCs are configured using mqprio.
 
    # ethtool -K <ethX> hw-tc-offload on
 
-4. Apply TCs to ingress (Rx) flow of the interface:
+4. Add clsact qdisc to enable adding ingress/egress filters for Rx/Tx:
 
-   # tc qdisc add dev <ethX> ingress
+   # tc qdisc add dev <ethX> clsact
+
+5. Verify successful TC creation after qdisc is created:
+
+   # tc qdisc show dev <ethX> ingress
+
+
+TRAFFIC CLASS EXAMPLES:
+See the tc and tc-flower man pages for more information on traffic control and
+TC flower filters.
+
+- To set up two TCs (tc0 and tc1), with 16 queues each, priorities 0-3 for
+  tc0 and 4-7 for tc1, and max Tx rate set to 1Gbit for tc0 and 3Gbit for tc1:
+
+  # tc qdisc add dev ens4f0 root mqprio num_tc 2 map 0 0 0 0 1 1 1 1 queues
+    16@0 16@16 hw 1 mode channel shaper bw_rlimit max_rate 1Gbit 3Gbit
+  Where:
+      map 0 0 0 0 1 1 1 1: Sets priorities 0-3 to use tc0 and 4-7 to use tc1
+      queues 16@0 16@16: Assigns 16 queues to tc0 at offset 0 and 16 queues
+          to tc1 at offset 16
+
+NOTE: If you set max_rate to less than 50Mbps, then max_rate is rounded up to
+50Mbps and a warning is logged in dmesg.
+
+
+Creating traffic class filters
+------------------------------
+NOTE: These instructions are not specific to ADQ configuration.
+
+After creating traffic classes, use the tc command to create filters for
+traffic. Refer to the tc and tc-flower man pages for more information.
+
+To view all TC filters:
+
+  # tc filter show dev <ethX> ingress
+  # tc filter show dev <ethX> egress
 
 NOTES:
 - Tunnel filters are not supported in ADQ. If encapsulated packets do arrive in
@@ -1054,31 +1098,60 @@ as it does not match PF address data.
 traffic will be duplicated and sent to all matching TC queues. The hardware
 switch mirrors the packet to a VSI list when multiple filters are matched.
 
-EXAMPLES:
-See the tc and tc-flower man pages for more information on traffic control and
-TC flower filters.
+TC FILTER EXAMPLES:
+To configure TCP TC filters, where:
+      protocol: Encapsulation protocol (valid options are IP and 802.1Q).
+      prio: Priority.
+      flower: Flow-based traffic control filter.
+      dst_ip: IP address of the device.
+      ip_proto: IP protocol to use (TCP or UDP).
+      dst_port: Destination port.
+      src_port: Source port.
+      skip_sw: Flag to add the rule only in hardware.
+      hw_tc: Route incoming traffic flow to this hardware TC. The TC count
+          starts at 0. For example, 'hw_tc 1' indicates that the filter
+          is on the second TC.
+      vlan_id: VLAN ID.
 
-- To set up two TCs (tc0 and tc1), with 16 queues each, priorities 0-3 for
-  tc0 and 4-7 for tc1, and max Tx rate set to 1Gbit for tc0 and 3Gbit for tc1:
+- TCP: Destination IP + L4 Destination Port
+  To route incoming TCP traffic with a matching destination IP address and
+  destination port to the given TC:
 
-  # tc qdisc add dev ens4f0 root mqprio num_tc 2 map 0 0 0 0 1 1 1 1 queues
-    16@0 16@16 hw 1 mode channel shaper bw_rlimit max_rate 1Gbit 3Gbit
-  Where:
-      map 0 0 0 0 1 1 1 1: Sets priorities 0-3 to use tc0 and 4-7 to use tc1
-      queues 16@0 16@16: Assigns 16 queues to tc0 at offset 0 and 16 queues
-          to tc1 at offset 16
+  # tc filter add dev <ethX> protocol ip ingress prio 1 flower dst_ip
+    <ip_address> ip_proto tcp dst_port <port_number> skip_sw hw_tc 1
 
-Multiple filters can be added to the device, using the same recipe (and
+- TCP: Source IP + L4 Source Port
+  To route outgoing TCP traffic with a matching source IP address and
+  source port to the given TC associated with the given priority:
+
+  # tc filter add dev <ethX> protocol ip egress prio 1 flower src_ip
+    <ip_address> ip_proto tcp src_port <port_number> action skbedit priority 1
+
+
+- TCP: Destination IP + L4 Destination Port + VLAN Protocol
+  To route incoming TCP traffic with a matching destination IP address and
+  destination port to the given TC using the VLAN protocol (802.1Q):
+
+  # tc filter add dev <ethX> protocol 802.1Q ingress prio 1 flower
+    dst_ip <ip address> eth_type ipv4 ip_proto tcp dst_port <port_number>
+    vlan_id <vlan_id> skip_sw hw_tc 1
+
+
+NOTE: You can add multiple filters to the device, using the same recipe (and
 requires no additional recipe resources), either on the same interface or on
 different interfaces. Each filter uses the same fields for matching, but can
 have different match values.
   # tc filter add dev <ethX> protocol ip ingress prio 1 flower ip_proto
-    tcp dst_port $app_port skip_sw hw_tc 1
+    tcp dst_port <port_number> skip_sw hw_tc 1
+  # tc filter add dev <ethX> protocol ip egress prio 1 flower ip_proto tcp
+    src_port <port_number> action skbedit priority 1
 
 For example:
 
-  # tc filter add dev <ethX> protocol ip ingress prio 1 flower ip_proto
+  # tc filter add dev ens4f0 protocol ip ingress prio 1 flower ip_proto
      tcp dst_port 5555 skip_sw hw_tc 1
+  # tc filter add dev ens4f0 protocol ip egress prio 1 flower ip_proto
+    tcp src_port 5555 action skbedit priority 1
 
 
 RDMA (Remote Direct Memory Access)
@@ -1518,8 +1591,9 @@ SR-IOV hypervisor functions:
 - tpid
   Specifies the TPID of the outer VLAN tag (S-tag). Can be set to 0x88A8 or
   0x8100. This setting affects all VFs configured on the specified PF.
-  Changing the TPID on PF0 results in a device-wide change; you should align
-  TPID settings on other PFs.
+  Changing the TPID on PF0 results in a device-wide change and will restart
+  all underlying VFs; you must manually reconfigure the TPID to the same value
+  on all PFs associated with the NIC.
   Note: This setting is not supported on Intel(R) Ethernet Network Connection
   X722 based devices.
   Example 1: set TPID to 0x88A8.

@@ -1,10 +1,10 @@
 Name: i40e
 Summary: Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
-Version: 2.19.3
+Version: 2.20.12
 Release: 1
 Source: %{name}-%{version}.tar.gz
 Vendor: Intel Corporation
-License: GPL-2.0
+License: @
 ExclusiveOS: linux
 Group: System Environment/Kernel
 Provides: %{name}
@@ -18,8 +18,10 @@ BuildRoot: %{_tmppath}/%{name}-%{version}-root
 %define pciids    %find %{_pciids}
 %define pcitable  %find %{_pcitable}
 Requires: kernel, findutils, gawk, bash
-%define need_aux %(rpm -q --whatprovides /lib/modules/`uname -r`/build/include/linux/auxiliary_bus.h > /dev/null 2>&1 && echo 0 || echo 2)
-%if (%need_aux == 2)
+%define need_aux_rpm %( [ -L /lib/modules/`uname -r`/source ] && \
+                  (rpm -q --whatprovides /lib/modules/`uname -r`/source/include/linux/auxiliary_bus.h > /dev/null 2>&1 && echo 0 || echo 2) || \
+                  (rpm -q --whatprovides /lib/modules/`uname -r`/build/include/linux/auxiliary_bus.h > /dev/null 2>&1 && echo 0 || echo 2) )
+%if (%need_aux_rpm == 2)
 Requires: auxiliary
 %endif
 
@@ -42,18 +44,39 @@ make -C src clean
 make -C src
 
 %install
-make -C src INSTALL_MOD_PATH=%{buildroot} MANDIR=%{_mandir} modules_install mandocs_install
+%define req_aux %( [[ "%name" =~ ^(ice|ice_sw|ice_swx|iavf|i40e)$ ]] && echo 0 || echo 1 )
+
+# install drivers that have auxiliary driver dependency
+%if (%req_aux == 0)
+make -C src INSTALL_MOD_PATH=%{buildroot} MANDIR=%{_mandir} modules_install_no_aux mandocs_install
 # Remove modules files that we do not want to include
 find %{buildroot}/lib/modules/ -name 'modules.*' -exec rm -f {} \;
 cd %{buildroot}
 find lib -name "i40e.ko" -printf "/%p\n" \
 	>%{_builddir}/%{name}-%{version}/file.list
-find lib -name "auxiliary.ko" -printf "/%p\n" \
-	>%{_builddir}/%{name}-%{version}/aux.list
+%if (%need_aux_rpm == 2)
+make -C %{_builddir}/%{name}-%{version}/src INSTALL_MOD_PATH=%{buildroot} auxiliary_install
+
 find lib -path "*extern-symvers/auxiliary.symvers" -printf "/%p\n" \
-	>>%{_builddir}/%{name}-%{version}/aux.list
+	>%{_builddir}/%{name}-%{version}/aux.list
 find * -name "auxiliary_bus.h" -printf "/%p\n" \
 	>>%{_builddir}/%{name}-%{version}/aux.list
+%endif
+if [ "$(%{_builddir}/%{name}-%{version}/scripts/./check_aux_bus; echo $?)" == "2" ] ; then
+find lib -name "auxiliary.ko" -printf "/%p\n" \
+	>>%{_builddir}/%{name}-%{version}/file.list
+fi
+
+# install drivers that do not have auxiliary driver dependency
+%else
+make -C src INSTALL_MOD_PATH=%{buildroot} MANDIR=%{_mandir} modules_install mandocs_install
+# Remove modules files that we do not want to include
+find %{buildroot}/lib/modules/ -name 'modules.*' -exec rm -f {} \;
+cd %{buildroot}
+find lib -name "i40e.ko" \
+	-fprintf %{_builddir}/%{name}-%{version}/file.list "/%p\n"
+%endif
+
 
 
 %clean
@@ -401,6 +424,7 @@ else
 	exit -1
 fi
 
+%if (%need_aux_rpm == 2) && (%req_aux == 0)
 %package -n auxiliary
 Summary: Auxiliary bus driver (backport)
 Version: 1.0.0
@@ -408,8 +432,9 @@ Version: 1.0.0
 %description -n auxiliary
 The Auxiliary bus driver (auxiliary.ko), backported from upstream, for use by kernels that don't have auxiliary bus.
 
-# %if to hide this whole section, causes RPM to not build the subproject at all
-%if (%need_aux == 2)
+# The if is used to hide this whole section. This causes RPM to skip the build
+# of the auxiliary subproject entirely.
 %files -n auxiliary -f aux.list
 %doc aux.list
 %endif
+

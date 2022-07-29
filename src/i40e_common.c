@@ -3889,7 +3889,7 @@ static void i40e_parse_discover_capabilities(struct i40e_hw *hw, void *buff,
 	 */
 	if (hw->num_ports != 0) {
 		hw->partition_id = (hw->pf_id / hw->num_ports) + 1;
-		hw->num_partitions = num_functions / hw->num_ports;
+		hw->num_partitions = (u16)(num_functions / hw->num_ports);
 	}
 
 	/* additional HW specific goodies that might
