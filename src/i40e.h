@@ -56,6 +56,9 @@
 #ifdef __TC_MQPRIO_MODE_MAX
 #include <net/pkt_cls.h>
 #endif
+#ifdef HAVE_UDP_TUNNEL_NIC_INFO
+#include <net/udp_tunnel.h>
+#endif /* HAVE_UDP_TUNNEL_NIC_INFO */
 #ifdef HAVE_AF_XDP_NETDEV_UMEM
 #include <net/xdp_sock.h>
 #endif /* HAVE_AF_XDP_NETDEV_UMEM */
@@ -70,6 +73,15 @@
 #ifdef HAVE_XDP_SUPPORT
 #include <linux/bpf_trace.h>
 #endif
+
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+#include "i40e_xsk.h"
+#ifndef HAVE_MEM_TYPE_XSK_BUFF_POOL
+#include <net/xdp_sock.h>
+#else
+#include <net/xdp_sock_drv.h>
+#endif
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
 
 /* Useful i40e defaults */
 #define I40E_MAX_VEB			16
@@ -186,7 +198,9 @@ enum i40e_state_t {
 	__I40E_VF_DISABLE,
 	__I40E_RECOVERY_MODE,
 	__I40E_MACVLAN_SYNC_PENDING,
+#ifndef HAVE_UDP_TUNNEL_NIC_INFO
 	__I40E_UDP_FILTER_SYNC_PENDING,
+#endif /* HAVE_UDP_TUNNEL_NIC_INFO */
 	__I40E_TEMP_LINK_POLLING,
 	__I40E_CLIENT_SERVICE_REQUESTED,
 	__I40E_CLIENT_L2_CHANGE,
@@ -594,8 +608,13 @@ struct i40e_pf {
 	struct list_head l3_flex_pit_list;
 	struct list_head l4_flex_pit_list;
 
+#ifndef HAVE_UDP_TUNNEL_NIC_INFO
 	struct i40e_udp_port_config udp_ports[I40E_MAX_PF_UDP_OFFLOAD_PORTS];
 	u16 pending_udp_bitmap;
+#else
+	struct udp_tunnel_nic_shared udp_tunnel_shared;
+	struct udp_tunnel_nic_info udp_tunnel_nic;
+#endif /* HAVE_UDP_TUNNEL_NIC_INFO */
 
 	struct hlist_head cloud_filter_list;
 	u16 num_cloud_filters;
@@ -987,6 +1006,7 @@ struct i40e_vsi {
 	u64 tx_force_wb;
 	u32 rx_buf_failed;
 	u32 rx_page_failed;
+	u64 rx_page_reuse;
 
 	/* These are containers of ring pointers, allocated at run-time */
 	struct i40e_ring **rx_rings;
@@ -1290,7 +1310,7 @@ int i40e_vsi_release(struct i40e_vsi *vsi);
 int i40e_vsi_mem_alloc(struct i40e_pf *pf, enum i40e_vsi_type type);
 int i40e_vsi_setup_rx_resources(struct i40e_vsi *vsi);
 int i40e_vsi_setup_tx_resources(struct i40e_vsi *vsi);
-int i40e_vsi_config_tc(struct i40e_vsi *vsi, u8 enabled_tc);
+i40e_status i40e_vsi_config_tc(struct i40e_vsi *vsi, u8 enabled_tc);
 int i40e_vsi_request_irq_msix(struct i40e_vsi *vsi, char *basename);
 void i40e_service_event_schedule(struct i40e_pf *pf);
 void i40e_notify_client_of_vf_msg(struct i40e_vsi *vsi, u32 vf_id,
@@ -1424,12 +1444,12 @@ int i40e_ptp_alloc_pins(struct i40e_pf *pf);
 #endif /* HAVE_PTP_1588_CLOCK */
 u8 i40e_pf_get_num_tc(struct i40e_pf *pf);
 int i40e_update_adq_vsi_queues(struct i40e_vsi *vsi, int vsi_offset);
-int i40e_vsi_get_bw_info(struct i40e_vsi *vsi);
+i40e_status i40e_vsi_get_bw_info(struct i40e_vsi *vsi);
 int i40e_is_vsi_uplink_mode_veb(struct i40e_vsi *vsi);
 i40e_status i40e_get_partition_bw_setting(struct i40e_pf *pf);
 i40e_status i40e_set_partition_bw_setting(struct i40e_pf *pf);
 i40e_status i40e_commit_partition_bw_setting(struct i40e_pf *pf);
-int i40e_set_bw_limit(struct i40e_vsi *vsi, u16 seid, u64 max_tx_rate);
+i40e_status i40e_set_bw_limit(struct i40e_vsi *vsi, u16 seid, u64 max_tx_rate);
 int i40e_add_del_cloud_filter_ex(struct i40e_pf *pf,
 				 struct i40e_cloud_filter *filter,
 				 bool add);
@@ -1477,7 +1497,11 @@ static inline struct xdp_umem *i40e_xsk_umem(struct i40e_ring *ring)
 		return NULL;
 
 #ifdef HAVE_AF_XDP_NETDEV_UMEM
-	return xdp_get_umem_from_qid(ring->vsi->netdev, qid);
+#ifdef HAVE_NETDEV_BPF_XSK_POOL
+	return xsk_get_pool_from_qid(ring->vsi->netdev, qid)->umem;
+#else
+	return xsk_get_pool_from_qid(ring->vsi->netdev, qid);
+#endif /* HAVE_NETDEV_BPF_XSK_POOL */
 #else
 	return ring->vsi->xsk_umems[qid];
 #endif /* HAVE_AF_XDP_NETDEV_UMEM */

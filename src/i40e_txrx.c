@@ -170,8 +170,8 @@ dma_fail:
  *
  * Returns address of layer 4 protocol dummy packet.
  **/
-static char *i40e_create_dummy_packet(u8 *dummy_packet, bool ipv4, u8 l4proto,
-				      struct i40e_fdir_filter *data)
+static u8 *i40e_create_dummy_packet(u8 *dummy_packet, bool ipv4, u8 l4proto,
+				    struct i40e_fdir_filter *data)
 {
 	bool is_vlan = !!data->vlan_tag;
 	struct vlan_hdr vlan;
@@ -228,12 +228,11 @@ static char *i40e_create_dummy_packet(u8 *dummy_packet, bool ipv4, u8 l4proto,
  * i40e_create_dummy_udp_packet - helper function to create UDP packet
  * @raw_packet: preallocated space for dummy packet
  * @ipv4: is layer 3 packet of version 4 or 6
- * @l4proto: next level protocol used in data portion of l3
  * @data: filter data
  *
  * Helper function to populate udp fields.
  **/
-static void i40e_create_dummy_udp_packet(u8 *raw_packet, bool ipv4, u8 l4proto,
+static void i40e_create_dummy_udp_packet(u8 *raw_packet, bool ipv4,
 					 struct i40e_fdir_filter *data)
 {
 	struct udphdr *udp;
@@ -249,12 +248,11 @@ static void i40e_create_dummy_udp_packet(u8 *raw_packet, bool ipv4, u8 l4proto,
  * i40e_create_dummy_tcp_packet - helper function to create TCP packet
  * @raw_packet: preallocated space for dummy packet
  * @ipv4: is layer 3 packet of version 4 or 6
- * @l4proto: next level protocol used in data portion of l3
  * @data: filter data
  *
  * Helper function to populate tcp fields.
  **/
-static void i40e_create_dummy_tcp_packet(u8 *raw_packet, bool ipv4, u8 l4proto,
+static void i40e_create_dummy_tcp_packet(u8 *raw_packet, bool ipv4,
 					 struct i40e_fdir_filter *data)
 {
 	struct tcphdr *tcp;
@@ -390,7 +388,7 @@ static int i40e_add_del_fdir_udp(struct i40e_vsi *vsi,
 	raw_packet = kzalloc(I40E_FDIR_MAX_RAW_PACKET_SIZE, GFP_KERNEL);
 	if (!raw_packet)
 		return -ENOMEM;
-	i40e_create_dummy_udp_packet(raw_packet, ipv4, IPPROTO_UDP, fd_data);
+	i40e_create_dummy_udp_packet(raw_packet, ipv4, fd_data);
 
 	if (ipv4)
 		ret = i40e_prepare_fdir_filter
@@ -436,7 +434,7 @@ static int i40e_add_del_fdir_tcp(struct i40e_vsi *vsi,
 	raw_packet = kzalloc(I40E_FDIR_MAX_RAW_PACKET_SIZE, GFP_KERNEL);
 	if (!raw_packet)
 		return -ENOMEM;
-	i40e_create_dummy_tcp_packet(raw_packet, ipv4, IPPROTO_TCP, fd_data);
+	i40e_create_dummy_tcp_packet(raw_packet, ipv4, fd_data);
 	if (ipv4)
 		ret = i40e_prepare_fdir_filter
 			(pf, fd_data, add, raw_packet,
@@ -693,7 +691,7 @@ void i40e_fd_handle_status(struct i40e_ring *rx_ring,
 	struct i40e_pf *pf = rx_ring->vsi->back;
 	struct pci_dev *pdev = pf->pdev;
 #ifdef HAVE_MEM_TYPE_XSK_BUFF_POOL
-	struct i40e_32b_rx_wb_qw0 *qw0;
+	struct i40e_rx_wb_qw0 *qw0;
 #endif /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
 	u32 fcnt_prog, fcnt_avail;
 	u32 error;
@@ -703,7 +701,7 @@ void i40e_fd_handle_status(struct i40e_ring *rx_ring,
 	qw = le64_to_cpu(rx_desc->wb.qword1.status_error_len);
 	error = (qw & I40E_RX_PROG_STATUS_DESC_QW1_ERROR_MASK) >>
 #else
-	qw0 = (struct i40e_32b_rx_wb_qw0 *)&qword0_raw;
+	qw0 = (struct i40e_rx_wb_qw0 *)&qword0_raw;
 	error = (qword1 & I40E_RX_PROG_STATUS_DESC_QW1_ERROR_MASK) >>
 #endif /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
 		I40E_RX_PROG_STATUS_DESC_QW1_ERROR_SHIFT;
@@ -1489,6 +1487,22 @@ static void i40e_reuse_rx_skb(struct i40e_ring *rx_ring,
 
 #endif /* CONFIG_I40E_DISABLE_PACKET_SPLIT */
 
+#if (defined HAVE_MEM_TYPE_XSK_BUFF_POOL)
+/**
+ * i40e_clean_programming_status - clean the programming status descriptor
+ * @rx_ring: the rx ring that has this descriptor
+ * @qword0_raw: qword0
+ * @qword1: qword1 representing status_error_len in CPU ordering
+ *
+ * Flow director should handle FD_FILTER_STATUS to check its filter programming
+ * status being successful or not and take actions accordingly. FCoE should
+ * handle its context/filter programming/invalidation status and take actions.
+ *
+ * Returns an i40e_rx_buffer to reuse if the cleanup occurred, otherwise NULL.
+ **/
+void i40e_clean_programming_status(struct i40e_ring *rx_ring, u64 qword0_raw,
+				   u64 qword1)
+#else
 /**
  * i40e_clean_programming_status - try to clean the programming status
  * descriptor
@@ -1506,6 +1520,7 @@ struct i40e_rx_buffer *i40e_clean_programming_status
 	(struct i40e_ring *rx_ring,
 	 union i40e_rx_desc *rx_desc,
 	 u64 qw)
+#endif /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
 {
 #ifndef HAVE_MEM_TYPE_XSK_BUFF_POOL
 	struct i40e_rx_buffer *rx_buffer;
@@ -1639,10 +1654,8 @@ void i40e_clean_rx_ring(struct i40e_ring *rx_ring)
 	if (!rx_ring->rx_bi)
 		return;
 
-	if (rx_ring->skb) {
-		dev_kfree_skb(rx_ring->skb);
-		rx_ring->skb = NULL;
-	}
+	dev_kfree_skb(rx_ring->skb);
+	rx_ring->skb = NULL;
 
 #ifdef HAVE_AF_XDP_ZC_SUPPORT
 #ifdef HAVE_NETDEV_BPF_XSK_POOL
@@ -2304,8 +2317,7 @@ static inline void i40e_rx_hash(struct i40e_ring *ring,
  * other fields within the skb.
  **/
 void i40e_process_skb_fields(struct i40e_ring *rx_ring,
-			     union i40e_rx_desc *rx_desc, struct sk_buff *skb,
-			     u8 rx_ptype)
+			     union i40e_rx_desc *rx_desc, struct sk_buff *skb)
 {
 #ifdef HAVE_PTP_1588_CLOCK
 	u64 qword = le64_to_cpu(rx_desc->wb.qword1.status_error_len);
@@ -2314,6 +2326,8 @@ void i40e_process_skb_fields(struct i40e_ring *rx_ring,
 	u32 tsynvalid = rx_status & I40E_RXD_QW1_STATUS_TSYNVALID_MASK;
 	u32 tsyn = (rx_status & I40E_RXD_QW1_STATUS_TSYNINDX_MASK) >>
 		   I40E_RXD_QW1_STATUS_TSYNINDX_SHIFT;
+	u32 rx_ptype = (qword & I40E_RXD_QW1_PTYPE_MASK) >>
+		       I40E_RXD_QW1_PTYPE_SHIFT;
 
 	if (unlikely(tsynvalid))
 		i40e_ptp_rx_hwtstamp(rx_ring->vsi->back, skb, tsyn);
@@ -2952,7 +2966,6 @@ static int i40e_clean_rx_irq(struct i40e_ring *rx_ring, int budget)
 		union i40e_rx_desc *rx_desc;
 		unsigned int size;
 		u16 vlan_tag;
-		u8 rx_ptype;
 		u64 qword;
 
 		/* return some buffers to hardware, one at a time is too slow */
@@ -3075,11 +3088,9 @@ static int i40e_clean_rx_irq(struct i40e_ring *rx_ring, int budget)
 		total_rx_bytes += skb->len;
 
 		qword = le64_to_cpu(rx_desc->wb.qword1.status_error_len);
-		rx_ptype = (qword & I40E_RXD_QW1_PTYPE_MASK) >>
-			   I40E_RXD_QW1_PTYPE_SHIFT;
 
 		/* populate checksum, VLAN, and protocol */
-		i40e_process_skb_fields(rx_ring, rx_desc, skb, rx_ptype);
+		i40e_process_skb_fields(rx_ring, rx_desc, skb);
 
 		vlan_tag = (qword & BIT(I40E_RX_DESC_STATUS_L2TAG1P_SHIFT)) ?
 			   le16_to_cpu(rx_desc->wb.qword0.lo_dword.l2tag1) : 0;

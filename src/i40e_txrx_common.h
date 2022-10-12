@@ -20,8 +20,7 @@ struct i40e_rx_buffer *i40e_clean_programming_status
 #endif
 void i40e_process_skb_fields(struct i40e_ring *rx_ring,
 			     union i40e_rx_desc *rx_desc,
-			     struct sk_buff *skb,
-			     u8 rx_ptype);
+			     struct sk_buff *skb);
 void i40e_receive_skb(struct i40e_ring *rx_ring,
 		      struct sk_buff *skb, u16 vlan_tag, u16 vlan_tpid);
 

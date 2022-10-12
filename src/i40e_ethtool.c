@@ -85,6 +85,7 @@ static const struct i40e_stats i40e_gstrings_misc_stats[] = {
 	I40E_VSI_STAT("tx_busy", tx_busy),
 	I40E_VSI_STAT("rx_alloc_fail", rx_buf_failed),
 	I40E_VSI_STAT("rx_pg_alloc_fail", rx_page_failed),
+	I40E_VSI_STAT("rx_cache_reuse", rx_page_reuse),
 };
 
 /* These PF_STATs might look like duplicates of some NETDEV_STATs,
@@ -1071,6 +1072,84 @@ static int i40e_get_link_ksettings(struct net_device *netdev,
 }
 
 #ifdef ETHTOOL_GLINKSETTINGS
+#define I40E_LBIT_SIZE 8
+/**
+ * i40e_speed_to_link_speed - Translate decimal speed to i40e_aq_link_speed
+ * @speed: speed in decimal
+ * @ks: ethtool ksettings
+ *
+ * Return i40e_aq_link_speed based on speed
+ **/
+static enum i40e_aq_link_speed
+i40e_speed_to_link_speed(__u32 speed, const struct ethtool_link_ksettings *ks)
+{
+	enum i40e_aq_link_speed link_speed = I40E_LINK_SPEED_UNKNOWN;
+	bool speed_changed = false;
+	int i, j;
+
+	static const struct {
+		__u32 speed;
+		enum i40e_aq_link_speed link_speed;
+		__u8 bit[I40E_LBIT_SIZE];
+	} i40e_speed_lut[] = {
+#define I40E_LBIT(mode) ETHTOOL_LINK_MODE_ ## mode ##_Full_BIT
+		{SPEED_100, I40E_LINK_SPEED_100MB, {I40E_LBIT(100baseT)} },
+		{SPEED_1000, I40E_LINK_SPEED_1GB,
+#ifdef HAVE_ETHTOOL_NEW_10G_BITS
+		 {I40E_LBIT(1000baseT), I40E_LBIT(1000baseX),
+		  I40E_LBIT(1000baseKX)} },
+#else
+		 {I40E_LBIT(1000baseT), I40E_LBIT(1000baseKX)} },
+#endif /* HAVE_ETHTOOL_NEW_10G_BITS */
+		{SPEED_10000, I40E_LINK_SPEED_10GB,
+#ifdef HAVE_ETHTOOL_NEW_10G_BITS
+		 {I40E_LBIT(10000baseT), I40E_LBIT(10000baseKR),
+		  I40E_LBIT(10000baseLR), I40E_LBIT(10000baseCR),
+		  I40E_LBIT(10000baseSR), I40E_LBIT(10000baseKX4)} },
+#else
+		 {I40E_LBIT(10000baseT), I40E_LBIT(10000baseKR),
+		  I40E_LBIT(10000baseKX4)} },
+#endif /* HAVE_ETHTOOL_NEW_10G_BITS */
+		{SPEED_25000, I40E_LINK_SPEED_25GB,
+		 {I40E_LBIT(25000baseCR), I40E_LBIT(25000baseKR),
+		  I40E_LBIT(25000baseSR)} },
+		{SPEED_40000, I40E_LINK_SPEED_40GB,
+		 {I40E_LBIT(40000baseKR4), I40E_LBIT(40000baseCR4),
+		  I40E_LBIT(40000baseSR4), I40E_LBIT(40000baseLR4)} },
+		{SPEED_20000, I40E_LINK_SPEED_20GB,
+		 {I40E_LBIT(20000baseKR2)} },
+#ifdef HAVE_ETHTOOL_NEW_2500MB_BITS
+		{SPEED_2500, I40E_LINK_SPEED_2_5GB, {I40E_LBIT(2500baseT)} },
+#endif /* HAVE_ETHTOOL_NEW_2500MB_BITS */
+#ifdef HAVE_ETHTOOL_5G_BITS
+		{SPEED_5000, I40E_LINK_SPEED_5GB, {I40E_LBIT(2500baseT)} }
+#endif /* HAVE_ETHTOOL_5G_BITS */
+#undef I40E_LBIT
+};
+
+	for (i = 0; i < ARRAY_SIZE(i40e_speed_lut); i++) {
+		if (i40e_speed_lut[i].speed == speed) {
+			for (j = 0; j < I40E_LBIT_SIZE; j++) {
+				if (test_bit(i40e_speed_lut[i].bit[j],
+					     ks->link_modes.supported)) {
+					speed_changed = true;
+					break;
+				}
+				if (!i40e_speed_lut[i].bit[j]) {
+					break;
+				}
+			}
+			if (speed_changed) {
+				link_speed = i40e_speed_lut[i].link_speed;
+				break;
+			}
+		}
+	}
+	return link_speed;
+}
+
+#undef I40E_LBIT_SIZE
+
 /**
  * i40e_set_link_ksettings - Set Speed and Duplex
  * @netdev: network interface device structure
@@ -1087,12 +1166,14 @@ static int i40e_set_link_ksettings(struct net_device *netdev,
 	struct ethtool_link_ksettings copy_ks;
 	struct i40e_aq_set_phy_config config;
 	struct i40e_pf *pf = np->vsi->back;
+	enum i40e_aq_link_speed link_speed;
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_hw *hw = &pf->hw;
 	bool autoneg_changed = false;
 	i40e_status status = I40E_SUCCESS;
 	int timeout = 50;
 	int err = 0;
+	__u32 speed;
 	u8 autoneg;
 
 	/* Changing port settings is not supported if this isn't the
@@ -1125,7 +1206,7 @@ static int i40e_set_link_ksettings(struct net_device *netdev,
 
 	/* save autoneg out of ksettings */
 	autoneg = copy_ks.base.autoneg;
-
+	speed = copy_ks.base.speed;
 	/* get our own copy of the bits to check against */
 	memset(&safe_ks, 0, sizeof(struct ethtool_link_ksettings));
 	safe_ks.base.cmd = copy_ks.base.cmd;
@@ -1143,13 +1224,15 @@ static int i40e_set_link_ksettings(struct net_device *netdev,
 
 	/* set autoneg back to what it currently is */
 	copy_ks.base.autoneg = safe_ks.base.autoneg;
-
+	copy_ks.base.speed  = safe_ks.base.speed;
 	/* If copy_ks.base and safe_ks.base are not the same now, then they are
 	 * trying to set something that we do not support.
 	 */
 	if (memcmp(&copy_ks.base, &safe_ks.base,
-		   sizeof(struct ethtool_link_settings)))
+		   sizeof(struct ethtool_link_settings))) {
+		netdev_err(netdev, "Only speed and autoneg are supported.\n");
 		return -EOPNOTSUPP;
+	}
 
 	while (test_and_set_bit(__I40E_CONFIG_BUSY, pf->state)) {
 		timeout--;
@@ -1268,6 +1351,17 @@ static int i40e_set_link_ksettings(struct net_device *netdev,
 	    ethtool_link_ksettings_test_link_mode(ks, advertising,
 						  40000baseLR4_Full))
 		config.link_speed |= I40E_LINK_SPEED_40GB;
+
+	if (speed != SPEED_UNKNOWN && safe_ks.base.speed != speed) {
+		link_speed = i40e_speed_to_link_speed(speed, ks);
+		if (link_speed == I40E_LINK_SPEED_UNKNOWN) {
+			netdev_info(netdev, "Given speed is not supported\n");
+			err = -EOPNOTSUPP;
+			goto done;
+		} else {
+			config.link_speed = link_speed;
+		}
+	}
 
 	/* If speed didn't get set, set it to what it currently is.
 	 * This is needed because if advertise is 0 (as it is when autoneg
@@ -5739,11 +5833,7 @@ static int i40e_check_fdir_input_set(struct i40e_vsi *vsi,
 			return -EOPNOTSUPP;
 
 		/* First 4 bytes of L4 header */
-		if (usr_ip4_spec->l4_4_bytes == htonl(0xFFFFFFFF))
-			new_mask |= I40E_L4_SRC_MASK | I40E_L4_DST_MASK;
-		else if (!usr_ip4_spec->l4_4_bytes)
-			new_mask &= ~(I40E_L4_SRC_MASK | I40E_L4_DST_MASK);
-		else
+		if (usr_ip4_spec->l4_4_bytes)
 			return -EOPNOTSUPP;
 
 		/* Filtering on Type of Service is not supported. */
@@ -5778,16 +5868,12 @@ static int i40e_check_fdir_input_set(struct i40e_vsi *vsi,
 				    (struct in6_addr *)&ipv6_full_mask))
 			new_mask |= I40E_L3_V6_DST_MASK;
 		else if (ipv6_addr_any((struct in6_addr *)
-				       &usr_ip6_spec->ip6src))
+				       &usr_ip6_spec->ip6dst))
 			new_mask &= ~I40E_L3_V6_DST_MASK;
 		else
 			return -EOPNOTSUPP;
 
-		if (usr_ip6_spec->l4_4_bytes == htonl(0xFFFFFFFF))
-			new_mask |= I40E_L4_SRC_MASK | I40E_L4_DST_MASK;
-		else if (!usr_ip6_spec->l4_4_bytes)
-			new_mask &= ~(I40E_L4_SRC_MASK | I40E_L4_DST_MASK);
-		else
+		if (usr_ip6_spec->l4_4_bytes)
 			return -EOPNOTSUPP;
 
 		/* Filtering on Traffic class is not supported. */

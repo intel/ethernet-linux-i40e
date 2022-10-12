@@ -117,8 +117,10 @@ enum i40e_dyn_idx_t {
 #define I40E_PACKET_HDR_PAD (ETH_HLEN + ETH_FCS_LEN + (VLAN_HLEN * 2))
 #ifdef I40E_32BYTE_RX
 #define i40e_rx_desc i40e_32byte_rx_desc
+#define i40e_rx_wb_qw0 i40e_32b_rx_wb_wq0
 #else
 #define i40e_rx_desc i40e_16byte_rx_desc
+#define i40e_rx_wb_qw0 i40e_16b_rx_wb_qw0
 #endif
 
 #ifdef HAVE_STRUCT_DMA_ATTRS

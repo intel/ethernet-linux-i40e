@@ -115,6 +115,8 @@
 		8086 0007  Ethernet Network Adapter OCP XXV710-1
 		8086 0008  Ethernet Network Adapter OCP XXV710-1
 		8086 0009  Ethernet 25G 2P XXV710 Adapter
+		8086 000c  Ethernet Network Adapter XXV710-DA2 for OCP 3.0
+		8086 000d  Ethernet 25G 2P XXV710 OCP
 		8086 4001  Ethernet Network Adapter XXV710-2
 	15ff  Ethernet Controller X710 for 10GBASE-T
 		1137 02c1  Ethernet Network Adapter X710-T2L

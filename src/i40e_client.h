@@ -4,8 +4,11 @@
 #ifndef _I40E_CLIENT_H_
 #define _I40E_CLIENT_H_
 
+#ifdef USE_INTEL_AUX_BUS
+#include "linux/auxiliary_bus.h"
+#else
 #include <linux/auxiliary_bus.h>
-
+#endif /* USE_INTEL_AUX_BUS */
 
 #define I40E_PEER_RDMA_NAME    "i40e_rdma"
 #define I40E_PEER_RDMA_ID      PLATFORM_DEVID_AUTO

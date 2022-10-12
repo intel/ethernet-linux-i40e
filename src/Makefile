@@ -34,7 +34,8 @@ i40e-y += kcompat.o
 i40e-y += kcompat_vfd.o
 
 ifeq (${NEED_AUX_BUS},2)
-obj-m += auxiliary.o
+intel_auxiliary-objs := auxiliary.o
+obj-m += intel_auxiliary.o
 $(warning ${NEED_AUX_BUS})
 endif
 

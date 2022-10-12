@@ -2,7 +2,7 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet 700 Series
 ============================================================
 
-July 5, 2022
+September 2, 2022
 Copyright(c) 2014 - 2022 Intel Corporation.
 
 Contents
@@ -1033,7 +1033,10 @@ To create traffic classes on the interface:
       max_rate <max_rate1 ...>: Sets the maximum bandwidth rate limit for each
           TC. You can set a min and max rate together.
 
-NOTE: See the mqprio man page and the examples below for more information.
+NOTE:
+- If you set max_rate to less than 50Mbps, then max_rate is rounded up to
+50Mbps and a warning is logged in dmesg.
+- See the mqprio man page and the examples below for more information.
 
 2. Verify the bandwidth limit using network monitoring tools such as ifstat or
 sar -n DEV [interval] [number of samples]
@@ -1068,9 +1071,6 @@ TC flower filters.
       queues 16@0 16@16: Assigns 16 queues to tc0 at offset 0 and 16 queues
           to tc1 at offset 16
 
-NOTE: If you set max_rate to less than 50Mbps, then max_rate is rounded up to
-50Mbps and a warning is logged in dmesg.
-
 
 Creating traffic class filters
 ------------------------------
@@ -1083,6 +1083,7 @@ To view all TC filters:
 
   # tc filter show dev <ethX> ingress
   # tc filter show dev <ethX> egress
+
 
 NOTES:
 - Tunnel filters are not supported in ADQ. If encapsulated packets do arrive in
@@ -1163,7 +1164,7 @@ throughput and lowering latency in certain networking environments.
 The i40e driver supports the following RDMA protocols:
 - iWARP (Internet Wide Area RDMA Protocol)
 
-- RDMA requires auxiliary bus support. Refer to "Auxiliary Bus" in this
+RDMA requires auxiliary bus support. Refer to "Auxiliary Bus" in this
 README for more information.
 
 For detailed installation and configuration information for RDMA, see the
@@ -1181,6 +1182,28 @@ RDMA functionality requires use of the auxiliary bus.
 If your kernel supports the auxiliary bus, the LAN and RDMA drivers will use
 the inbox auxiliary bus for IDC. For kernels lower than 5.11, the base driver
 will automatically install an out-of-tree auxiliary bus module.
+
+
+Source Pruning
+--------------
+The i40e driver allows you to enable or disable source MAC address pruning of
+Ethernet packets. You can use this feature without a bond created or when
+active-backup bonding is configured with ARP monitoring.
+
+Use the ethtool private flag disable-source-pruning to enable or disable source
+MAC pruning on received packets:
+
+# ethtool --set-priv-flags <ethX> disable-source-pruning on|off
+  Where:
+  off - discards packets with source MAC address matching the source MAC
+        address of the interface (default)
+  on - receives packets with source MAC address matching the source MAC
+       address of the interface
+
+NOTE: When you set disable-source-pruning to on (enabled):
+- The driver will disable spoof check.
+- The network interface will receive all packets with a source MAC address
+matching the network interface's MAC address.
 
 
 EEE (Energy Efficient Ethernet)
@@ -1249,11 +1272,28 @@ enabling flow control may mitigate the issue.
 
 Speed and Duplex Configuration
 ------------------------------
-You cannot set speed, duplex, or autonegotiation settings using ethtool.
+The i40e driver supports setting the link speed using ethtool. You can only set
+speeds that the device actually supports. You cannot set duplex settings using
+ethtool.
 
 To see the speed configurations your device supports, run the following:
 
 # ethtool <ethX>
+
+To set your device to a supported speed on Intel Ethernet 710 Series devices,
+use the following:
+
+# ethtool -s <ethX> speed <desired speed in Mbps>
+
+For example, to set the speed to 10 Gbps, use:
+
+# ethtool -s <ethX> speed 10000
+
+NOTE: The 'speed' parameter is not supported on Intel Ethernet Network
+Connection X722.
+
+Alternately, you can use the 'advertise' parameter to set the link speed. The
+'advertise' method is supported on all Intel Ethernet 700 Series devices.
 
 To have your device advertise supported speeds, use the following:
 
@@ -1417,8 +1457,8 @@ Allows you to set the Forward Error Correction (FEC) mode. FEC improves link
 stability, but increases latency. Many high quality optics, direct attach
 cables, and backplane channels provide a stable link without FEC.
 
-NOTE: For devices to benefit from this feature, link partners must have FEC
-enabled.
+NOTE:
+For devices to benefit from this feature, link partners must have FEC enabled.
 
 NOTE:
 - Intel(R) Ethernet Controller XXV710 devices support all FEC modes listed

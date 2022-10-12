@@ -4233,8 +4233,6 @@ i40e_vc_add_vlans_legacy(struct virtchnl_vlan_filter_list *vfl,
 		}
 	}
 
-	i40e_vlan_stripping_enable(vsi);
-
 	for (i = 0; i < vfl->num_elements; i++) {
 		aq_ret = i40e_check_vf_vlan_cap(vf);
 		if (aq_ret)
@@ -5037,7 +5035,7 @@ static bool i40e_is_ok_to_alloc_vsi(struct i40e_pf *pf,
 				    struct i40e_lump_tracking *pile,
 				    u16 qp_needed, u8 num_vsi)
 {
-	u16 i = 0, qp_free = 0;
+	u16 vsi_free, i = 0, qp_free = 0;
 
 	if (!pile || qp_needed == 0)
 		return false;
@@ -5067,12 +5065,13 @@ static bool i40e_is_ok_to_alloc_vsi(struct i40e_pf *pf,
 		return false;
 
 	/* Quick scan to look for free VSIs */
-	if (pf->next_vsi + num_vsi >= pf->num_alloc_vsi) {
-		i = 0;
-		while (i < pf->next_vsi && pf->vsi[i])
+	i = 0;
+	for (vsi_free = 0; vsi_free <= num_vsi; vsi_free++) {
+		while (i < pf->num_alloc_vsi && pf->vsi[i])
 			i++;
-		if (i + num_vsi >= pf->num_alloc_vsi)
+		if (i > pf->num_alloc_vsi || pf->vsi[i])
 			return false;
+		i++;
 	}
 	return true;
 }
