@@ -30,6 +30,7 @@
 #else /* >= 7.3 */
 #undef NEED_DEV_PRINTK_ONCE
 #undef NEED_DEVM_KASPRINTF
+#define HAVE_DEVLINK_PORT_SPLIT
 #endif /* 7.3 */
 
 /*****************************************************************************/
@@ -95,6 +96,7 @@
 #define NEED_NETDEV_TX_SENT_QUEUE
 #define HAVE_DEVLINK_REGIONS
 #define HAVE_DEVLINK_PARAMS
+#define HAVE_DEVLINK_PORT_SPLIT_EXTACK
 #endif /* 8.0 */
 
 /*****************************************************************************/
@@ -110,6 +112,7 @@
 #undef NEED_INDIRECT_CALL_WRAPPER_MACROS
 #define HAVE_INDIRECT_CALL_WRAPPER_HEADER
 #define HAVE_GRETAP_TYPE
+#define HAVE_GENEVE_TYPE
 #define HAVE_VXLAN_TYPE
 #define HAVE_LINKMODE
 #define HAVE_FLOW_DISSECTOR_KEY_CVLAN
@@ -154,6 +157,7 @@
 #define XSK_UMEM_RETURNS_XDP_DESC
 #undef NEED_XSK_UMEM_GET_RX_FRAME_SIZE
 #define HAVE_ETHTOOL_COALESCE_PARAMS_SUPPORT
+#define HAVE_PTP_FIND_PIN_UNLOCKED
 #endif /* 8.4 */
 
 /*****************************************************************************/
@@ -171,6 +175,7 @@
 #undef NEED_XSK_BUFF_POOL_RENAME
 #define HAVE_NETDEV_BPF_XSK_POOL
 #define HAVE_AF_XDP_NETDEV_UMEM
+#define HAVE_DEVLINK_OPS_CREATE_DEL
 #endif /* 8.5 */
 
 /*****************************************************************************/
@@ -193,6 +198,7 @@
 #undef HAVE_DEVLINK_REGISTER_SETS_DEV
 #define HAVE_DEVLINK_NOTIFY_REGISTER
 #define HAVE_DEVLINK_SET_FEATURES
+#define HAVE_DEVLINK_PORT_SPLIT_PORT_STRUCT
 #endif /* 8.7 */
 
 /*****************************************************************************/
@@ -202,6 +208,7 @@
 #define HAVE_NDO_ETH_IOCTL
 #define NEED_NO_NETDEV_PROG_XDP_WARN_ACTION
 #undef HAVE_ETHTOOL_EXTENDED_RINGPARAMS
+#undef HAVE_DEVLINK_PORT_SPLIT_PORT_STRUCT
 #endif /* 9.0 */
 
 /*****************************************************************************/

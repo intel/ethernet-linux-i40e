@@ -2,7 +2,7 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet 700 Series
 ============================================================
 
-September 2, 2022
+September 20, 2022
 Copyright(c) 2014 - 2022 Intel Corporation.
 
 Contents
@@ -176,11 +176,18 @@ To manually build the driver
    The install location listed above is the default location. This may differ
    for various Linux distributions.
 
-  NOTE: To gather and display additional statistics, use the
-  I40E_ADD_PROBES pre-processor macro:
-  # make CFLAGS_EXTRA=-DI40E_ADD_PROBES
-  Please note that this additional statistics gathering can impact
-  performance.
+   NOTE: To gather and display additional statistics, use the
+   I40E_ADD_PROBES pre-processor macro:
+   # make CFLAGS_EXTRA=-DI40E_ADD_PROBES
+   Please note that this additional statistics gathering can impact
+   performance.
+
+   NOTE: You may see warnings from depmod related to unknown RDMA symbols
+   during the make of the OOT base driver. These warnings are normal and
+   appear because the in-tree RDMA driver will not work with the OOT base
+   driver. To address the issue, you need to install the latest OOT versions
+   of the base and RDMA drivers.
+
 
 5. Load the module using the modprobe command.
 

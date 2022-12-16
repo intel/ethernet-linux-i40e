@@ -83,6 +83,7 @@ static const struct i40e_stats i40e_gstrings_misc_stats[] = {
 	I40E_VSI_STAT("tx_linearize", tx_linearize),
 	I40E_VSI_STAT("tx_force_wb", tx_force_wb),
 	I40E_VSI_STAT("tx_busy", tx_busy),
+	I40E_VSI_STAT("tx_stopped", tx_stopped),
 	I40E_VSI_STAT("rx_alloc_fail", rx_buf_failed),
 	I40E_VSI_STAT("rx_pg_alloc_fail", rx_page_failed),
 	I40E_VSI_STAT("rx_cache_reuse", rx_page_reuse),
@@ -318,6 +319,8 @@ static const struct i40e_priv_flags i40e_gstrings_priv_flags[] = {
 		       I40E_FLAG_MULTIPLE_TRAFFIC_CLASSES, 0),
 	I40E_PRIV_FLAG("vf-vlan-pruning",
 		       I40E_FLAG_VF_VLAN_PRUNING, 0),
+	I40E_PRIV_FLAG("vf-source-pruning",
+		       I40E_FLAG_VF_SOURCE_PRUNING, 0),
 };
 
 #define I40E_PRIV_FLAGS_STR_LEN ARRAY_SIZE(i40e_gstrings_priv_flags)
@@ -815,6 +818,15 @@ static void i40e_get_settings_link_up(struct i40e_hw *hw,
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
 			ethtool_link_ksettings_add_link_mode(ks, advertising,
 							     10000baseT_Full);
+#ifdef HAVE_ETHTOOL_25G_BITS
+		if (i40e_is_25G_device(hw->device_id)) {
+			ethtool_link_ksettings_add_link_mode(ks, supported,
+							     25000baseCR_Full);
+			if (hw_link_info->requested_speeds & I40E_LINK_SPEED_25GB)
+				ethtool_link_ksettings_add_link_mode(ks, advertising,
+								     25000baseCR_Full);
+		}
+#endif /* HAVE_ETHTOOL_25G_BITS */
 #ifdef ETHTOOL_GFECPARAM
 		i40e_get_settings_link_up_fec(hw_link_info->req_fec_info, ks);
 #endif /* ETHTOOL_GFECPARAM */
@@ -4959,7 +4971,7 @@ static int i40e_add_cloud_filter_ethtool(struct i40e_vsi *vsi,
 		(void)i40e_del_fdir_entry(pf->vsi[pf->lan_vsi], cmd);
 	}
 
-	filter = kzalloc(sizeof(*filter), GFP_KERNEL);
+	filter = (struct i40e_cloud_filter *)kzalloc(sizeof(*filter), GFP_KERNEL);
 	if (!filter)
 		return -ENOMEM;
 
@@ -6232,7 +6244,7 @@ static int i40e_add_fdir_ethtool(struct i40e_vsi *vsi,
 		q_index = ring;
 	}
 
-	input = kzalloc(sizeof(*input), GFP_KERNEL);
+	input = (struct i40e_fdir_filter *)kzalloc(sizeof(*input), GFP_KERNEL);
 	if (!input)
 		return -ENOMEM;
 
@@ -6713,7 +6725,8 @@ flags_complete:
 	    I40E_FLAG_MULTIPLE_TRAFFIC_CLASSES))
 		reset_needed = I40E_PF_RESET_AND_REBUILD_FLAG;
 	if (changed_flags & (I40E_FLAG_VEB_STATS_ENABLED |
-	    I40E_FLAG_LEGACY_RX | I40E_FLAG_SOURCE_PRUNING_DISABLED))
+	    I40E_FLAG_LEGACY_RX | I40E_FLAG_SOURCE_PRUNING_DISABLED |
+	    I40E_FLAG_VF_SOURCE_PRUNING))
 		reset_needed = BIT(__I40E_PF_RESET_REQUESTED);
 
 	/* Before we finalize any flag changes, we need to perform some
@@ -6886,6 +6899,15 @@ flags_complete:
 				}
 			}
 		}
+	}
+
+	if (changed_flags & I40E_FLAG_VF_SOURCE_PRUNING) {
+		if (orig_flags & I40E_FLAG_VF_SOURCE_PRUNING)
+			dev_info(&pf->pdev->dev,
+				 "VF source pruning disabled. To take effect please make sure to disable spoof checking and enable trust on selected VF's\n");
+		else
+			dev_info(&pf->pdev->dev,
+				 "VF source pruning enabled on all VF's\n");
 	}
 
 	/* Now that we've checked to ensure that the new flags are valid, load

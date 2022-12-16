@@ -42,8 +42,8 @@ static const char i40e_driver_string[] =
 #define DRV_VERSION_DESC ""
 
 #define DRV_VERSION_MAJOR 2
-#define DRV_VERSION_MINOR 21
-#define DRV_VERSION_BUILD 12
+#define DRV_VERSION_MINOR 22
+#define DRV_VERSION_BUILD 8
 #define DRV_VERSION_SUBBUILD 0
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
@@ -980,6 +980,7 @@ static void i40e_update_vsi_stats(struct i40e_vsi *vsi)
 #endif
 	u64 tx_linearize;
 	u64 tx_force_wb;
+	u64 tx_stopped;
 	u64 rx_p, rx_b;
 	u64 tx_p, tx_b;
 	u16 q;
@@ -999,6 +1000,7 @@ static void i40e_update_vsi_stats(struct i40e_vsi *vsi)
 	rx_b = rx_p = 0;
 	tx_b = tx_p = 0;
 	tx_restart = tx_busy = tx_linearize = tx_force_wb = 0;
+	tx_stopped = 0;
 	rx_page = 0;
 	rx_buf = 0;
 	rx_reuse = 0;
@@ -1022,6 +1024,7 @@ static void i40e_update_vsi_stats(struct i40e_vsi *vsi)
 		tx_busy += p->tx_stats.tx_busy;
 		tx_linearize += p->tx_stats.tx_linearize;
 		tx_force_wb += p->tx_stats.tx_force_wb;
+		tx_stopped += p->tx_stats.tx_stopped;
 
 		/* Rx queue is part of the same block as Tx queue */
 		p = &p[1];
@@ -1045,6 +1048,7 @@ static void i40e_update_vsi_stats(struct i40e_vsi *vsi)
 	vsi->tx_busy = tx_busy;
 	vsi->tx_linearize = tx_linearize;
 	vsi->tx_force_wb = tx_force_wb;
+	vsi->tx_stopped = tx_stopped;
 	vsi->rx_page_failed = rx_page;
 	vsi->rx_buf_failed = rx_buf;
 	vsi->rx_page_reuse = rx_reuse;
@@ -1386,6 +1390,7 @@ struct i40e_mac_filter *i40e_find_mac(struct i40e_vsi *vsi, const u8 *macaddr)
 	}
 	return NULL;
 }
+
 
 /**
  * i40e_is_vid - Check if VSI is tagging/stripping VLAN
@@ -1759,7 +1764,7 @@ struct i40e_mac_filter *i40e_add_filter(struct i40e_vsi *vsi,
 
 	f = i40e_find_filter(vsi, macaddr, vlan);
 	if (!f) {
-		f = kzalloc(sizeof(*f), GFP_ATOMIC);
+		f = (struct i40e_mac_filter *)kzalloc(sizeof(*f), GFP_ATOMIC);
 		if (!f)
 			return NULL;
 
@@ -2777,8 +2782,8 @@ int i40e_sync_vsi_filters(struct i40e_vsi *vsi)
 			}
 			if (f->state == I40E_FILTER_NEW) {
 				/* Create a temporary i40e_new_mac_filter */
-				new_mac = kzalloc(sizeof(*new_mac),
-						  GFP_ATOMIC);
+				new_mac = (struct i40e_new_mac_filter *)
+					kzalloc(sizeof(*new_mac), GFP_ATOMIC);
 				if (!new_mac)
 					goto err_no_memory_locked;
 
@@ -2820,7 +2825,8 @@ int i40e_sync_vsi_filters(struct i40e_vsi *vsi)
 			    sizeof(struct i40e_aqc_remove_macvlan_element_data);
 		list_size = filter_list_len *
 			    sizeof(struct i40e_aqc_remove_macvlan_element_data);
-		del_list = kzalloc(list_size, GFP_ATOMIC);
+		del_list = (struct i40e_aqc_remove_macvlan_element_data *)
+			kzalloc(list_size, GFP_ATOMIC);
 		if (!del_list)
 			goto err_no_memory;
 
@@ -2880,7 +2886,8 @@ int i40e_sync_vsi_filters(struct i40e_vsi *vsi)
 			       sizeof(struct i40e_aqc_add_macvlan_element_data);
 		list_size = filter_list_len *
 			       sizeof(struct i40e_aqc_add_macvlan_element_data);
-		add_list = kzalloc(list_size, GFP_ATOMIC);
+		add_list = (struct i40e_aqc_add_macvlan_element_data *)
+			kzalloc(list_size, GFP_ATOMIC);
 		if (!add_list)
 			goto err_no_memory;
 
@@ -8388,7 +8395,7 @@ static int i40e_vsi_reconfig_rss(struct i40e_vsi *vsi, u16 rss_size)
 		return -EINVAL;
 
 	local_rss_size = min_t(int, vsi->rss_size, rss_size);
-	lut = kzalloc(vsi->rss_table_size, GFP_KERNEL);
+	lut = (u8 *)kzalloc(vsi->rss_table_size, GFP_KERNEL);
 	if (!lut)
 		return -ENOMEM;
 
@@ -8822,7 +8829,8 @@ static int i40e_configure_queue_channels(struct i40e_vsi *vsi)
 	vsi->tc_seid_map[0] = vsi->seid;
 	for (i = 1; i < I40E_MAX_TRAFFIC_CLASS; i++) {
 		if (vsi->tc_config.enabled_tc & BIT(i)) {
-			ch = kzalloc(sizeof(*ch), GFP_KERNEL);
+			ch = (struct i40e_channel *)
+				kzalloc(sizeof(*ch), GFP_KERNEL);
 			if (!ch) {
 				ret = -ENOMEM;
 				goto err_free;
@@ -9519,7 +9527,8 @@ static int i40e_configure_clsflower(struct i40e_vsi *vsi,
 		vsi->back->flags |= I40E_FLAG_FD_SB_TO_CLOUD_FILTER;
 	}
 
-	filter = kzalloc(sizeof(*filter), GFP_KERNEL);
+	filter = (struct i40e_cloud_filter *)
+		kzalloc(sizeof(*filter), GFP_KERNEL);
 	if (!filter)
 		return -ENOMEM;
 
@@ -10931,7 +10940,7 @@ static void i40e_clean_adminq_subtask(struct i40e_pf *pf)
 		wr32(&pf->hw, pf->hw.aq.asq.len, val);
 
 	event.buf_len = I40E_MAX_AQ_BUF_SIZE;
-	event.msg_buf = kzalloc(event.buf_len, GFP_KERNEL);
+	event.msg_buf = (u8 *)kzalloc(event.buf_len, GFP_KERNEL);
 	if (!event.msg_buf)
 		return;
 
@@ -11231,7 +11240,8 @@ static int i40e_get_capabilities(struct i40e_pf *pf,
 
 	buf_len = 40 * sizeof(struct i40e_aqc_list_capabilities_element_resp);
 	do {
-		cap_buf = kzalloc(buf_len, GFP_KERNEL);
+		cap_buf = (struct i40e_aqc_list_capabilities_element_resp *)
+		kzalloc(buf_len, GFP_KERNEL);
 		if (!cap_buf)
 			return -ENOMEM;
 
@@ -12197,7 +12207,7 @@ static int i40e_vsi_alloc_arrays(struct i40e_vsi *vsi, bool alloc_qvectors)
 	size = sizeof(struct i40e_ring *) * vsi->alloc_queue_pairs *
 	       (i40e_enabled_xdp_vsi(vsi) ? 3 : 2);
 
-        vsi->tx_rings = kzalloc(size, GFP_KERNEL);
+        vsi->tx_rings = (struct i40e_ring **)kzalloc(size, GFP_KERNEL);
 	if (!vsi->tx_rings)
 		return -ENOMEM;
 	next_rings = vsi->tx_rings + vsi->alloc_queue_pairs;
@@ -12210,7 +12220,7 @@ static int i40e_vsi_alloc_arrays(struct i40e_vsi *vsi, bool alloc_qvectors)
 	if (alloc_qvectors) {
 		/* allocate memory for q_vector pointers */
 		size = sizeof(struct i40e_q_vector *) * vsi->num_q_vectors;
-		vsi->q_vectors = kzalloc(size, GFP_KERNEL);
+		vsi->q_vectors = (struct i40e_q_vector **)kzalloc(size, GFP_KERNEL);
 		if (!vsi->q_vectors) {
 			ret = -ENOMEM;
 			goto err_vectors;
@@ -12264,7 +12274,7 @@ int i40e_vsi_mem_alloc(struct i40e_pf *pf, enum i40e_vsi_type type)
 	}
 	pf->next_vsi = ++i;
 
-	vsi = kzalloc(sizeof(*vsi), GFP_KERNEL);
+	vsi = (struct i40e_vsi *)kzalloc(sizeof(*vsi), GFP_KERNEL);
 	if (!vsi) {
 		ret = -ENOMEM;
 		goto unlock_pf;
@@ -12427,7 +12437,7 @@ static int i40e_alloc_rings(struct i40e_vsi *vsi)
 	/* Set basic values in the rings to be used later during open() */
 	for (i = 0; i < vsi->alloc_queue_pairs; i++) {
 		/* allocate space for both Tx and Rx in one shot */
-		ring = kcalloc(qpv, sizeof(struct i40e_ring), GFP_KERNEL);
+		ring = (struct i40e_ring *)kcalloc(qpv, sizeof(struct i40e_ring), GFP_KERNEL);
 		if (!ring)
 			goto err_out;
 
@@ -12743,7 +12753,8 @@ static int i40e_vsi_alloc_q_vector(struct i40e_vsi *vsi, int v_idx)
 	struct i40e_q_vector *q_vector;
 
 	/* allocate q_vector */
-	q_vector = kzalloc(sizeof(struct i40e_q_vector), GFP_KERNEL);
+	q_vector = (struct i40e_q_vector *)
+		kzalloc(sizeof(struct i40e_q_vector), GFP_KERNEL);
 	if (!q_vector)
 		return -ENOMEM;
 
@@ -12754,7 +12765,7 @@ static int i40e_vsi_alloc_q_vector(struct i40e_vsi *vsi, int v_idx)
 #endif
 	if (vsi->netdev)
 		netif_napi_add(vsi->netdev, &q_vector->napi,
-			       i40e_napi_poll, NAPI_POLL_WEIGHT);
+			       i40e_napi_poll);
 
 	/* tie q_vector and vsi together */
 	vsi->q_vectors[v_idx] = q_vector;
@@ -13227,7 +13238,7 @@ static int i40e_pf_config_rss(struct i40e_pf *pf)
 	if (!vsi->rss_size)
 		return -EINVAL;
 
-	lut = kzalloc(vsi->rss_table_size, GFP_KERNEL);
+	lut = (u8 *)kzalloc(vsi->rss_table_size, GFP_KERNEL);
 	if (!lut)
 		return -ENOMEM;
 
@@ -13747,6 +13758,9 @@ static int i40e_sw_init(struct i40e_pf *pf)
 		pf->dcb_veb_bw_map[i] = I40E_MULTIPLE_TRAFFIC_CLASS_NO_ENTRY;
 		pf->dcb_mib_bw_map[i] = I40E_MULTIPLE_TRAFFIC_CLASS_NO_ENTRY;
 	}
+
+	/* VSIs by default have source pruning enabled */
+	pf->flags |= I40E_FLAG_VF_SOURCE_PRUNING;
 
 	mutex_init(&pf->switch_mutex);
 
@@ -15359,6 +15373,54 @@ int i40e_is_vsi_uplink_mode_veb(struct i40e_vsi *vsi)
 }
 
 /**
+ * i40e_configure_source_pruning
+ * @vsi: VSI to disable source pruning on
+ * @enable: enable or disable pruning
+ *
+ * Enable/disable vsi source pruning based on enable flag
+ **/
+i40e_status i40e_configure_source_pruning(struct i40e_vsi *vsi, bool enable)
+{
+	struct i40e_pf *pf = vsi->back;
+	struct i40e_hw *hw = &pf->hw;
+	struct i40e_vsi_context ctxt;
+	i40e_status ret;
+
+	memset(&ctxt, 0, sizeof(ctxt));
+
+	ctxt.seid = vsi->seid;
+	ctxt.pf_num = hw->pf_id;
+	if (vsi->type == I40E_VSI_SRIOV)
+		ctxt.vf_num = vsi->vf_id + hw->func_caps.vf_base_id;
+	ret = i40e_aq_get_vsi_params(hw, &ctxt, NULL);
+	if (ret) {
+		dev_info(&pf->pdev->dev,
+			 "couldn't get vsi config, err %s\n",
+			 i40e_stat_str(hw, ret));
+		return ret;
+	}
+
+	if (vsi->type == I40E_VSI_MAIN)
+		ctxt.flags = I40E_AQ_VSI_TYPE_PF;
+	else if (vsi->type == I40E_VSI_SRIOV)
+		ctxt.flags = I40E_AQ_VSI_TYPE_VF;
+
+	ctxt.info.valid_sections = cpu_to_le16(I40E_AQ_VSI_PROP_SWITCH_VALID);
+	if (enable)
+		ctxt.info.switch_id &=
+			~cpu_to_le16(I40E_AQ_VSI_SW_ID_FLAG_LOCAL_LB);
+	else
+		ctxt.info.switch_id |=
+			cpu_to_le16(I40E_AQ_VSI_SW_ID_FLAG_LOCAL_LB);
+	ret = i40e_aq_update_vsi_params(&pf->hw, &ctxt, NULL);
+	if (ret)
+		dev_err(&pf->pdev->dev,
+			"Update VSI failed, err %s\n",
+			i40e_stat_str(&pf->hw, ret));
+	return ret;
+}
+
+/**
  * i40e_add_vsi - Add a VSI to the switch
  * @vsi: the VSI being configured
  *
@@ -15413,23 +15475,9 @@ static int i40e_add_vsi(struct i40e_vsi *vsi)
 		 * the VSI to disable source pruning.
 		 */
 		if (pf->flags & I40E_FLAG_SOURCE_PRUNING_DISABLED) {
-			memset(&ctxt, 0, sizeof(ctxt));
-			ctxt.seid = pf->main_vsi_seid;
-			ctxt.pf_num = pf->hw.pf_id;
-			ctxt.vf_num = 0;
-			ctxt.info.valid_sections |=
-			     cpu_to_le16(I40E_AQ_VSI_PROP_SWITCH_VALID);
-			ctxt.info.switch_id =
-				   cpu_to_le16(I40E_AQ_VSI_SW_ID_FLAG_LOCAL_LB);
-			ret = i40e_aq_update_vsi_params(hw, &ctxt, NULL);
-			if (ret) {
-				dev_info(&pf->pdev->dev,
-					 "update vsi failed, err %s aq_err %s\n",
-					 i40e_stat_str(&pf->hw, ret),
-					 i40e_aq_str(&pf->hw,
-						    pf->hw.aq.asq_last_status));
+			ret = i40e_configure_source_pruning(vsi, false);
+			if (ret)
 				goto err;
-			}
 		}
 
 		/* MFP mode setup queue map and update VSI */
@@ -16158,7 +16206,7 @@ static int i40e_veb_mem_alloc(struct i40e_pf *pf)
 		goto err_alloc_veb;  /* out of VEB slots! */
 	}
 
-	veb = kzalloc(sizeof(*veb), GFP_KERNEL);
+	veb = (struct i40e_veb *)kzalloc(sizeof(*veb), GFP_KERNEL);
 	if (!veb) {
 		ret = -ENOMEM;
 		goto err_alloc_veb;
@@ -17138,6 +17186,25 @@ static inline void i40e_set_subsystem_device_id(struct i40e_hw *hw)
 		(ushort)(rd32(hw, I40E_PFPCI_SUBSYSID) & USHRT_MAX);
 }
 
+#ifdef HAVE_UDP_TUNNEL_NIC_INFO
+/**
+ * i40e_set_udp_tunnel_callbacks - set udp tunnel callbacks
+ * @pf: board private structure
+ *
+ * Sets up UDP tunnel callbacks
+ **/
+static inline void i40e_set_udp_tunnel_callbacks(struct i40e_pf *pf)
+{
+	pf->udp_tunnel_nic.set_port = i40e_udp_tunnel_set_port;
+	pf->udp_tunnel_nic.unset_port = i40e_udp_tunnel_unset_port;
+	pf->udp_tunnel_nic.flags = UDP_TUNNEL_NIC_INFO_MAY_SLEEP;
+	pf->udp_tunnel_nic.shared = &pf->udp_tunnel_shared;
+	pf->udp_tunnel_nic.tables[0].n_entries = I40E_MAX_PF_UDP_OFFLOAD_PORTS;
+	pf->udp_tunnel_nic.tables[0].tunnel_types = UDP_TUNNEL_TYPE_VXLAN |
+						    UDP_TUNNEL_TYPE_GENEVE;
+}
+#endif /* HAVE_UDP_TUNNEL_NIC_INFO */
+
 /**
  * i40e_probe - Device initialization routine
  * @pdev: PCI device information struct
@@ -17465,13 +17532,7 @@ static int i40e_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		pf->num_lan_msix = 1;
 
 #ifdef HAVE_UDP_TUNNEL_NIC_INFO
-	pf->udp_tunnel_nic.set_port = i40e_udp_tunnel_set_port;
-	pf->udp_tunnel_nic.unset_port = i40e_udp_tunnel_unset_port;
-	pf->udp_tunnel_nic.flags = UDP_TUNNEL_NIC_INFO_MAY_SLEEP;
-	pf->udp_tunnel_nic.shared = &pf->udp_tunnel_shared;
-	pf->udp_tunnel_nic.tables[0].n_entries = I40E_MAX_PF_UDP_OFFLOAD_PORTS;
-	pf->udp_tunnel_nic.tables[0].tunnel_types = UDP_TUNNEL_TYPE_VXLAN |
-						    UDP_TUNNEL_TYPE_GENEVE;
+	i40e_set_udp_tunnel_callbacks(pf);
 #endif /* HAVE_UDP_TUNNEL_NIC_INFO */
 
 	/* The number of VSIs reported by the FW is the minimum guaranteed

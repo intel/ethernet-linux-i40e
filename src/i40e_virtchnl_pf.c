@@ -955,7 +955,7 @@ static int i40e_add_ingress_egress_mirror(struct i40e_vsi *src_vsi,
 	int *vsi_egress_vlan;
 	__le16 *mr_list;
 
-	mr_list = kcalloc(cnt, sizeof(__le16), GFP_KERNEL);
+	mr_list = (__le16*)kcalloc(cnt, sizeof(__le16), GFP_KERNEL);
 	if (!mr_list) {
 		ret = -ENOMEM;
 		goto err_out;
@@ -1472,6 +1472,61 @@ static void i40e_free_macs(struct list_head *mac_list)
 #endif /* HAVE_NDO_SET_VF_LINK_STATE */
 
 /**
+ * i40e_set_source_pruning
+ * @vf: pointer to the VF info
+ *
+ * This function set appropriate source pruning flag for vf.
+ * To disable source pruning on selected VFs the PF should set
+ * private flag 'vf-source-pruning' off, and VF should be set
+ * 'trusted' on and 'spoofchk' off.
+ * Otherwise, source pruning should still be enabled on VF.
+ **/
+static int i40e_set_source_pruning(struct i40e_vf *vf)
+{
+	struct i40e_pf *pf = vf->pf;
+	struct i40e_vsi *vsi;
+	bool pf_sp;
+
+	vsi = pf->vsi[vf->lan_vsi_idx];
+	pf_sp = !!(pf->flags & I40E_FLAG_VF_SOURCE_PRUNING);
+
+	if (pf_sp) {
+		if (!vf->source_pruning) {
+			vf->source_pruning = true;
+			dev_info(&pf->pdev->dev,
+				 "Source pruning enabled on VF %d\n",
+				 vf->vf_id);
+		}
+		return 0;
+	}
+
+	if (!vf->source_pruning && (!vf->trusted || vf->mac_anti_spoof)) {
+		if (vf->mac_anti_spoof &&
+		    test_bit(I40E_VF_STATE_ACTIVE, &vf->vf_states)) {
+			/* enable source pruning beyond vf reset */
+			if (i40e_configure_source_pruning(vsi, true))
+				return -EIO;
+		}
+		vf->source_pruning = true;
+		dev_info(&pf->pdev->dev,
+			 "Source pruning enabled on VF %d\n", vf->vf_id);
+	} else if ((vf->source_pruning && vf->trusted &&
+		   !vf->mac_anti_spoof) || !vf->source_pruning) {
+		if (i40e_configure_source_pruning(vsi, false))
+			return -EIO;
+
+		if (vf->source_pruning) {
+			vf->source_pruning = false;
+			dev_info(&pf->pdev->dev,
+				 "Source pruning disabled on VF %d\n",
+				 vf->vf_id);
+		}
+	}
+
+	return 0;
+}
+
+/**
  * i40e_alloc_vsi_res
  * @vf: pointer to the VF info
  * @idx: VSI index, applies only for ADq mode, zero otherwise
@@ -1574,6 +1629,9 @@ static int i40e_alloc_vsi_res(struct i40e_vf *vf, u8 idx)
 		dev_err(&pf->pdev->dev,
 			"Failed to restore VF-d config error %d\n", ret);
 #endif /* HAVE_NDO_SET_VF_LINK_STATE */
+
+	if (!idx)
+		ret = i40e_set_source_pruning(vf);
 
 error_alloc_vsi_res:
 	return ret;
@@ -1734,7 +1792,8 @@ i40e_add_vmvlan_to_list(struct i40e_vf *vf,
 {
 	struct i40e_vm_vlan *vlan_elem;
 
-	vlan_elem = kzalloc(sizeof(*vlan_elem), GFP_KERNEL);
+	vlan_elem = (struct i40e_vm_vlan *)kzalloc(sizeof(*vlan_elem),
+						   GFP_KERNEL);
 	if (!vlan_elem)
 		return I40E_ERR_NO_MEMORY;
 	vlan_elem->vlan = vfl->vlan_id[vlan_idx];
@@ -2634,6 +2693,8 @@ int i40e_alloc_vfs(struct i40e_pf *pf, u16 num_alloc_vfs)
 		set_bit(I40E_VF_STATE_PRE_ENABLE, &vfs[i].vf_states);
 		INIT_LIST_HEAD(&vfs[i].vm_vlan_list);
 		INIT_LIST_HEAD(&vfs[i].vm_mac_list);
+		/* assign source pruning default value */
+		vfs[i].source_pruning = true;
 	}
 	pf->num_alloc_vfs = num_alloc_vfs;
 
@@ -6477,7 +6538,6 @@ int i40e_ndo_set_vf_spoofchk(struct net_device *netdev, int vf_id, bool enable)
 	if (enable == vf->mac_anti_spoof)
 		goto out;
 
-	vf->mac_anti_spoof = enable;
 	memset(&ctxt, 0, sizeof(ctxt));
 	ctxt.seid = pf->vsi[vf->lan_vsi_idx]->seid;
 	ctxt.pf_num = pf->hw.pf_id;
@@ -6489,7 +6549,12 @@ int i40e_ndo_set_vf_spoofchk(struct net_device *netdev, int vf_id, bool enable)
 		dev_err(&pf->pdev->dev, "Error %d updating VSI parameters\n",
 			ret);
 		ret = -EIO;
+		goto out;
 	}
+	vf->mac_anti_spoof = enable;
+
+	ret = i40e_set_source_pruning(vf);
+
 out:
 	clear_bit(__I40E_VIRTCHNL_OP_PENDING, pf->state);
 	return ret;
@@ -6758,8 +6823,10 @@ static int i40e_set_mac_anti_spoof(struct pci_dev *pdev, int vf_id,
 	vsi = pf->vsi[vf->lan_vsi_idx];
 	sec_flag = I40E_AQ_VSI_SEC_FLAG_ENABLE_MAC_CHK;
 	ret = i40e_set_spoof_settings(vsi, sec_flag, enable);
-	if (!ret)
+	if (!ret) {
 		vf->mac_anti_spoof = enable;
+		ret = i40e_set_source_pruning(vf);
+	}
 out:
 	clear_bit(__I40E_VIRTCHNL_OP_PENDING, pf->state);
 	return ret;

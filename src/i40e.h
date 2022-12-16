@@ -689,6 +689,7 @@ struct i40e_pf {
 #define I40E_FLAG_MULTIPLE_TRAFFIC_CLASSES	BIT(28)
 #define I40E_FLAG_CLS_FLOWER			BIT(29)
 #define I40E_FLAG_VF_VLAN_PRUNING		BIT(30)
+#define I40E_FLAG_VF_SOURCE_PRUNING		BIT(31)
 
 	/* flag to enable/disable vf base mode support */
 	bool vf_base_mode_only;
@@ -1004,6 +1005,7 @@ struct i40e_vsi {
 	u32 tx_busy;
 	u64 tx_linearize;
 	u64 tx_force_wb;
+	u64 tx_stopped;
 	u32 rx_buf_failed;
 	u32 rx_page_failed;
 	u64 rx_page_reuse;
@@ -1446,6 +1448,7 @@ u8 i40e_pf_get_num_tc(struct i40e_pf *pf);
 int i40e_update_adq_vsi_queues(struct i40e_vsi *vsi, int vsi_offset);
 i40e_status i40e_vsi_get_bw_info(struct i40e_vsi *vsi);
 int i40e_is_vsi_uplink_mode_veb(struct i40e_vsi *vsi);
+i40e_status i40e_configure_source_pruning(struct i40e_vsi *vsi, bool enable);
 i40e_status i40e_get_partition_bw_setting(struct i40e_pf *pf);
 i40e_status i40e_set_partition_bw_setting(struct i40e_pf *pf);
 i40e_status i40e_commit_partition_bw_setting(struct i40e_pf *pf);

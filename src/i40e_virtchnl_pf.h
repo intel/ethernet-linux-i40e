@@ -108,6 +108,7 @@ struct i40e_vf {
 	s16 port_vlan_id;
 	bool pf_set_mac;	/* The VMM admin set the VF MAC address */
 	bool trusted;
+	bool source_pruning;
 	u64 reset_timestamp;
 
 	/* VSI indices - actual VSI pointers are maintained in the PF structure

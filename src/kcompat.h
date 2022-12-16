@@ -6879,7 +6879,6 @@ ptp_read_system_postts(struct ptp_system_timestamp __always_unused *sts)
 #define HAVE_PTP_CLOCK_INFO_GETTIMEX64
 #define HAVE_NDO_BRIDGE_SETLINK_EXTACK
 #define HAVE_DMA_ALLOC_COHERENT_ZEROES_MEM
-#define HAVE_GENEVE_TYPE
 #define HAVE_TC_INDIR_BLOCK
 #endif /* 5.0.0 */
 

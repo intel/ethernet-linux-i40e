@@ -1,10 +1,10 @@
 Name: i40e
 Summary: Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
-Version: 2.21.12
+Version: 2.22.8
 Release: 1
 Source: %{name}-%{version}.tar.gz
 Vendor: Intel Corporation
-License: @
+License: GPL-2.0
 ExclusiveOS: linux
 Group: System Environment/Kernel
 Provides: %{name}
@@ -40,13 +40,16 @@ Requires: kernel, findutils, gawk, bash
 Requires: intel_auxiliary
 %endif
 
-# Check for existence of %kernel_module_package_buildreqs ...
+# Check for existence of variable kernel_module_package_buildreqs ...
 %if 0%{?!kernel_module_package_buildreqs:1}
 # ... and provide a suitable definition if it is not defined
 %define kernel_module_package_buildreqs kernel-devel
 %endif
 
-BuildRequires: %kernel_module_package_buildreqs
+%define kernel_module_package_buildreqs_fixed %(/bin/bash -fc 'if [[ %{kernel_ver} == *uek* ]]; 
+	then echo %kernel_module_package_buildreqs | sed 's/kernel-devel/kernel-uek-devel/g' ; else echo %kernel_module_package_buildreqs ; fi')
+
+BuildRequires: %kernel_module_package_buildreqs_fixed
 
 %description
 This package contains the Intel(R) 40-10 Gigabit Ethernet Connection Network Driver.
@@ -59,7 +62,7 @@ make -C src clean
 make -C src
 
 %install
-%define req_aux %( [[ "%name" =~ ^(ice|ice_sw|ice_swx|iavf|i40e)$ ]] && echo 0 || echo 1 )
+%define req_aux %(/bin/bash -fc '[[ "%name" =~ ^(ice|ice_sw|ice_swx|iavf|i40e)$ ]] && echo 0 || echo 1' )
 
 # install drivers that have auxiliary driver dependency
 %if (%req_aux == 0)
@@ -90,6 +93,19 @@ find %{buildroot}/lib/modules/ -name 'modules.*' -exec rm -f {} \;
 cd %{buildroot}
 find lib -name "i40e.ko" \
 	-fprintf %{_builddir}/%{name}-%{version}/file.list "/%p\n"
+%endif
+
+# Sign the modules(s)
+%if %{?_with_modsign:1}%{!?_with_modsign:0}
+%define __strip /bin/true
+%{!?privkey: %define privkey %{_sysconfdir}/pki/SECURE-BOOT-KEY.priv}
+%{!?pubkey: %define pubkey %{_sysconfdir}/pki/SECURE-BOOT-KEY.der}
+%{!?_signfile: %define _signfile %{_usrsrc}/kernels/%{kernel_ver}/scripts/sign-file}
+for module in `find . -type f -name *.ko`;
+do
+strip --strip-debug ${module}
+$(KSRC=%{_usrsrc}/kernels/%{kernel_ver} %{_signfile} sha512 %{privkey} %{pubkey} ${module} > /dev/null 2>&1)
+done
 %endif
 
 
@@ -385,6 +401,11 @@ fi
 
 uname -r | grep BOOT || /sbin/depmod -a > /dev/null 2>&1 || true
 
+if [ -x "/usr/sbin/weak-modules" ]; then
+    modules=( $(cat %{_docdir}/%{name}/file.list | grep '\.ko$' | xargs realpath) )
+    printf '%s\n' "${modules[@]}" | /usr/sbin/weak-modules --no-initramfs --add-modules
+fi
+
 if which dracut >/dev/null 2>&1; then
 	echo "Updating initramfs with dracut..."
 	if dracut --force ; then
@@ -410,10 +431,19 @@ else
 fi
 
 %preun
+# save tmp list of installed kernel modules for weak-modules
+cat %{_docdir}/%{name}/file.list | grep '\.ko$' | xargs realpath > /var/run/rpm-%{name}-modules.list
+
 rm -rf /usr/local/share/%{name}
 
 %postun
 uname -r | grep BOOT || /sbin/depmod -a > /dev/null 2>&1 || true
+
+if [ -x "/usr/sbin/weak-modules" ]; then
+    modules=( $(cat /var/run/rpm-%{name}-modules.list) )
+    printf '%s\n' "${modules[@]}" | /usr/sbin/weak-modules --no-initramfs --remove-modules
+fi
+rm /var/run/rpm-%{name}-modules.list
 
 if which dracut >/dev/null 2>&1; then
 	echo "Updating initramfs with dracut..."

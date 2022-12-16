@@ -316,7 +316,7 @@ static int i40e_prepare_fdir_filter(struct i40e_pf *pf,
 		__be16 pattern = fd_data->flex_word;
 		u16 off = fd_data->flex_offset;
 
-		payload = packet_addr + payload_offset;
+		payload = (packet_addr + payload_offset);
 
 		/* If user provided vlan, offset payload by vlan
 		 * header length
@@ -385,7 +385,7 @@ static int i40e_add_del_fdir_udp(struct i40e_vsi *vsi,
 	u8 *raw_packet;
 	int ret;
 
-	raw_packet = kzalloc(I40E_FDIR_MAX_RAW_PACKET_SIZE, GFP_KERNEL);
+	raw_packet = (u8 *)kzalloc(I40E_FDIR_MAX_RAW_PACKET_SIZE, GFP_KERNEL);
 	if (!raw_packet)
 		return -ENOMEM;
 	i40e_create_dummy_udp_packet(raw_packet, ipv4, fd_data);
@@ -431,7 +431,7 @@ static int i40e_add_del_fdir_tcp(struct i40e_vsi *vsi,
 	u8 *raw_packet;
 	int ret;
 
-	raw_packet = kzalloc(I40E_FDIR_MAX_RAW_PACKET_SIZE, GFP_KERNEL);
+	raw_packet = (u8 *)kzalloc(I40E_FDIR_MAX_RAW_PACKET_SIZE, GFP_KERNEL);
 	if (!raw_packet)
 		return -ENOMEM;
 	i40e_create_dummy_tcp_packet(raw_packet, ipv4, fd_data);
@@ -482,7 +482,7 @@ static int i40e_add_del_fdir_sctp(struct i40e_vsi *vsi,
 	u8 *raw_packet;
 	int ret;
 
-	raw_packet = kzalloc(I40E_FDIR_MAX_RAW_PACKET_SIZE, GFP_KERNEL);
+	raw_packet = (u8 *)kzalloc(I40E_FDIR_MAX_RAW_PACKET_SIZE, GFP_KERNEL);
 	if (!raw_packet)
 		return -ENOMEM;
 
@@ -544,7 +544,7 @@ static int i40e_add_del_fdir_ip(struct i40e_vsi *vsi,
 	for (i = iter_start; i <= iter_end; i++) {
 		int payload_offset;
 
-		raw_packet = kzalloc(I40E_FDIR_MAX_RAW_PACKET_SIZE, GFP_KERNEL);
+		raw_packet = (u8 *)kzalloc(I40E_FDIR_MAX_RAW_PACKET_SIZE, GFP_KERNEL);
 		if (!raw_packet)
 			return -ENOMEM;
 
@@ -1154,6 +1154,7 @@ static void i40e_enable_wb_on_itr(struct i40e_vsi *vsi,
 	}
 	q_vector->arm_wb_state = true;
 }
+
 
 /**
  * i40e_force_wb - Issue SW Interrupt so HW does a wb
@@ -4038,8 +4039,10 @@ int __i40e_maybe_stop_tx(struct i40e_ring *tx_ring, int size)
 	smp_mb();
 
 	/* Check again in a case another CPU has just made room available. */
-	if (likely(I40E_DESC_UNUSED(tx_ring) < size))
+	if (likely(I40E_DESC_UNUSED(tx_ring) < size)) {
+		++tx_ring->tx_stats.tx_stopped;
 		return -EBUSY;
+	}
 
 	/* A reprieve! - use start_queue because it doesn't call schedule */
 	netif_start_subqueue(tx_ring->netdev, tx_ring->queue_index);

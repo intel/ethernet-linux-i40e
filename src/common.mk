@@ -272,9 +272,9 @@ endif
 
 # Check if it is Oracle Linux UEK kernel and take release patch number from it
 ifneq (,$(findstring uek,${BUILD_KERNEL}))
-  EXTRAVERSION := $(shell BK=${BUILD_KERNEL}; echo $${BK\#*-})
-  UEK_RELEASE_NUMBER := $(shell EV=${EXTRAVERSION}; echo $${EV%%\.*})
-  UEK_MINOR_RELEASE_NUMBER := $(shell EV=${EXTRAVERSION}; MIV=$${EV\#*\.}; echo $${MIV%%\.*})
+  EXTRAVERSION := $(shell echo ${BUILD_KERNEL} | cut -s -d '-' -f2-)
+  UEK_RELEASE_NUMBER := $(shell echo ${EXTRAVERSION} | cut -s -d '.' -f1)
+  UEK_MINOR_RELEASE_NUMBER := $(shell echo ${EXTRAVERSION} | cut -s -d '.' -f2)
   EXTRA_CFLAGS += -DUEK_RELEASE_NUMBER=${UEK_RELEASE_NUMBER}
   EXTRA_CFLAGS += -DUEK_MINOR_RELEASE_NUMBER=${UEK_MINOR_RELEASE_NUMBER}
 endif
