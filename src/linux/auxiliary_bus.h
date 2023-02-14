@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2022 Intel Corporation. */
+/* Copyright(c) 2013 - 2023 Intel Corporation. */
 
 #ifndef _AUXILIARY_BUS_H_
 #define _AUXILIARY_BUS_H_

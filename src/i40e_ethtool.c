@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-2.0
-/* Copyright(c) 2013 - 2022 Intel Corporation. */
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Copyright(c) 2013 - 2023 Intel Corporation. */
 
 /* ethtool support for i40e */
 

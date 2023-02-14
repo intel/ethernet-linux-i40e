@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2022 Intel Corporation. */
+/* Copyright(c) 2013 - 2023 Intel Corporation. */
 
 #ifndef _KCOMPAT_H_
 #define _KCOMPAT_H_
@@ -967,7 +967,6 @@ struct _kc_ethtool_pauseparam {
   #endif /*  LINUX_VERSION_CODE == KERNEL_VERSION(4,15,0) */
 #endif /* if (NOT RHEL && NOT SLES && NOT UBUNTU) */
 
-
 #ifdef __KLOCWORK__
 #ifdef ARRAY_SIZE
 #undef ARRAY_SIZE
@@ -1274,7 +1273,6 @@ int snprintf(char * buf, size_t size, const char *fmt, ...);
 int vsnprintf(char *buf, size_t size, const char *fmt, va_list args);
 #endif
 #endif /* 2.4.10 -> 2.4.6 */
-
 
 /*****************************************************************************/
 /* 2.4.12 => 2.4.10 */
@@ -5638,9 +5636,6 @@ static inline struct sk_buff *__kc_napi_alloc_skb(struct napi_struct *napi, unsi
 #ifndef READ_ONCE
 #define READ_ONCE(_x) ACCESS_ONCE(_x)
 #endif
-#if RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(7,2))
-#define HAVE_NDO_FDB_ADD_VID
-#endif
 #ifndef ETH_MODULE_SFF_8636
 #define ETH_MODULE_SFF_8636		0x3
 #endif
@@ -5657,7 +5652,6 @@ static inline struct sk_buff *__kc_napi_alloc_skb(struct napi_struct *napi, unsi
 #define writel_relaxed	writel
 #endif
 #else /* 3.19.0 */
-#define HAVE_NDO_FDB_ADD_VID
 #define HAVE_RXFH_HASHFUNC
 #define NDO_DFLT_BRIDGE_GETLINK_HAS_BRFLAGS
 #endif /* 3.19.0 */
@@ -6929,14 +6923,9 @@ __kc_eth_get_headlen(const struct net_device __always_unused *dev, void *data,
 #endif
 #endif /* mmiowb */
 
-#if (RHEL_RELEASE_CODE > RHEL_RELEASE_VERSION(8,1))
-#define HAVE_NDO_GET_DEVLINK_PORT
-#endif /* RHEL > 8.1 */
-
 #else /* >= 5.2.0 */
 #define HAVE_NDO_SELECT_QUEUE_FALLBACK_REMOVED
 #define SPIN_UNLOCK_IMPLIES_MMIOWB
-#define HAVE_NDO_GET_DEVLINK_PORT
 #endif /* 5.2.0 */
 
 /*****************************************************************************/
@@ -7152,7 +7141,6 @@ _kc_napi_busy_loop(unsigned int napi_id,
 #endif /* >=5.12.0 */
 
 /*****************************************************************************/
-
 /*
  * Load the implementations file which actually defines kcompat backports.
  * Legacy backports still exist in this file, but all new backports must be

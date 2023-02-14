@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2022 Intel Corporation. */
+/* Copyright(c) 2013 - 2023 Intel Corporation. */
 
 #ifndef _KCOMPAT_DEFS_H_
 #define _KCOMPAT_DEFS_H_
@@ -35,5 +35,7 @@
 #elif defined(UEK_RELEASE_NUMBER)
 #include "kcompat_oracle_defs.h"
 #endif
+
+#include "kcompat_generated_defs.h"
 
 #endif /* _KCOMPAT_DEFS_H_ */

@@ -1211,6 +1211,30 @@ NOTE: When you set disable-source-pruning to on (enabled):
 - The driver will disable spoof check.
 - The network interface will receive all packets with a source MAC address
 matching the network interface's MAC address.
+_blank_line
+The i40e driver allows you to enable or disable source pruning on a specified
+VF using the vf-source-pruning private flag. You must also disable MAC
+anti-spoofing for the VF and enable trust mode for the VF. All three must be
+set for source pruning on a VF to function. This will allow you to configure
+VRRP (virtual router redundancy protocol) where one VF is designated as the
+primary device and all other VFs are secondary devices.
+
+# ethtool --set-priv-flags <ethX> vf-source-pruning on|off
+  Where:
+  on - discards packets with source MAC address matching the source MAC
+       address of the interface (default)
+  off - receives packets with source MAC address matching the source MAC
+        address of the interface
+
+NOTE: Enabling vf-source-pruning will not automatically set anti-spoofing and
+trust mode automatically. You must perform these steps yourself. They can be
+perfomed in any order. For example:
+# ip link set <ethX> vf <vf id> spoofchk off
+# ip link set <ethX> vf <vf id> trust on
+# ethtool --set-priv-flag <ethX> vf-source-pruning off
+
+For more information, refer to "MAC and VLAN Anti-Spoofing Feature for VFs" and
+"Trusted VFs and VF Promiscuous Mode" in this README.
 
 
 EEE (Energy Efficient Ethernet)
