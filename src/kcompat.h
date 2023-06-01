@@ -6683,37 +6683,6 @@ static inline unsigned long _kc_array_index_mask_nospec(unsigned long index,
 #ifndef sizeof_field
 #define sizeof_field(TYPE, MEMBER) (sizeof((((TYPE *)0)->MEMBER)))
 #endif /* sizeof_field */
-/* add a check for the Oracle UEK 4.14.35 kernel as
- * it backported a version of this bitmap function
- */
-#if !(RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,0)) && \
-    !(SLE_VERSION_CODE >= SLE_VERSION(12,5,0) && \
-      SLE_VERSION_CODE < SLE_VERSION(15,0,0) || \
-      SLE_VERSION_CODE >= SLE_VERSION(15,1,0)) && \
-    !(LINUX_VERSION_CODE == KERNEL_VERSION(4,14,35))
-/*
- * Copy bitmap and clear tail bits in last word.
- */
-static inline void
-bitmap_copy_clear_tail(unsigned long *dst, const unsigned long *src, unsigned int nbits)
-{
-	bitmap_copy(dst, src, nbits);
-	if (nbits % BITS_PER_LONG)
-		dst[nbits / BITS_PER_LONG] &= BITMAP_LAST_WORD_MASK(nbits);
-}
-
-/*
- * On 32-bit systems bitmaps are represented as u32 arrays internally, and
- * therefore conversion is not needed when copying data from/to arrays of u32.
- */
-#if BITS_PER_LONG == 64
-void bitmap_from_arr32(unsigned long *bitmap, const u32 *buf, unsigned int nbits);
-#else
-#define bitmap_from_arr32(bitmap, buf, nbits)			\
-	bitmap_copy_clear_tail((unsigned long *) (bitmap),	\
-			       (const unsigned long *) (buf), (nbits))
-#endif /* BITS_PER_LONG == 64 */
-#endif /* !(RHEL >= 8.0) && !(SLES >= 12.5 && SLES < 15.0 || SLES >= 15.1) */
 #else /* >= 4.16 */
 #include <linux/nospec.h>
 #define HAVE_TC_FLOWER_OFFLOAD_COMMON_EXTACK
@@ -6844,23 +6813,6 @@ _kc_dev_change_flags(struct net_device *netdev, unsigned int flags,
      (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,1)))
 #define HAVE_PTP_SYS_OFFSET_EXTENDED_IOCTL
 #define HAVE_PTP_CLOCK_INFO_GETTIMEX64
-#else /* RHEL >= 7.7 && RHEL < 8.0 || RHEL >= 8.1 */
-struct ptp_system_timestamp {
-	struct timespec64 pre_ts;
-	struct timespec64 post_ts;
-};
-
-static inline void
-ptp_read_system_prets(struct ptp_system_timestamp __always_unused *sts)
-{
-	;
-}
-
-static inline void
-ptp_read_system_postts(struct ptp_system_timestamp __always_unused *sts)
-{
-	;
-}
 #endif /* !(RHEL >= 7.7 && RHEL != 8.0) */
 #if (RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,1)))
 #define HAVE_NDO_BRIDGE_SETLINK_EXTACK
@@ -7037,18 +6989,6 @@ static inline void _kc_bitmap_set_value8(unsigned long *map,
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(5,7,0))
 u64 _kc_pci_get_dsn(struct pci_dev *dev);
 #define pci_get_dsn(dev) _kc_pci_get_dsn(dev)
-/* add a check for the Oracle UEK 5.4.17 kernel which
- * backported the rename of the aer functions
- */
-#if defined(NEED_ORCL_LIN_PCI_AER_CLEAR_NONFATAL_STATUS) || \
-!(SLE_VERSION_CODE > SLE_VERSION(15, 2, 0)) && \
-    !((LINUX_VERSION_CODE == KERNEL_VERSION(5,3,18)) && \
-(SLE_LOCALVERSION_CODE >= KERNEL_VERSION(14, 0, 0))) && \
-    !(LINUX_VERSION_CODE == KERNEL_VERSION(5,4,17)) && \
-    !(RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8,3)))
-#define pci_aer_clear_nonfatal_status	pci_cleanup_aer_uncorrect_error_status
-#endif
-
 #ifndef DEVLINK_INFO_VERSION_GENERIC_FW_BUNDLE_ID
 #define DEVLINK_INFO_VERSION_GENERIC_FW_BUNDLE_ID "fw.bundle_id"
 #endif

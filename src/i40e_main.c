@@ -43,7 +43,7 @@ static const char i40e_driver_string[] =
 
 #define DRV_VERSION_MAJOR 2
 #define DRV_VERSION_MINOR 22
-#define DRV_VERSION_BUILD 18
+#define DRV_VERSION_BUILD 20
 #define DRV_VERSION_SUBBUILD 0
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
@@ -14967,6 +14967,15 @@ static const struct net_device_ops i40e_netdev_ops = {
 	.extended.ndo_udp_tunnel_add = i40e_udp_tunnel_add,
 	.extended.ndo_udp_tunnel_del = i40e_udp_tunnel_del,
 #else /* !HAVE_RHEL7_NETDEV_OPS_EXT_NDO_UDP_TUNNEL */
+#ifdef HAVE_NDO_UDP_TUNNEL_CALLBACK
+#ifdef HAVE_UDP_TUNNEL_NIC_INFO
+	.ndo_udp_tunnel_add	= udp_tunnel_nic_add_port,
+	.ndo_udp_tunnel_del	= udp_tunnel_nic_del_port,
+#else
+	.ndo_udp_tunnel_add	= i40e_udp_tunnel_add,
+	.ndo_udp_tunnel_del	= i40e_udp_tunnel_del,
+#endif /* !HAVE_UDP_TUNNEL_NIC_INFO */
+#endif /* HAVE_NDO_UDP_TUNNEL_CALLBACK */
 #endif /* HAVE_RHEL7_NETDEV_OPS_EXT_NDO_UDP_TUNNEL */
 #else /* !HAVE_UDP_ENC_RX_OFFLOAD */
 #ifdef HAVE_VXLAN_RX_OFFLOAD

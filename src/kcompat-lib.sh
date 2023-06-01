@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: GPL-2.0
 # Copyright(c) 2013 - 2023 Intel Corporation.
 
+
+
+
 # to be sourced
 
 # General shell helpers
@@ -31,12 +34,13 @@ function filter-out-bad-files() {
 	if [ $# = 0 ]; then
 		die 10 "no files passed, use '-' when reading from pipe (|)"
 	fi
-	local out=()
+	local out=() diagmsgs=stderr
+	[ -n "${QUIET_COMPAT-}" ] && diagmsgs=null
 	for x in "$@"; do
 		if [ -e "$x" ]; then
 			out+=("$x")
 		else
-			echo >&2 filtering "$x" out
+			echo >&"/dev/$diagmsgs" filtering "$x" out
 		fi
 	done
 	if [ ${#out[@]} = 0 ]; then
@@ -48,11 +52,9 @@ function filter-out-bad-files() {
 # Basics of regexp explained, as a reference for mostly-C programmers:
 # (bash) "regexp-$VAR-regexp"  - bash' VARs are placed into "QUOTED" strings
 # /\);?$/       - match end of function declaration, $ is end of string
-# ^[^\/]*       - (heuristic), anything but comment, eg to exclude function docs
+# ^[ \t]*       - (heuristic), anything but comment, eg to exclude function docs
 # /STH/, /END/  - (awk), print all lines sice STH matched, up to END, inclusive
 
-# "Not inside of Comment, at on begining of line", heuristic
-NC='^[^\/]*'
 # "Whitespace only"
 WB='[ \t\n]'
 
@@ -74,7 +76,10 @@ function find-decl() {
 	end="$2"
 	shift 2
 	files="$(filter-out-bad-files "$@")" || die
-	awk "$what, $end" "$files"
+	awk "
+		/^$WB*\*/ {next}
+		$what, $end
+	" "$files"
 }
 
 # yield $1 function declaration (signature), don't pass return type in $1
@@ -82,7 +87,7 @@ function find-decl() {
 function find-fun-decl() {
 	test $# -ge 2
 	local what end
-	what="/$NC$WB*(\(\*)?$1$WB*($|[()])/"
+	what="/$WB*([(]\*)?$1$WB*($|[()])/"
 	end='/\);?$/'
 	shift
 	find-decl "$what" "$end" "$@"
@@ -92,7 +97,7 @@ function find-fun-decl() {
 function find-enum-decl() {
 	test $# -ge 2
 	local what end
-	what="/${NC}enum $1"' \{$/'
+	what="/^$WB*enum $1"' \{$/'
 	end='/\};$/'
 	shift
 	find-decl "$what" "$end" "$@"
@@ -102,7 +107,7 @@ function find-enum-decl() {
 function find-struct-decl() {
 	test $# -ge 2
 	local what end
-	what="/${NC}struct $1"' \{$/'
+	what="/^$WB*struct $1"' \{$/'
 	end='/^\};$/' # that's (^) different from enum-decl
 	shift
 	find-decl "$what" "$end" "$@"
@@ -155,26 +160,27 @@ function gen() {
 	test $# -ge 6 || die 20 "too few arguments, $# given, at least 6 needed"
 	local define if_kw kind name in_kw # mandatory
 	local of_kw method_name operator pattern # optional
+	local src_line="${BASH_SOURCE[0]}:${BASH_LINENO[0]}"
 	define="$1"
 	if_kw="$2"
 	kind="$3"
 	local orig_args_cnt=$#
 	shift 3
-	[ "$if_kw" != if ] && die 21 "'if' keyword expected, '$if_kw' given"
+	[ "$if_kw" != if ] && die 21 "$src_line: 'if' keyword expected, '$if_kw' given"
 	case "$kind" in
 	fun|enum|struct|macro)
 		name="$1"
 		shift
 	;;
 	method)
-		test $# -ge 5 || die 22 "too few arguments, $orig_args_cnt given, at least 8 needed"
+		test $# -ge 5 || die 22 "$src_line: too few arguments, $orig_args_cnt given, at least 8 needed"
 		method_name="$1"
 		of_kw="$2"
 		name="$3"
 		shift 3
-		[ "$of_kw" != of ] && die 23 "'of' keyword expected, '$of_kw' given"
+		[ "$of_kw" != of ] && die 23 "$src_line: 'of' keyword expected, '$of_kw' given"
 	;;
-	*) die 24 "unknown KIND ($kind) to look for" ;;
+	*) die 24 "$src_line: unknown KIND ($kind) to look for" ;;
 	esac
 	operator="$1"
 	case "$operator" in
@@ -194,10 +200,10 @@ function gen() {
 		in_kw=in
 		shift
 	;;
-	*) die 25 "unknown OPERATOR ($operator) to look for" ;;
+	*) die 25 "$src_line: unknown OPERATOR ($operator) to look for" ;;
 	esac
-	[ "$in_kw" != in ] && die 26 "'in' keyword expected, '$in_kw' given"
-	test $# -ge 1 || die 27 'too few arguments, at least one filename expected'
+	[ "$in_kw" != in ] && die 26 "$src_line: 'in' keyword expected, '$in_kw' given"
+	test $# -ge 1 || die 27 "$src_line: too few arguments, at least one filename expected"
 
 	local first_decl=
 	if [ "$kind" = method ]; then

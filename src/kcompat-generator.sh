@@ -2,6 +2,9 @@
 # SPDX-License-Identifier: GPL-2.0
 # Copyright(c) 2013 - 2023 Intel Corporation.
 
+
+
+
 set -Eeuo pipefail
 
 # This file generates HAVE_ and NEED_ defines for current kernel
@@ -41,6 +44,33 @@ source "$ORIG_CWD"/kcompat-lib.sh
 # handy line of DOC copy-pasted form kcompat-lib.sh:
 #   gen DEFINE if (KIND [METHOD of]) NAME [(matches|lacks) PATTERN|absent] in <list-of-files>
 
+function gen-devlink() {
+	dh='include/net/devlink.h'
+	gen HAVE_DEVLINK_FLASH_UPDATE_BEGIN_END_NOTIFY if fun devlink_flash_update_begin_notify in "$dh"
+	gen HAVE_DEVLINK_FLASH_UPDATE_PARAMS    if struct devlink_flash_update_params in "$dh"
+	gen HAVE_DEVLINK_FLASH_UPDATE_PARAMS_FW if struct devlink_flash_update_params matches 'struct firmware \\*fw' in "$dh"
+	gen HAVE_DEVLINK_HEALTH if enum devlink_health_reporter_state in "$dh"
+	gen HAVE_DEVLINK_HEALTH_DEFAULT_AUTO_RECOVER if fun devlink_health_reporter_create lacks auto_recover in "$dh"
+	gen HAVE_DEVLINK_HEALTH_OPS_EXTACK if method dump of devlink_health_reporter_ops matches ext_ack in "$dh"
+	gen HAVE_DEVLINK_INFO_DRIVER_NAME_PUT if fun devlink_info_driver_name_put in "$dh"
+	gen HAVE_DEVLINK_PARAMS if method validate of devlink_param matches ext_ack in "$dh"
+	gen HAVE_DEVLINK_PARAMS_PUBLISH if fun devlink_params_publish in "$dh"
+	gen HAVE_DEVLINK_RATE_NODE_CREATE if fun devl_rate_node_create in "$dh"
+	# keep devlink_region_ops body in variable, to not look 4 times for
+	# exactly the same thing in big file
+	# please consider it as an example of "how to speed up if needed"
+	REGION_OPS="$(find-struct-decl devlink_region_ops "$dh")"
+	gen HAVE_DEVLINK_REGIONS if struct devlink_region_ops in - <<< "$REGION_OPS"
+	gen HAVE_DEVLINK_REGION_OPS_SNAPSHOT if fun snapshot in - <<< "$REGION_OPS"
+	gen HAVE_DEVLINK_REGION_OPS_SNAPSHOT_OPS if fun snapshot matches devlink_region_ops in - <<< "$REGION_OPS"
+	gen HAVE_DEVLINK_REGISTER_SETS_DEV if fun devlink_register matches 'struct device' in "$dh"
+	gen HAVE_DEVLINK_RELOAD_ENABLE_DISABLE if fun devlink_reload_enable in "$dh"
+	gen HAVE_DEVLINK_SET_FEATURES  if fun devlink_set_features in "$dh"
+	gen HAVE_DEVL_PORT_REGISTER if fun devl_port_register in "$dh"
+
+	gen HAVE_DEVLINK_RELOAD_ACTION_AND_LIMIT if enum devlink_reload_action matches DEVLINK_RELOAD_ACTION_FW_ACTIVATE in include/uapi/linux/devlink.h
+}
+
 function gen-ethtool() {
 	eth='include/linux/ethtool.h'
 	gen HAVE_ETHTOOL_EXTENDED_RINGPARAMS if method get_ringparam of ethtool_ops matches 'struct kernel_ethtool_ringparam \\*' in "$eth"
@@ -48,32 +78,8 @@ function gen-ethtool() {
 
 function gen-filter() {
 	fh='include/linux/filter.h'
+	gen HAVE_XDP_DO_FLUSH if fun xdp_do_flush_map in "$fh"
 	gen NEED_NO_NETDEV_PROG_XDP_WARN_ACTION if fun bpf_warn_invalid_xdp_action lacks 'struct net_device \\*' in "$fh"
-}
-
-function gen-devlink() {
-	dh='include/net/devlink.h'
-	gen HAVE_DEVLINK_FLASH_UPDATE_BEGIN_END_NOTIFY if fun devlink_flash_update_begin_notify in "$dh"
-	gen HAVE_DEVLINK_FLASH_UPDATE_PARAMS_FW if struct devlink_flash_update_params matches 'struct firmware \\*fw' in "$dh"
-	gen HAVE_DEVLINK_FLASH_UPDATE_PARAMS    if struct devlink_flash_update_params in "$dh"
-	gen HAVE_DEVLINK_HEALTH_DEFAULT_AUTO_RECOVER if fun devlink_health_reporter_create lacks auto_recover in "$dh"
-	gen HAVE_DEVLINK_HEALTH if enum devlink_health_reporter_state in "$dh"
-	gen HAVE_DEVLINK_HEALTH_OPS_EXTACK if method dump of devlink_health_reporter_ops matches ext_ack in "$dh"
-	gen HAVE_DEVLINK_INFO_DRIVER_NAME_PUT if fun devlink_info_driver_name_put in "$dh"
-	gen HAVE_DEVLINK_PARAMS if method validate of devlink_param matches ext_ack in "$dh"
-	gen HAVE_DEVLINK_PARAMS_PUBLISH if fun devlink_params_publish in "$dh"
-	# keep devlink_region_ops body in variable, to not look 4 times for
-	# exactly the same thing in big file
-	# please consider it as an example of "how to speed up if needed"
-	REGION_OPS="$(find-struct-decl devlink_region_ops "$dh")"
-	gen HAVE_DEVLINK_REGION_OPS_SNAPSHOT if fun snapshot in - <<< "$REGION_OPS"
-	gen HAVE_DEVLINK_REGION_OPS_SNAPSHOT_OPS if fun snapshot matches devlink_region_ops in - <<< "$REGION_OPS"
-	gen HAVE_DEVLINK_REGIONS if struct devlink_region_ops in - <<< "$REGION_OPS"
-	gen HAVE_DEVLINK_REGISTER_SETS_DEV if fun devlink_register matches 'struct device' in "$dh"
-	gen HAVE_DEVLINK_RELOAD_ENABLE_DISABLE if fun devlink_reload_enable in "$dh"
-	gen HAVE_DEVLINK_SET_FEATURES  if fun devlink_set_features in "$dh"
-
-	gen HAVE_DEVLINK_RELOAD_ACTION_AND_LIMIT if enum devlink_reload_action matches DEVLINK_RELOAD_ACTION_FW_ACTIVATE in include/uapi/linux/devlink.h
 }
 
 function gen-flow-dissector() {
@@ -93,12 +99,22 @@ function gen-netdevice() {
 	gen HAVE_NDO_FDB_ADD_VID    if method ndo_fdb_del of net_device_ops matches 'u16 vid' in "$ndh"
 	gen HAVE_NDO_FDB_DEL_EXTACK if method ndo_fdb_del of net_device_ops matches ext_ack   in "$ndh"
 	gen HAVE_NDO_GET_DEVLINK_PORT if method ndo_get_devlink_port of net_device_ops in "$ndh"
+	gen HAVE_NDO_UDP_TUNNEL_CALLBACK if method ndo_udp_tunnel_add of net_device_ops in "$ndh"
+	gen HAVE_NETIF_SET_TSO_MAX if fun netif_set_tso_max_size in "$ndh"
 	gen HAVE_SET_NETDEV_DEVLINK_PORT if macro SET_NETDEV_DEVLINK_PORT in "$ndh"
-	gen NEED_NETIF_NAPI_ADD_NO_WEIGHT if fun netif_napi_add matches weight in "$ndh"
+	gen NEED_NETIF_NAPI_ADD_NO_WEIGHT if fun netif_napi_add matches 'int weight' in "$ndh"
+	gen NEED_NET_PREFETCH if fun net_prefetch absent in "$ndh"
 }
 
 function gen-other() {
+	gen NEED_PCI_AER_CLEAR_NONFATAL_STATUS if fun pci_aer_clear_nonfatal_status absent in include/linux/aer.h
+	gen NEED_BITMAP_COPY_CLEAR_TAIL if fun bitmap_copy_clear_tail absent in include/linux/bitmap.h
 	gen NEED_ETH_HW_ADDR_SET if fun eth_hw_addr_set absent in include/linux/etherdevice.h
+	gen NEED_MUL_U64_U64_DIV_U64 if fun mul_u64_u64_div_u64 absent in include/linux/math64.h
+	gen NEED_DIFF_BY_SCALED_PPM if fun diff_by_scaled_ppm absent in include/linux/ptp_clock_kernel.h
+	gen NEED_PTP_SYSTEM_TIMESTAMP if fun ptp_read_system_prets absent in include/linux/ptp_clock_kernel.h
+	gen HAVE_U64_STATS_FETCH_BEGIN_IRQ if fun u64_stats_fetch_begin_irq in include/linux/u64_stats_sync.h
+	gen HAVE_U64_STATS_FETCH_RETRY_IRQ if fun u64_stats_fetch_retry_irq in include/linux/u64_stats_sync.h
 }
 
 # all the generations, extracted from main() to keep normal code and various

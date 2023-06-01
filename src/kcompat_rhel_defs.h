@@ -69,17 +69,6 @@
 #endif /* 7.7 */
 
 /*****************************************************************************/
-#if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(7,9))
-#else /* >= 7.9 */
-/* mul_u64_u64_div_u64 was backported into RHEL 7.9 but not into the early
- * 8.x releases
- */
-#if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(8,0))
-#undef NEED_MUL_U64_U64_DIV_U64
-#endif /* < 8.0 */
-#endif /* 7.9 */
-
-/*****************************************************************************/
 #if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(8,0))
 #else /* >= 8.0 */
 #undef HAVE_TCF_EXTS_TO_LIST
@@ -127,14 +116,12 @@
 #else /* >= 8.3 */
 #undef NEED_CPU_LATENCY_QOS_RENAME
 #undef NEED_DEVLINK_REGION_CREATE_OPS
-#undef NEED_MUL_U64_U64_DIV_U64
 #endif /* 8.3 */
 
 /*****************************************************************************/
 #if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(8,4))
 #else /* >= 8.4 */
 #undef NEED_DEVLINK_PORT_ATTRS_SET_STRUCT
-#undef NEED_NET_PREFETCH
 #undef NEED_DEVLINK_FLASH_UPDATE_TIMEOUT_NOTIFY
 #undef HAVE_XDP_QUERY_PROG
 #define HAVE_AF_XDP_ZC_SUPPORT
@@ -165,7 +152,6 @@
 #else /* >= 8.6 */
 #if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(9,0))
 #define HAVE_ETHTOOL_COALESCE_EXTACK
-#define HAVE_DEVL_PORT_REGISTER
 #endif /* < 9.0 */
 #endif /* 8.6 */
 
@@ -191,7 +177,6 @@
 #else /* >= 9.1 */
 #undef HAVE_PASID_SUPPORT
 #define HAVE_ETHTOOL_COALESCE_EXTACK
-#define HAVE_XDP_DO_FLUSH
 #endif /* 9.1 */
 
 /*****************************************************************************/

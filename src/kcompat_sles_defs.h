@@ -156,11 +156,6 @@
 #define HAVE_FLOW_INDR_BLOCK_LOCK
 #endif /* 5.3.8-2 */
 
-#if (SLE_KERNEL_CODE < SLE_KERNEL_VERSION(5,3,18,24))
-#else /* >= 5.3.18-24 */
-#undef NEED_MUL_U64_U64_DIV_U64
-#endif
-
 #if (SLE_KERNEL_CODE < SLE_KERNEL_VERSION(5,3,18,26))
 #else /* >= 5.3.18-26 */
 #undef NEED_CPU_LATENCY_QOS_RENAME
@@ -172,12 +167,6 @@
 #undef NEED_DEVLINK_REGION_CREATE_OPS
 #undef NEED_DEVLINK_PORT_ATTRS_SET_STRUCT
 #endif /* 5.3.18-34 */
-
-/*****************************************************************************/
-#if (SLE_KERNEL_CODE < SLE_KERNEL_VERSION(5,3,18,37))
-#else /* >= 5.3.18-37 */
-#undef NEED_NET_PREFETCH
-#endif /* 5.3.18-37 */
 
 /*****************************************************************************/
 #if (SLE_KERNEL_CODE < SLE_KERNEL_VERSION(5,3,18,38))

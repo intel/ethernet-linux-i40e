@@ -13,9 +13,7 @@
  * should be migrated to the new format over time.
  */
 
-/*
- * generic network stack functions
- */
+/* generic network stack functions */
 
 /* NEED_NETDEV_TXQ_BQL_PREFETCH
  *
@@ -197,9 +195,7 @@ static inline bool macvlan_supports_dest_filter(struct net_device *dev)
 
 #endif /* NETIF_F_HW_L2FW_DOFFLOAD */
 
-/*
- * tc functions
- */
+/* tc functions */
 
 /* NEED_FLOW_INDR_BLOCK_CB_REGISTER
  *
@@ -215,9 +211,7 @@ static inline bool macvlan_supports_dest_filter(struct net_device *dev)
 #define __flow_indr_block_cb_unregister __tc_indr_block_cb_unregister
 #endif
 
-/*
- * devlink support
- */
+/* devlink support */
 #if IS_ENABLED(CONFIG_NET_DEVLINK)
 
 #include <net/devlink.h>
@@ -475,9 +469,7 @@ static inline void ida_free(struct ida *ida, unsigned int id)
 }
 #endif /* NEED_IDA_ALLOC_MIN_MAX_RANGE_FREE */
 
-/*
- * dev_printk implementations
- */
+/* dev_printk implementations */
 
 /* NEED_DEV_PRINTK_ONCE
  *
@@ -563,9 +555,7 @@ tc_cls_can_offload_and_chain0(const struct net_device *dev,
 #define TC_SETUP_QDISC_MQPRIO TC_SETUP_MQPRIO
 #endif /* NEED_TC_SETUP_QDISC_MQPRIO */
 
-/*
- * ART/TSC functions
- */
+/* ART/TSC functions */
 #ifdef HAVE_PTP_CROSSTIMESTAMP
 /* NEED_CONVERT_ART_NS_TO_TSC
  *
@@ -610,9 +600,7 @@ static inline struct system_counterval_t convert_art_ns_to_tsc(u64 art_ns)
 #endif /* NEED_CONVERT_ART_NS_TO_TSC */
 #endif /* HAVE_PTP_CROSSTIMESTAMP */
 
-/*
- * PTP functions and definitions
- */
+/* PTP functions and definitions */
 #if IS_ENABLED(CONFIG_PTP_1588_CLOCK)
 #include <linux/ptp_clock_kernel.h>
 #include <linux/ptp_clock.h>
@@ -666,6 +654,28 @@ static inline struct system_counterval_t convert_art_ns_to_tsc(u64 art_ns)
 #endif
 
 #endif /* CONFIG_PTP_1588_CLOCK */
+
+/*
+ * NEED_PTP_SYSTEM_TIMESTAMP
+ *
+ * Upstream commit 361800876f80 ("ptp: add PTP_SYS_OFFSET_EXTENDED
+ * ioctl") introduces new ioctl, driver and helper functions.
+ *
+ * Required for PhotonOS 3.0 to correctly support backport of
+ * PTP patches introduced in Linux Kernel version 5.0 on 4.x kernels
+ */
+#ifdef NEED_PTP_SYSTEM_TIMESTAMP
+struct ptp_system_timestamp {
+	struct timespec64 pre_ts;
+	struct timespec64 post_ts;
+};
+
+static inline void
+ptp_read_system_prets(struct ptp_system_timestamp *sts) { }
+
+static inline void
+ptp_read_system_postts(struct ptp_system_timestamp *sts) { }
+#endif /* !NEED_PTP_SYSTEM_TIMESTAMP */
 
 #ifdef NEED_BUS_FIND_DEVICE_CONST_DATA
 /* NEED_BUS_FIND_DEVICE_CONST_DATA
@@ -818,6 +828,17 @@ cpu_latency_qos_remove_request(struct pm_qos_request *req)
 #define static_branch_dec(x)		static_key_slow_dec(x)
 
 #endif /* NEED_STATIC_BRANCH */
+
+/* PCI related stuff */
+
+/* NEED_PCI_AER_CLEAR_NONFATAL_STATUS
+ *
+ * 894020fdd88c ("PCI/AER: Rationalize error status register clearing") has
+ * renamed pci_cleanup_aer_uncorrect_error_status to more sane name.
+ */
+#ifdef NEED_PCI_AER_CLEAR_NONFATAL_STATUS
+#define pci_aer_clear_nonfatal_status	pci_cleanup_aer_uncorrect_error_status
+#endif /* NEED_PCI_AER_CLEAR_NONFATAL_STATUS */
 
 #ifdef NEED_NETDEV_XDP_STRUCT
 #define netdev_bpf netdev_xdp
@@ -1269,6 +1290,36 @@ flow_rule_match_enc_keyid(const struct flow_rule *rule,
 #endif /* HAVE_TC_FLOWER_ENC */
 #endif /* NEED_FLOW_MATCH && HAVE_TC_SETUP_CLSFLOWER */
 
+/* bitfield / bitmap */
+
+/* NEED_BITMAP_COPY_CLEAR_TAIL
+ *
+ * backport
+ * c724f193619c ("bitmap: new bitmap_copy_safe and bitmap_{from,to}_arr32")
+ */
+#ifdef NEED_BITMAP_COPY_CLEAR_TAIL
+/* Copy bitmap and clear tail bits in last word */
+static inline void
+bitmap_copy_clear_tail(unsigned long *dst, const unsigned long *src, unsigned int nbits)
+{
+	bitmap_copy(dst, src, nbits);
+	if (nbits % BITS_PER_LONG)
+		dst[nbits / BITS_PER_LONG] &= BITMAP_LAST_WORD_MASK(nbits);
+}
+
+/*
+ * On 32-bit systems bitmaps are represented as u32 arrays internally, and
+ * therefore conversion is not needed when copying data from/to arrays of u32.
+ */
+#if BITS_PER_LONG == 64
+void bitmap_from_arr32(unsigned long *bitmap, const u32 *buf, unsigned int nbits);
+#else
+#define bitmap_from_arr32(bitmap, buf, nbits)			\
+	bitmap_copy_clear_tail((unsigned long *) (bitmap),	\
+			       (const unsigned long *) (buf), (nbits))
+#endif /* BITS_PER_LONG == 64 */
+#endif /* NEED_BITMAP_COPY_CLEAR_TAIL */
+
 #ifndef HAVE_INCLUDE_BITFIELD
 /* linux/bitfield.h has been added in Linux 4.9 in upstream commit
  * 3e9b3112ec74 ("add basic register-field manipulation macros")
@@ -1417,5 +1468,78 @@ __printf(2, 3) void ethtool_sprintf(u8 **data, const char *fmt, ...)
 	*data += ETH_GSTRING_LEN;
 }
 #endif /* NEED_ETHTOOL_SPRINTF */
+
+/*
+ * HAVE_U64_STATS_FETCH_BEGIN_IRQ
+ * HAVE_U64_STATS_FETCH_RETRY_IRQ
+ *
+ * Upstream commit 44b0c2957adc ("u64_stats: Streamline the implementation")
+ * marks u64_stats_fetch_begin_irq() and u64_stats_fetch_retry_irq()
+ * as obsolete. Their functionality is combined with: u64_stats_fetch_begin()
+ * and u64_stats_fetch_retry().
+ *
+ * Upstream commit dec5efcffad4 ("u64_stat: Remove the obsolete fetch_irq()
+ * variants.") removes u64_stats_fetch_begin_irq() and
+ * u64_stats_fetch_retry_irq().
+ *
+ * Map u64_stats_fetch_begin() and u64_stats_fetch_retry() to the _irq()
+ * variants on the older kernels to allow the same driver code working on
+ * both old and new kernels.
+ */
+#ifdef HAVE_U64_STATS_FETCH_BEGIN_IRQ
+#define u64_stats_fetch_begin _kc_u64_stats_fetch_begin
+
+static inline unsigned int
+_kc_u64_stats_fetch_begin(const struct u64_stats_sync *syncp)
+{
+	return u64_stats_fetch_begin_irq(syncp);
+}
+#endif /* HAVE_U64_STATS_FETCH_BEGIN_IRQ */
+
+#ifdef HAVE_U64_STATS_FETCH_RETRY_IRQ
+#define u64_stats_fetch_retry _kc_u64_stats_fetch_retry
+
+static inline bool
+_kc_u64_stats_fetch_retry(const struct u64_stats_sync *syncp,
+			  unsigned int start)
+{
+	return u64_stats_fetch_retry_irq(syncp, start);
+}
+#endif /* HAVE_U64_STATS_FETCH_RETRY_IRQ */
+
+/* NEED_DIFF_BY_SCALED_PPM
+ *
+ * diff_by_scaled_ppm and adjust_by_scaled_ppm were introduced in
+ * kernel 6.1 by upstream commit 1060707e3809 ("ptp: introduce helpers
+ * to adjust by scaled parts per million").
+ */
+#ifdef NEED_DIFF_BY_SCALED_PPM
+static inline bool
+diff_by_scaled_ppm(u64 base, long scaled_ppm, u64 *diff)
+{
+	bool negative = false;
+
+	if (scaled_ppm < 0) {
+		negative = true;
+		scaled_ppm = -scaled_ppm;
+	}
+
+	*diff = mul_u64_u64_div_u64(base, (u64)scaled_ppm,
+				    1000000ULL << 16);
+
+	return negative;
+}
+
+static inline u64
+adjust_by_scaled_ppm(u64 base, long scaled_ppm)
+{
+	u64 diff;
+
+	if (diff_by_scaled_ppm(base, scaled_ppm, &diff))
+		return base - diff;
+
+	return base + diff;
+}
+#endif /* NEED_DIFF_BY_SCALED_PPM */
 
 #endif /* _KCOMPAT_IMPL_H_ */
