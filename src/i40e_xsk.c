@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2023 Intel Corporation. */
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2023 Intel Corporation */
 
 #ifdef HAVE_AF_XDP_ZC_SUPPORT
 #include <linux/bpf_trace.h>
@@ -790,12 +790,10 @@ void i40e_zca_free(struct zero_copy_allocator *alloc, unsigned long handle)
 }
 #endif /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
 
-/**
+/*
  * i40e_construct_skb_zc - Create skbuff from zero-copy Rx buffer
  * @rx_ring: Rx ring
-#ifndef HAVE_MEM_TYPE_XSK_BUFF_POOL
  * @bi: Rx buffer
-#endif
  * @xdp: xdp_buff
  *
  * This functions allocates a new skb from a zero-copy Rx buffer.
@@ -1084,7 +1082,8 @@ static void i40e_set_rs_bit(struct i40e_ring *xdp_ring)
 	struct i40e_tx_desc *tx_desc;
 
 	tx_desc = I40E_TX_DESC(xdp_ring, ntu);
-	tx_desc->cmd_type_offset_bsz |= (I40E_TX_DESC_CMD_RS << I40E_TXD_QW1_CMD_SHIFT);
+	tx_desc->cmd_type_offset_bsz |= cpu_to_le64(I40E_TX_DESC_CMD_RS <<
+						    I40E_TXD_QW1_CMD_SHIFT);
 }
 
 /**
@@ -1324,13 +1323,13 @@ out_xmit:
  **/
 int i40e_xsk_wakeup(struct net_device *dev, u32 queue_id, u32 flags)
 #else
-/**
+/*
  * i40e_xsk_async_xmit - Implements the ndo_xsk_async_xmit
  * @dev: the netdevice
  * @queue_id: queue id to wake up
  *
  * Returns <0 for errors, 0 otherwise.
- **/
+ */
 int i40e_xsk_async_xmit(struct net_device *dev, u32 queue_id)
 #endif /* HAVE_NDO_XSK_WAKEUP */
 {
@@ -1399,7 +1398,7 @@ void i40e_xsk_clean_rx_ring(struct i40e_ring *rx_ring)
 }
 
 /**
- * i40e_xsk_clean_xdp_ring - Clean the XDP Tx ring on shutdown
+ * i40e_xsk_clean_tx_ring - Clean the XDP Tx ring on shutdown
  * @tx_ring: XDP Tx ring
  **/
 void i40e_xsk_clean_tx_ring(struct i40e_ring *tx_ring)

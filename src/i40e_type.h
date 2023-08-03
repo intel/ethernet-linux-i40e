@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2023 Intel Corporation. */
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2023 Intel Corporation */
 
 #ifndef _I40E_TYPE_H_
 #define _I40E_TYPE_H_
@@ -25,7 +25,6 @@
 
 /* Max timeout in ms for the phy to respond */
 #define I40E_MAX_PHY_TIMEOUT		500
-
 /* Switch from ms to the 1usec global time (this is the GTIME resolution) */
 #define I40E_MS_TO_GTIME(time)		((time) * 1000)
 
@@ -380,7 +379,7 @@ enum i40e_aq_resource_access_type {
 };
 
 struct i40e_nvm_info {
-	u64 hw_semaphore_timeout; /* usec global time (GTIME resolution) */
+	u32 hw_semaphore_timeout; /* usec global time (GTIME resolution) */
 	u32 timeout;              /* [ms] */
 	u16 sr_size;              /* Shadow RAM size in words */
 	bool blank_nvm_mode;      /* is NVM empty (no FW present)*/

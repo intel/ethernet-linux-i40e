@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2023 Intel Corporation. */
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2023 Intel Corporation */
 
 #ifdef CONFIG_DCB
 #include "i40e.h"
@@ -111,10 +111,13 @@ static int i40e_dcbnl_ieee_setets(struct net_device *netdev,
 	struct i40e_pf *pf = i40e_netdev_to_pf(netdev);
 	struct i40e_hw *hw = &pf->hw;
 	struct i40e_dcbx_config *old_cfg = &hw->local_dcbx_config;
+	int tc_reco_bw = 0;
+	int tc_tx_bw = 0;
 	int i, ret;
 
 	if (!(pf->dcbx_cap & DCB_CAP_DCBX_VER_IEEE) ||
-	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED))
+	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED) ||
+	    (pf->flags & I40E_FLAG_TC_MQPRIO))
 		return -EINVAL;
 
 	/* Copy current config into temp */
@@ -125,17 +128,24 @@ static int i40e_dcbnl_ieee_setets(struct net_device *netdev,
 	pf->tmp_cfg.etscfg.maxtcs = I40E_MAX_TRAFFIC_CLASS;
 	pf->tmp_cfg.etscfg.cbs = ets->cbs;
 	for (i = 0; i < I40E_MAX_TRAFFIC_CLASS; i++) {
+		tc_tx_bw += ets->tc_tx_bw[i];
 		pf->tmp_cfg.etscfg.tcbwtable[i] = ets->tc_tx_bw[i];
 		pf->tmp_cfg.etscfg.tsatable[i] = ets->tc_tsa[i];
 		pf->tmp_cfg.etscfg.prioritytable[i] = ets->prio_tc[i];
+		tc_reco_bw += ets->tc_reco_bw[i];
 		pf->tmp_cfg.etsrec.tcbwtable[i] = ets->tc_reco_bw[i];
 		pf->tmp_cfg.etsrec.tsatable[i] = ets->tc_reco_tsa[i];
 		pf->tmp_cfg.etsrec.prioritytable[i] = ets->reco_prio_tc[i];
 	}
 
+	if (!tc_tx_bw)
+		pf->tmp_cfg.etscfg.tcbwtable[0] = 100;
+	if (!tc_reco_bw)
+		pf->tmp_cfg.etsrec.tcbwtable[0] = 100;
+
 	/* Commit changes to HW */
-	ret = i40e_hw_dcb_config(pf, &pf->tmp_cfg);
-	if (ret) {
+	ret = i40e_pf_dcb_cfg(pf, &pf->tmp_cfg);
+	if (ret < 0) {
 		dev_info(&pf->pdev->dev,
 			 "Failed setting DCB ETS configuration err %s aq_err %s\n",
 			 i40e_stat_str(&pf->hw, ret),
@@ -162,7 +172,8 @@ static int i40e_dcbnl_ieee_setpfc(struct net_device *netdev,
 	int ret;
 
 	if (!(pf->dcbx_cap & DCB_CAP_DCBX_VER_IEEE) ||
-	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED))
+	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED) ||
+	    (pf->flags & I40E_FLAG_TC_MQPRIO))
 		return -EINVAL;
 
 	/* Copy current config into temp */
@@ -173,8 +184,8 @@ static int i40e_dcbnl_ieee_setpfc(struct net_device *netdev,
 		pf->tmp_cfg.pfc.pfccap = I40E_MAX_TRAFFIC_CLASS;
 	pf->tmp_cfg.pfc.pfcenable = pfc->pfc_en;
 
-	ret = i40e_hw_dcb_config(pf, &pf->tmp_cfg);
-	if (ret) {
+	ret = i40e_pf_dcb_cfg(pf, &pf->tmp_cfg);
+	if (ret < 0) {
 		dev_info(&pf->pdev->dev,
 			 "Failed setting DCB PFC configuration err %s aq_err %s\n",
 			 i40e_stat_str(&pf->hw, ret),
@@ -202,7 +213,8 @@ static int i40e_dcbnl_ieee_setapp(struct net_device *netdev,
 	int ret;
 
 	if (!(pf->dcbx_cap & DCB_CAP_DCBX_VER_IEEE) ||
-	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED))
+	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED) ||
+	    (pf->flags & I40E_FLAG_TC_MQPRIO))
 		return -EINVAL;
 
 	if (old_cfg->numapps == I40E_DCBX_MAX_APPS)
@@ -224,8 +236,8 @@ static int i40e_dcbnl_ieee_setapp(struct net_device *netdev,
 	/* Add the app */
 	pf->tmp_cfg.app[pf->tmp_cfg.numapps++] = new_app;
 
-	ret = i40e_hw_dcb_config(pf, &pf->tmp_cfg);
-	if (ret) {
+	ret = i40e_pf_dcb_cfg(pf, &pf->tmp_cfg);
+	if (ret < 0) {
 		dev_info(&pf->pdev->dev,
 			 "Failed setting DCB configuration err %s aq_err %s\n",
 			 i40e_stat_str(&pf->hw, ret),
@@ -253,7 +265,8 @@ static int i40e_dcbnl_ieee_delapp(struct net_device *netdev,
 	int i, j, ret;
 
 	if (!(pf->dcbx_cap & DCB_CAP_DCBX_VER_IEEE) ||
-	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED))
+	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED) ||
+	    (pf->flags & I40E_FLAG_TC_MQPRIO))
 		return -EINVAL;
 
 	ret = dcb_ieee_delapp(netdev, app);
@@ -289,8 +302,8 @@ static int i40e_dcbnl_ieee_delapp(struct net_device *netdev,
 	for (j = i; j < pf->tmp_cfg.numapps; j++)
 		pf->tmp_cfg.app[j] = old_cfg->app[j + 1];
 
-	ret = i40e_hw_dcb_config(pf, &pf->tmp_cfg);
-	if (ret) {
+	ret = i40e_pf_dcb_cfg(pf, &pf->tmp_cfg);
+	if (ret < 0) {
 		dev_info(&pf->pdev->dev,
 			 "Failed setting DCB configuration err %s aq_err %s\n",
 			 i40e_stat_str(&pf->hw, ret),
@@ -329,7 +342,8 @@ static u8 i40e_dcbnl_setstate(struct net_device *netdev, u8 state)
 	int ret = I40E_DCBNL_STATUS_SUCCESS;
 
 	if (!(pf->dcbx_cap & DCB_CAP_DCBX_VER_CEE) ||
-	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED))
+	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED) ||
+	    (pf->flags & I40E_FLAG_TC_MQPRIO))
 		return ret;
 
 	dev_dbg(&pf->pdev->dev, "new state=%d current state=%d\n",
@@ -373,7 +387,8 @@ static void i40e_dcbnl_set_pg_tc_cfg_tx(struct net_device *netdev, int tc,
 	int i;
 
 	if (!(pf->dcbx_cap & DCB_CAP_DCBX_VER_CEE) ||
-	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED))
+	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED) ||
+	    (pf->flags & I40E_FLAG_TC_MQPRIO))
 		return;
 
 	/* LLTC not supported yet */
@@ -407,7 +422,8 @@ static void i40e_dcbnl_set_pg_bwg_cfg_tx(struct net_device *netdev, int pgid,
 	struct i40e_pf *pf = i40e_netdev_to_pf(netdev);
 
 	if (!(pf->dcbx_cap & DCB_CAP_DCBX_VER_CEE) ||
-	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED))
+	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED) ||
+	    (pf->flags & I40E_FLAG_TC_MQPRIO))
 		return;
 
 	/* LLTC not supported yet */
@@ -480,7 +496,8 @@ static void i40e_dcbnl_get_pg_tc_cfg_tx(struct net_device *netdev, int prio,
 	struct i40e_pf *pf = i40e_netdev_to_pf(netdev);
 
 	if (!(pf->dcbx_cap & DCB_CAP_DCBX_VER_CEE) ||
-	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED))
+	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED) ||
+	    (pf->flags & I40E_FLAG_TC_MQPRIO))
 		return;
 
 	if (prio >= I40E_MAX_USER_PRIORITY)
@@ -505,7 +522,8 @@ static void i40e_dcbnl_get_pg_bwg_cfg_tx(struct net_device *netdev, int pgid,
 	struct i40e_pf *pf = i40e_netdev_to_pf(netdev);
 
 	if (!(pf->dcbx_cap & DCB_CAP_DCBX_VER_CEE) ||
-	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED))
+	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED) ||
+	    (pf->flags & I40E_FLAG_TC_MQPRIO))
 		return;
 
 	if (pgid >= I40E_MAX_TRAFFIC_CLASS)
@@ -536,7 +554,8 @@ static void i40e_dcbnl_get_pg_tc_cfg_rx(struct net_device *netdev, int prio,
 	struct i40e_pf *pf = i40e_netdev_to_pf(netdev);
 
 	if (!(pf->dcbx_cap & DCB_CAP_DCBX_VER_CEE) ||
-	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED))
+	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED) ||
+	    (pf->flags & I40E_FLAG_TC_MQPRIO))
 		return;
 
 	if (prio >= I40E_MAX_USER_PRIORITY)
@@ -561,7 +580,8 @@ static void i40e_dcbnl_get_pg_bwg_cfg_rx(struct net_device *netdev, int pgid,
 	struct i40e_pf *pf = i40e_netdev_to_pf(netdev);
 
 	if (!(pf->dcbx_cap & DCB_CAP_DCBX_VER_CEE) ||
-	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED))
+	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED) ||
+	    (pf->flags & I40E_FLAG_TC_MQPRIO))
 		return;
 	*bw_pct = 0;
 }
@@ -580,7 +600,8 @@ static void i40e_dcbnl_set_pfc_cfg(struct net_device *netdev, int prio,
 	struct i40e_pf *pf = i40e_netdev_to_pf(netdev);
 
 	if (!(pf->dcbx_cap & DCB_CAP_DCBX_VER_CEE) ||
-	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED))
+	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED) ||
+	    (pf->flags & I40E_FLAG_TC_MQPRIO))
 		return;
 
 	if (prio >= I40E_MAX_USER_PRIORITY)
@@ -610,7 +631,8 @@ static void i40e_dcbnl_get_pfc_cfg(struct net_device *netdev, int prio,
 	struct i40e_pf *pf = i40e_netdev_to_pf(netdev);
 
 	if (!(pf->dcbx_cap & DCB_CAP_DCBX_VER_CEE) ||
-	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED))
+	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED) ||
+	    (pf->flags & I40E_FLAG_TC_MQPRIO))
 		return;
 
 	if (prio >= I40E_MAX_USER_PRIORITY)
@@ -634,11 +656,12 @@ static u8 i40e_dcbnl_cee_set_all(struct net_device *netdev)
 	int err;
 
 	if (!(pf->dcbx_cap & DCB_CAP_DCBX_VER_CEE) ||
-	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED))
+	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED) ||
+	    (pf->flags & I40E_FLAG_TC_MQPRIO))
 		return I40E_DCBNL_STATUS_ERROR;
 
 	dev_dbg(&pf->pdev->dev, "Commit DCB Configuration to the hardware\n");
-	err = i40e_hw_dcb_config(pf, &pf->tmp_cfg);
+	err = i40e_pf_dcb_cfg(pf, &pf->tmp_cfg);
 
 	return err ? I40E_DCBNL_STATUS_ERROR : I40E_DCBNL_STATUS_SUCCESS;
 }
@@ -778,7 +801,8 @@ static u8 i40e_dcbnl_getapp(struct net_device *netdev, u8 idtype, u16 id)
 			     };
 
 	if (!(pf->dcbx_cap & DCB_CAP_DCBX_VER_CEE) ||
-	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED))
+	    (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED) ||
+	    (pf->flags & I40E_FLAG_TC_MQPRIO))
 		return -EINVAL;
 
 	return dcb_getapp(netdev, &app);
@@ -796,7 +820,8 @@ static u8 i40e_dcbnl_setdcbx(struct net_device *netdev, u8 mode)
 	struct i40e_pf *pf = i40e_netdev_to_pf(netdev);
 
 	/* Do not allow to set mode if managed by Firmware */
-	if (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED)
+	if (pf->dcbx_cap & DCB_CAP_DCBX_LLD_MANAGED ||
+	    (pf->flags & I40E_FLAG_TC_MQPRIO))
 		return I40E_DCBNL_STATUS_ERROR;
 
 	/* No support for LLD_MANAGED modes or CEE+IEEE */

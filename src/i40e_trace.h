@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2023 Intel Corporation. */
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2023 Intel Corporation */
 
 #ifndef CONFIG_TRACEPOINTS
 #if !defined(_I40E_TRACE_H_)
@@ -37,7 +37,7 @@
 
 #include <linux/tracepoint.h>
 
-/**
+/*
  * i40e_trace() macro enables shared code to refer to trace points
  * like:
  *

@@ -1,9 +1,6 @@
 #!/bin/bash
-# SPDX-License-Identifier: GPL-2.0
-# Copyright(c) 2013 - 2023 Intel Corporation.
-
-
-
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2013-2023 Intel Corporation
 
 # to be sourced
 
@@ -24,29 +21,35 @@ function die() {
 }
 
 # filter out paths that are not files
-# fail if some provided, but all are not files
-# input $@, outut via echo
-# note: `-` for stdin is OK
+# input $@, output via echo;
+# note: pass `-` for stdin
+# note: outputs nothing if all input files are "bad" (eg. not existing), but it
+#	is left for caller to decide if this is an erorr condition;
+# note: whitespaces are considered "bad" as part of filename, it's an error.
 function filter-out-bad-files() {
 	if [[ $# = 1 && "$1" = '-' ]]; then
+		echo -
 		return 0
 	fi
 	if [ $# = 0 ]; then
 		die 10 "no files passed, use '-' when reading from pipe (|)"
 	fi
-	local out=() diagmsgs=stderr
-	[ -n "${QUIET_COMPAT-}" ] && diagmsgs=null
+	local any=0 diagmsgs=/dev/stderr re=$'[\t \n]'
+	[ -n "${QUIET_COMPAT-}" ] && diagmsgs=/dev/null
 	for x in "$@"; do
 		if [ -e "$x" ]; then
-			out+=("$x")
+			if [[ "$x" =~ $re ]]; then
+				die 11 "err: filename contains whitespaces: $x."
+			fi
+			echo "$x"
+			any=1
 		else
-			echo >&"/dev/$diagmsgs" filtering "$x" out
+			echo >&"$diagmsgs" filtering "$x" out
 		fi
 	done
-	if [ ${#out[@]} = 0 ]; then
-		die 11 'empty list of files'
+	if [ $any = 0 ]; then
+		echo >&"$diagmsgs" 'all files (for given query) filtered out'
 	fi
-	echo "${out[@]}"
 }
 
 # Basics of regexp explained, as a reference for mostly-C programmers:
@@ -64,7 +67,7 @@ WB='[ \t\n]'
 # We take advantage of current/common linux codebase formatting here.
 #
 # Functions in this section require input file/s passed as args
-# (usualy one, but more could be supplied in case of renames in kernel),
+# (usually one, but more could be supplied in case of renames in kernel),
 # '-' could be used as an (only) file argument to read from stdin/pipe.
 
 # wrapper over find-something-decl() functions below, to avoid repetition
@@ -76,10 +79,14 @@ function find-decl() {
 	end="$2"
 	shift 2
 	files="$(filter-out-bad-files "$@")" || die
+	if [ -z "$files" ]; then
+		return 0
+	fi
+	# shellcheck disable=SC2086
 	awk "
 		/^$WB*\*/ {next}
 		$what, $end
-	" "$files"
+	" $files
 }
 
 # yield $1 function declaration (signature), don't pass return type in $1
@@ -97,7 +104,7 @@ function find-fun-decl() {
 function find-enum-decl() {
 	test $# -ge 2
 	local what end
-	what="/^$WB*enum $1"' \{$/'
+	what="/^$WB*enum$WB+$1"' \{$/'
 	end='/\};$/'
 	shift
 	find-decl "$what" "$end" "$@"
@@ -107,7 +114,7 @@ function find-enum-decl() {
 function find-struct-decl() {
 	test $# -ge 2
 	local what end
-	what="/^$WB*struct $1"' \{$/'
+	what="/^$WB*struct$WB+$1"' \{$/'
 	end='/^\};$/' # that's (^) different from enum-decl
 	shift
 	find-decl "$what" "$end" "$@"
@@ -117,8 +124,33 @@ function find-struct-decl() {
 function find-macro-decl() {
 	test $# -ge 2
 	local what end
-	what="/^#define $1/" # only unindented defines
-	end=1 # only first line (bumping to bigger number does not bring more ;)
+	# only unindented defines, only whole-word match
+	what="/^#define$WB+$1"'([ \t\(]|$)/'
+	end=1 # only first line; use find-macro-implementation-decl for full body
+	shift
+	find-decl "$what" "$end" "$@"
+}
+
+# yield full macro implementation
+function find-macro-implementation-decl() {
+	test $# -ge 2
+	local what end
+	# only unindented defines, only whole-word match
+	what="/^#define$WB+$1"'([ \t\(]|$)/'
+	# full implementation, until a line not ending in a backslash.
+	# Does not handle macros with comments embedded within the definition.
+	end='/[^\\]$/'
+	shift
+	find-decl "$what" "$end" "$@"
+}
+
+# yield first line of $1 typedef definition (simple typedefs only)
+# this probably won't handle typedef struct { \n int foo;\n};
+function find-typedef-decl() {
+	test $# -ge 2
+	local what end
+	what="/^typedef .* $1"';$/'
+	end=1
 	shift
 	find-decl "$what" "$end" "$@"
 }
@@ -135,9 +167,14 @@ function find-macro-decl() {
 #   NAME is the name for what we are looking for;
 #
 #   KIND specifies what kind of declaration/definition we are looking for,
-#      could be: fun, enum, struct, method, macro
+#      could be: fun, enum, struct, method, macro, typedef,
+#      'implementation of macro'
 #   for KIND=method, we are looking for function ptr named METHOD in struct
 #     named NAME (two optional args are then necessary (METHOD & of));
+#
+#   for KIND='implementation of macro' we are looking for the full
+#     implementation of the macro, not just its first line. This is usually
+#     combined with "matches" or "lacks".
 #
 #   next [optional] args could be used:
 #     matches PATTERN - use to grep for the PATTERN within definition
@@ -168,7 +205,7 @@ function gen() {
 	shift 3
 	[ "$if_kw" != if ] && die 21 "$src_line: 'if' keyword expected, '$if_kw' given"
 	case "$kind" in
-	fun|enum|struct|macro)
+	fun|enum|struct|macro|typedef)
 		name="$1"
 		shift
 	;;
@@ -179,6 +216,16 @@ function gen() {
 		name="$3"
 		shift 3
 		[ "$of_kw" != of ] && die 23 "$src_line: 'of' keyword expected, '$of_kw' given"
+	;;
+	implementation)
+		test $# -ge 5 || die 28 "$src_line: too few arguments, $orig_args_cnt given, at least 8 needed"
+		of_kw="$1"
+		kind="$2"
+		name="$3"
+		shift 3
+		[ "$of_kw" != of ] && die 29 "$src_line: 'of' keyword expected, '$of_kw' given"
+		[ "$kind" != macro ] && die 30 "$src_line: implementation only supports 'macro', '$kind' given"
+		kind=macro-implementation
 	;;
 	*) die 24 "$src_line: unknown KIND ($kind) to look for" ;;
 	esac

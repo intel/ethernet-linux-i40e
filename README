@@ -2,8 +2,8 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet 700 Series
 ============================================================
 
-September 20, 2022
-Copyright(c) 2014 - 2022 Intel Corporation.
+March 3, 2023
+Copyright(c) 2014 - 2023 Intel Corporation.
 
 Contents
 ========
@@ -518,7 +518,16 @@ system log using the dmesg command.
 
 - If the PF driver logs MDD events from the VF, confirm that the correct VF
 driver is installed.
-- To restore functionality, you can manually reload the VF or VM.
+- To restore functionality, you can manually reload the VF or VM or enable
+automatic VF resets.
+- When automatic VF resets are enabled, the PF driver will immediately reset
+the VF and reenable queues when it detects MDD events on the receive path.
+- If automatic VF resets are disabled, the PF will not automatically reset the
+VF when it detects MDD events.
+
+To enable or disable automatic VF resets, use the following command:
+
+# ethtool --set-priv-flags <ethX> mdd-auto-reset-vf on|off
 
 
 MAC and VLAN Anti-Spoofing Feature for VFs
@@ -709,7 +718,7 @@ port 80, and then send it to queue 7:
 # ethtool -U enp130s0 flow-type tcp4 src-ip 192.168.0.1 dst-ip 192.168.0.5
 src-port 5300 dst-port 80 action 7
 
-To add a TCPv4 filter with a partial mask for a source IP subnet:
+To add a TCPv4 filter with a partial mask for a source IP :
 
 # ethtool -U <ethX> flow-type tcp4 src-ip 192.168.0.0 m 0.255.255.255 dst-ip
 192.168.5.12 src-port 12600 dst-port 31 action 12
@@ -1211,7 +1220,7 @@ NOTE: When you set disable-source-pruning to on (enabled):
 - The driver will disable spoof check.
 - The network interface will receive all packets with a source MAC address
 matching the network interface's MAC address.
-_blank_line
+
 The i40e driver allows you to enable or disable source pruning on a specified
 VF using the vf-source-pruning private flag. You must also disable MAC
 anti-spoofing for the VF and enable trust mode for the VF. All three must be
@@ -1870,6 +1879,30 @@ promiscuous mode.
   # cat /sys/class/net/p1p1/device/sriov/1/qos/share (return 20)
 
 
+PHY Register Debug Dump
+-----------------------
+Intel(R) Ethernet 700 Series of Adapters devices support Phy register debug
+dump, which allows you to obtain runtime register values from the PHY and then
+write the results to a single dump file, for debugging connection and link
+issues.
+
+This debug dump contains a snapshot of the PHY's existing configuration, such
+as the PCS Link Control Register, PCS Link Status registers, and other
+information.
+
+To generate a PHY register debug dump file, do the following:
+
+1. Use ethtool -d to dump the PHY registers. Refer to the ethtool man page for
+more information. For example:
+  # ethtool -d <ethX> > dump.txt
+
+NOTES:
+- If a register does not exist or if the register cannot be read, the driver
+will return "0xAABBCCDD " for the register.
+- The contents of the debug dump are not human-readable. You must work with
+Customer Support to decode the file.
+
+
 Performance Optimization
 ========================
 Driver defaults are meant to fit a wide variety of workloads, but if further
@@ -2358,14 +2391,6 @@ Failover (LBFO) to configure VLANs in a Windows guest. VLANs configured using
 LBFO on a VF driver may result in failure to pass traffic.
 
 
-Unexpected i40iw error messages in dmesg
-----------------------------------------
-If you install newer i40e drivers over the drivers in your Linux distro, you
-may see i40iw error messages in dmesg. This is because the i40iw drivers must
-be updated at the same time as the i40e drivers. These messages may be ignored
-if you do not use iWARP in your configuration.
-
-
 Support
 =======
 For general information, go to the Intel support website at:
@@ -2396,7 +2421,7 @@ St - Fifth Floor, Boston, MA 02110-1301 USA.
 The full GNU General Public License is included in this distribution in the
 file called "COPYING".
 
-Copyright(c) 2014 - 2022 Intel Corporation.
+Copyright(c) 2014 - 2023 Intel Corporation.
 
 
 Trademarks

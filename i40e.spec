@@ -1,10 +1,10 @@
 Name: i40e
 Summary: Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
-Version: 2.22.20
+Version: 2.23.17
 Release: 1
 Source: %{name}-%{version}.tar.gz
 Vendor: Intel Corporation
-License: GPL-2.0
+License: GPL-2.0-only
 ExclusiveOS: linux
 Group: System Environment/Kernel
 Provides: %{name}
@@ -75,11 +75,11 @@ find lib -path "*extern-symvers/intel_auxiliary.symvers" -printf "/%p\n" \
 	>%{_builddir}/%{name}-%{version}/aux.list
 find * -name "auxiliary_bus.h" -printf "/%p\n" \
 	>>%{_builddir}/%{name}-%{version}/aux.list
+find lib -name "intel_auxiliary.ko" -printf "/%p\n" \
+	>>%{_builddir}/%{name}-%{version}/aux.list
+%else
+find lib -name "intel_auxiliary.ko" -type f -delete
 %endif
-if [ "$(%{_builddir}/%{name}-%{version}/scripts/./check_aux_bus %check_aux_args; echo $?)" == "2" ] ; then
-	find lib -name "intel_auxiliary.ko" -printf "/%p\n" \
-	>>%{_builddir}/%{name}-%{version}/file.list
-fi
 
 export _ksrc=%{_usrsrc}/kernels/%{kernel_ver}
 cd %{buildroot}
@@ -136,7 +136,7 @@ bash -s %{pciids} \
 	%{name} \
 <<"END"
 #! /bin/bash
-# Copyright (C) 2017 Intel Corporation
+# Copyright (C) 2017 - 2023 Intel Corporation
 # For licensing information, see the file 'LICENSE' in the root folder
 # $1 = system pci.ids file to update
 # $2 = system pcitable file to update

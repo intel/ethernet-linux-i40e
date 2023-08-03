@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2023 Intel Corporation. */
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2023 Intel Corporation */
 
 /* ethtool support for i40e */
 
@@ -283,6 +283,18 @@ static const char i40e_gstrings_test[][ETH_GSTRING_LEN] = {
 #define I40E_TEST_LEN (sizeof(i40e_gstrings_test) / ETH_GSTRING_LEN)
 
 #endif /* ETHTOOL_TEST */
+static const struct i40e_diag_reg_test_info i40e_phy_regs_list[] = {
+	/* offset               mask         elements   stride */
+	{I40E_PRTMAC_PCS_LINK_CTRL,		0xFFFFFFFF, 1, 4},
+	{I40E_PRTMAC_PCS_LINK_STATUS1(0),	0xFFFFFFFF, 1, 4},
+	{I40E_PRTMAC_PCS_LINK_STATUS2,		0xFFFFFFFF, 1, 4},
+	{I40E_PRTMAC_PCS_XGMII_FIFO_STATUS,	0xFFFFFFFF, 1, 4},
+	{I40E_PRTMAC_PCS_AN_LP_STATUS,		0xFFFFFFFF, 1, 4},
+	{I40E_PRTMAC_PCS_KR_STATUS,		0xFFFFFFFF, 1, 4},
+	{I40E_PRTMAC_PCS_FEC_KR_STATUS1,	0xFFFFFFFF, 1, 4},
+	{I40E_PRTMAC_PCS_FEC_KR_STATUS2,	0xFFFFFFFF, 1, 4},
+	{ 0 }
+};
 
 #ifdef HAVE_ETHTOOL_GET_SSET_COUNT
 struct i40e_priv_flags {
@@ -321,6 +333,8 @@ static const struct i40e_priv_flags i40e_gstrings_priv_flags[] = {
 		       I40E_FLAG_VF_VLAN_PRUNING, 0),
 	I40E_PRIV_FLAG("vf-source-pruning",
 		       I40E_FLAG_VF_SOURCE_PRUNING, 0),
+	I40E_PRIV_FLAG("mdd-auto-reset-vf",
+		       I40E_FLAG_MDD_AUTO_RESET_VF, 0),
 };
 
 #define I40E_PRIV_FLAGS_STR_LEN ARRAY_SIZE(i40e_gstrings_priv_flags)
@@ -2149,37 +2163,61 @@ static int i40e_get_regs_len(struct net_device *netdev)
 	for (i = 0; i40e_reg_list[i].offset != 0; i++)
 		reg_count += i40e_reg_list[i].elements;
 
+	for (i = 0; i40e_phy_regs_list[i].offset != 0; i++)
+		reg_count += i40e_phy_regs_list[i].elements;
+
 	return reg_count * sizeof(u32);
+}
+
+static void i40e_read_regs(struct net_device *netdev,
+			   const struct i40e_diag_reg_test_info *i40e_regs_list,
+			   void *p, u32 *ri)
+{
+	struct i40e_netdev_priv *np = netdev_priv(netdev);
+	struct i40e_pf *pf = np->vsi->back;
+	struct i40e_hw *hw = &pf->hw;
+	u32 *reg_buf = p;
+	unsigned int i, j;
+	u32 reg;
+	u32 val;
+
+	/* loop through the regs table for what to print */
+	for (i = 0; i40e_regs_list[i].offset != 0; i++) {
+		for (j = 0; j < i40e_regs_list[i].elements; j++) {
+			reg = i40e_regs_list[i].offset
+				+ (j * i40e_regs_list[i].stride);
+
+			/* check the range on registers */
+			if (reg <= (pf->ioremap_len - sizeof(u32)))
+				val = rd32(hw, reg);
+			else
+				val = I40E_READ_REG_INVALID;
+
+			netdev_dbg(netdev, "reg[%02u] 0x%08X %08X\n",
+				   *ri, reg, val);
+			reg_buf[(*ri)++] = val;
+		}
+	}
 }
 
 static void i40e_get_regs(struct net_device *netdev, struct ethtool_regs *regs,
 			  void *p)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
-	struct i40e_pf *pf = np->vsi->back;
-	struct i40e_hw *hw = &pf->hw;
-	u32 *reg_buf = p;
-	unsigned int i, j, ri;
-	u32 reg;
+	struct i40e_hw *hw = &np->vsi->back->hw;
+	u32 ri = 0;
 
 	/* Tell ethtool which driver-version-specific regs output we have.
 	 *
-	 * At some point, if we have ethtool doing special formatting of
-	 * this data, it will rely on this version number to know how to
-	 * interpret things.  Hence, this needs to be updated if/when the
-	 * diags register table is changed.
+	 * At some point, if we will have ethtool able to parse binary stream
+	 * output, it will rely on this version number, basing on encoded
+	 * MAC type, Revision ID and Device ID of tested PHY.
 	 */
-	regs->version = 1;
+	regs->version = hw->mac.type << 24 | hw->revision_id << 16 |
+			hw->device_id;
 
-	/* loop through the diags reg table for what to print */
-	ri = 0;
-	for (i = 0; i40e_reg_list[i].offset != 0; i++) {
-		for (j = 0; j < i40e_reg_list[i].elements; j++) {
-			reg = i40e_reg_list[i].offset
-				+ (j * i40e_reg_list[i].stride);
-			reg_buf[ri++] = rd32(hw, reg);
-		}
-	}
+	i40e_read_regs(netdev, i40e_reg_list, p, &ri);
+	i40e_read_regs(netdev, i40e_phy_regs_list, p, &ri);
 
 }
 
@@ -2227,7 +2265,7 @@ static int i40e_get_eeprom(struct net_device *netdev,
 	/* normal ethtool get_eeprom support */
 	eeprom->magic = hw->vendor_id | (hw->device_id << 16);
 
-	eeprom_buff = kzalloc(eeprom->len, GFP_KERNEL);
+	eeprom_buff = (u8 *)kzalloc(eeprom->len, GFP_KERNEL);
 	if (!eeprom_buff)
 		return -ENOMEM;
 
@@ -2472,8 +2510,9 @@ static int i40e_set_ringparam(struct net_device *netdev,
 		netdev_info(netdev,
 			    "Changing Tx descriptor count from %d to %d\n",
 			    vsi->tx_rings[0]->count, new_tx_count);
-		tx_rings = kcalloc(tx_alloc_queue_pairs,
-				   sizeof(struct i40e_ring), GFP_KERNEL);
+		tx_rings = (struct i40e_ring *)
+			kcalloc(tx_alloc_queue_pairs,
+				sizeof(struct i40e_ring), GFP_KERNEL);
 		if (!tx_rings) {
 			err = -ENOMEM;
 			goto done;
@@ -2511,8 +2550,9 @@ static int i40e_set_ringparam(struct net_device *netdev,
 		netdev_info(netdev,
 			    "Changing Rx descriptor count from %d to %d\n",
 			    vsi->rx_rings[0]->count, new_rx_count);
-		rx_rings = kcalloc(vsi->alloc_queue_pairs,
-				   sizeof(struct i40e_ring), GFP_KERNEL);
+		rx_rings = (struct i40e_ring *)
+			kcalloc(vsi->alloc_queue_pairs,
+				sizeof(struct i40e_ring), GFP_KERNEL);
 		if (!rx_rings) {
 			err = -ENOMEM;
 			goto free_tx;
@@ -4442,6 +4482,7 @@ static int i40e_get_rxnfc(struct net_device *netdev, struct ethtool_rxnfc *cmd,
 
 /**
  * i40e_get_rss_hash_bits - Read RSS Hash bits from register
+ * @hw: hw structure
  * @nfc: pointer to user request
  * @i_setc: bits currently set
  *
@@ -5336,7 +5377,8 @@ static int i40e_add_flex_offset(struct list_head *flex_pit_list,
 {
 	struct i40e_flex_pit *new_pit, *entry;
 
-	new_pit = kzalloc(sizeof(*entry), GFP_KERNEL);
+	new_pit = (struct i40e_flex_pit *)
+		kzalloc(sizeof(*entry), GFP_KERNEL);
 	if (!new_pit)
 		return -ENOMEM;
 
@@ -6537,7 +6579,7 @@ static int i40e_get_rxfh(struct net_device *netdev, u32 *indir, u8 *key)
 		return 0;
 
 	seed = key;
-	lut = kzalloc(I40E_HLUT_ARRAY_SIZE, GFP_KERNEL);
+	lut = (u8 *)kzalloc(I40E_HLUT_ARRAY_SIZE, GFP_KERNEL);
 	if (!lut)
 		return -ENOMEM;
 	ret = i40e_get_rss(vsi, seed, lut, I40E_HLUT_ARRAY_SIZE);
@@ -6595,8 +6637,8 @@ static int i40e_set_rxfh(struct net_device *netdev, const u32 *indir,
 
 	if (key) {
 		if (!vsi->rss_hkey_user) {
-			vsi->rss_hkey_user = kzalloc(I40E_HKEY_ARRAY_SIZE,
-						     GFP_KERNEL);
+			vsi->rss_hkey_user = (u8 *)
+				kzalloc(I40E_HKEY_ARRAY_SIZE, GFP_KERNEL);
 			if (!vsi->rss_hkey_user)
 				return -ENOMEM;
 		}
@@ -6604,7 +6646,8 @@ static int i40e_set_rxfh(struct net_device *netdev, const u32 *indir,
 		seed = vsi->rss_hkey_user;
 	}
 	if (!vsi->rss_lut_user) {
-		vsi->rss_lut_user = kzalloc(I40E_HLUT_ARRAY_SIZE, GFP_KERNEL);
+		vsi->rss_lut_user = (u8 *)
+			kzalloc(I40E_HLUT_ARRAY_SIZE, GFP_KERNEL);
 		if (!vsi->rss_lut_user)
 			return -ENOMEM;
 	}
@@ -7339,44 +7382,6 @@ static const struct ethtool_ops i40e_ethtool_ops = {
 #endif /* DDP_PROFILE_UPLOAD_SUPPORT */
 };
 
-#ifdef HAVE_RHEL6_ETHTOOL_OPS_EXT_STRUCT
-static const struct ethtool_ops_ext i40e_ethtool_ops_ext = {
-	.size			= sizeof(struct ethtool_ops_ext),
-	.get_ts_info		= i40e_get_ts_info,
-	.set_phys_id		= i40e_set_phys_id,
-	.get_channels		= i40e_get_channels,
-	.set_channels		= i40e_set_channels,
-#if defined(ETHTOOL_GRSSH) && defined(ETHTOOL_SRSSH)
-	.get_rxfh_key_size	= i40e_get_rxfh_key_size,
-	.get_rxfh_indir_size	= i40e_get_rxfh_indir_size,
-	.get_rxfh		= i40e_get_rxfh,
-	.set_rxfh		= i40e_set_rxfh,
-#endif /* ETHTOOL_GRSSH && ETHTOOL_SRSSH */
-#ifdef ETHTOOL_GEEE
-	.get_eee		= i40e_get_eee,
-#endif /* ETHTOOL_GEEE */
-#ifdef ETHTOOL_SEEE
-	.set_eee		= i40e_set_eee,
-#endif /* ETHTOOL_SEEE */
-#ifdef ETHTOOL_GMODULEINFO
-	.get_module_info	= i40e_get_module_info,
-	.get_module_eeprom	= i40e_get_module_eeprom,
-#endif
-};
-
-void i40e_set_ethtool_ops(struct net_device *netdev)
-{
-	struct i40e_netdev_priv *np = netdev_priv(netdev);
-	struct i40e_pf		*pf = np->vsi->back;
-
-	if (test_bit(__I40E_RECOVERY_MODE, pf->state)) {
-		netdev->ethtool_ops = &i40e_ethtool_recovery_mode_ops;
-	} else {
-		netdev->ethtool_ops = &i40e_ethtool_ops;
-		set_ethtool_ops_ext(netdev, &i40e_ethtool_ops_ext);
-	}
-}
-#else
 void i40e_set_ethtool_ops(struct net_device *netdev)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
@@ -7387,5 +7392,4 @@ void i40e_set_ethtool_ops(struct net_device *netdev)
 	else
 		netdev->ethtool_ops = &i40e_ethtool_ops;
 }
-#endif /* HAVE_RHEL6_ETHTOOL_OPS_EXT_STRUCT */
 #endif /* SIOCETHTOOL */

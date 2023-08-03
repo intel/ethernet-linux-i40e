@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2023 Intel Corporation. */
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2023 Intel Corporation */
 
 #ifdef CONFIG_DEBUG_FS
 
@@ -93,7 +93,7 @@ static ssize_t i40e_dbg_command_read(struct file *filp, char __user *buffer,
 	return len;
 }
 
-static char *i40e_filter_state_string[] = {
+static const char *i40e_filter_state_string[] = {
 	"INVALID",
 	"NEW",
 	"ACTIVE",
@@ -688,7 +688,7 @@ static void i40e_dbg_dump_resources(struct i40e_pf *pf)
 	dev_info(&pf->pdev->dev, "  resources:\n");
 	dev_info(&pf->pdev->dev, "  guar  total  used unalloc   name\n");
 	for (i = 0; i < num_entries; i++) {
-		char *p;
+		const char *p;
 
 		switch (buf[i].resource_type) {
 		case I40E_AQ_RESOURCE_TYPE_VEB:
@@ -909,7 +909,7 @@ static void i40e_dbg_dump_vf(struct i40e_pf *pf, int vf_id)
 		dev_info(&pf->pdev->dev, "vf %2d: VSI id=%d, seid=%d, qps=%d\n",
 			 vf_id, vf->lan_vsi_id, vsi->seid, vf->num_queue_pairs);
 		dev_info(&pf->pdev->dev, "       num MDD=%lld",
-			 vf->num_mdd_events);
+			 vf->mdd_tx_events.count + vf->mdd_rx_events.count);
 	} else {
 		dev_info(&pf->pdev->dev, "invalid VF id %d\n", vf_id);
 	}
@@ -938,7 +938,7 @@ static void i40e_dbg_dump_vf_all(struct i40e_pf *pf)
  **/
 static void i40e_dbg_dump_dcb_cfg(struct i40e_pf *pf,
 				  struct i40e_dcbx_config *cfg,
-				  char *prefix)
+				  const char *prefix)
 {
 	int i;
 
@@ -1608,7 +1608,7 @@ static ssize_t i40e_dbg_command_write(struct file *filp,
 			goto command_write_done;
 		}
 		/* Just stub a buffer big enough in case user messed up */
-		if (buffer_len == 0)
+		if (buffer_len == 0 || buffer_len > 1280)
 			buffer_len = 1280;
 
 		buff = kzalloc(buffer_len, GFP_KERNEL);
@@ -2231,7 +2231,6 @@ static const struct file_operations i40e_dbg_command_fops = {
 	.read =  i40e_dbg_command_read,
 	.write = i40e_dbg_command_write,
 };
-
 /**************************************************************
  * netdev_ops
  * The netdev_ops entry in debugfs is for giving the driver commands

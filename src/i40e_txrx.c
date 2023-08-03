@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2023 Intel Corporation. */
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2023 Intel Corporation */
 
 #include <linux/prefetch.h>
 #ifdef HAVE_XDP_SUPPORT
@@ -179,6 +179,11 @@ static u8 *i40e_create_dummy_packet(u8 *dummy_packet, bool ipv4, u8 l4proto,
 	struct ethhdr eth;
 	struct iphdr ip;
 	u8 *tmp;
+
+	memset(&vlan, 0, sizeof(vlan));
+	memset(&ipv6, 0, sizeof(ipv6));
+	memset(&eth, 0, sizeof(eth));
+	memset(&ip, 0, sizeof(ip));
 
 	if (ipv4) {
 		eth.h_proto = cpu_to_be16(ETH_P_IP);
@@ -675,7 +680,7 @@ int i40e_add_del_fdir(struct i40e_vsi *vsi,
 static void i40e_fd_handle_status(struct i40e_ring *rx_ring, u64 qword0_raw,
 				  u64 qword1, u8 prog_id)
 #else
-/**
+/*
  * i40e_fd_handle_status - check the Programming Status for FD
  * @rx_ring: the Rx ring for this descriptor
  * @rx_desc: the Rx descriptor for programming Status, not a packet descriptor.
@@ -1121,6 +1126,7 @@ static bool i40e_clean_tx_irq(struct i40e_vsi *vsi,
 	return !!budget;
 }
 
+
 /**
  * i40e_enable_wb_on_itr - Arm hardware to do a wb, interrupts are not enabled
  * @vsi: the VSI we care about
@@ -1488,7 +1494,7 @@ static void i40e_reuse_rx_skb(struct i40e_ring *rx_ring,
 
 #endif /* CONFIG_I40E_DISABLE_PACKET_SPLIT */
 
-#if (defined HAVE_MEM_TYPE_XSK_BUFF_POOL)
+#if defined(HAVE_MEM_TYPE_XSK_BUFF_POOL)
 /**
  * i40e_clean_programming_status - clean the programming status descriptor
  * @rx_ring: the rx ring that has this descriptor
@@ -1504,7 +1510,7 @@ static void i40e_reuse_rx_skb(struct i40e_ring *rx_ring,
 void i40e_clean_programming_status(struct i40e_ring *rx_ring, u64 qword0_raw,
 				   u64 qword1)
 #else
-/**
+/*
  * i40e_clean_programming_status - try to clean the programming status
  * descriptor
  * @rx_ring: the rx ring that has this descriptor
@@ -1575,7 +1581,7 @@ int i40e_setup_tx_descriptors(struct i40e_ring *tx_ring)
 	/* warn if we are about to overwrite the pointer */
 	WARN_ON(tx_ring->tx_bi);
 	bi_size = sizeof(struct i40e_tx_buffer) * tx_ring->count;
-	tx_ring->tx_bi = kzalloc(bi_size, GFP_KERNEL);
+	tx_ring->tx_bi = (struct i40e_tx_buffer *)kzalloc(bi_size, GFP_KERNEL);
 	if (!tx_ring->tx_bi)
 		goto err;
 
@@ -1733,6 +1739,7 @@ skip_free:
 	rx_ring->next_to_use = 0;
 }
 
+
 /**
  * i40e_free_rx_resources - Free Rx resources
  * @rx_ring: ring to clean the resources from
@@ -1773,7 +1780,7 @@ int i40e_setup_rx_descriptors(struct i40e_ring *rx_ring)
 	/* warn if we are about to overwrite the pointer */
 	WARN_ON(rx_ring->rx_bi);
 	bi_size = sizeof(struct i40e_rx_buffer) * rx_ring->count;
-	rx_ring->rx_bi = kzalloc(bi_size, GFP_KERNEL);
+	rx_ring->rx_bi = (struct i40e_rx_buffer *)kzalloc(bi_size, GFP_KERNEL);
 	if (!rx_ring->rx_bi)
 		goto err;
 #else 
@@ -2311,7 +2318,6 @@ static inline void i40e_rx_hash(struct i40e_ring *ring,
  * @rx_ring: rx descriptor ring packet is being transacted on
  * @rx_desc: pointer to the EOP Rx descriptor
  * @skb: pointer to current skb being populated
- * @rx_ptype: the packet type decoded by hardware
  *
  * This function checks the ring, descriptor, and packet information in
  * order to populate the hash, checksum, VLAN, protocol, and
@@ -2332,6 +2338,10 @@ void i40e_process_skb_fields(struct i40e_ring *rx_ring,
 
 	if (unlikely(tsynvalid))
 		i40e_ptp_rx_hwtstamp(rx_ring->vsi->back, skb, tsyn);
+#else
+	u64 qword = le64_to_cpu(rx_desc->wb.qword1.status_error_len);
+	u32 rx_ptype = (qword & I40E_RXD_QW1_PTYPE_MASK) >>
+		       I40E_RXD_QW1_PTYPE_SHIFT;
 #endif /* HAVE_PTP_1588_CLOCK */
 
 	i40e_rx_hash(rx_ring, rx_desc, skb, rx_ptype);
@@ -3533,7 +3543,8 @@ static inline int i40e_tx_prepare_vlan_flags(struct sk_buff *skb,
 	} else if (protocol == htons(ETH_P_8021Q)) {
 		struct vlan_hdr *vhdr, _vhdr;
 
-		vhdr = skb_header_pointer(skb, ETH_HLEN, sizeof(_vhdr), &_vhdr);
+		vhdr = skb_header_pointer(skb, ETH_HLEN,
+								     sizeof(_vhdr), &_vhdr);
 		if (!vhdr)
 			return -EINVAL;
 
@@ -4020,9 +4031,6 @@ static void i40e_create_tx_ctx(struct i40e_ring *tx_ring,
 	context_desc->l2tag2 = cpu_to_le16(cd_l2tag2);
 	context_desc->rsvd = cpu_to_le16(0);
 	context_desc->type_cmd_tso_mss = cpu_to_le64(cd_type_cmd_tso_mss);
-	if (context_desc->l2tag2)
-		context_desc->type_cmd_tso_mss |= I40E_TX_CTX_DESC_IL2TAG2 <<
-			I40E_TXD_CTX_QW1_CMD_SHIFT;
 }
 
 /**
@@ -4636,9 +4644,12 @@ static netdev_tx_t i40e_xmit_frame_ring(struct sk_buff *skb,
 	/* always enable CRC insertion offload */
 	td_cmd |= I40E_TX_DESC_CMD_ICRC;
 
-	if (tx_flags & I40E_TX_FLAGS_HW_OUTER_VLAN)
+	if (tx_flags & I40E_TX_FLAGS_HW_OUTER_VLAN) {
 		cd_l2tag2 = (tx_flags & I40E_TX_FLAGS_VLAN_MASK) >>
 			    I40E_TX_FLAGS_VLAN_SHIFT;
+		cd_type_cmd_tso_mss |= (I40E_TX_CTX_DESC_IL2TAG2 <<
+					I40E_TXD_CTX_QW1_CMD_SHIFT);
+	}
 
 	i40e_create_tx_ctx(tx_ring, cd_type_cmd_tso_mss,
 			   cd_tunneling, cd_l2tag2);

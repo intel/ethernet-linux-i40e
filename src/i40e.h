@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2023 Intel Corporation. */
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2023 Intel Corporation */
 
 #ifndef _I40E_H_
 #define _I40E_H_
@@ -114,6 +114,7 @@ bool i40e_is_l4mode_enabled(void);
 #define I40E_MIN_ARQ_LEN		1
 #define I40E_MIN_ASQ_LEN		2
 #define I40E_AQ_WORK_LIMIT		66 /* max number of VFs + a little */
+#define I40E_READ_REG_INVALID		0xaabbccdd /* not supported or fail read */
 /*
  * If I40E_MAX_USER_PRIORITY is updated please also update
  * I40E_CLIENT_MAX_USER_PRIORITY in i40e_client.h and i40evf_client.h
@@ -173,6 +174,7 @@ enum i40e_state_t {
 	__I40E_SERVICE_SCHED,
 	__I40E_ADMINQ_EVENT_PENDING,
 	__I40E_MDD_EVENT_PENDING,
+	__I40E_MDD_VF_PRINT_PENDING,
 	__I40E_VFLR_EVENT_PENDING,
 	__I40E_RESET_RECOVERY_PENDING,
 	__I40E_TIMEOUT_RECOVERY_PENDING,
@@ -401,6 +403,9 @@ struct i40e_cloud_filter {
 #define I40E_DCB_PRIO_TYPE_STRICT	0
 #define I40E_DCB_PRIO_TYPE_ETS		1
 #define I40E_DCB_STRICT_PRIO_CREDITS	127
+
+#define I40E_DCB_NO_HW_CHG	1 /* DCB configuration did not change */
+
 /* DCB per TC information data structure */
 struct i40e_tc_info {
 	u16	qoffset;	/* Queue offset from base queue */
@@ -690,6 +695,7 @@ struct i40e_pf {
 #define I40E_FLAG_CLS_FLOWER			BIT(29)
 #define I40E_FLAG_VF_VLAN_PRUNING		BIT(30)
 #define I40E_FLAG_VF_SOURCE_PRUNING		BIT(31)
+#define I40E_FLAG_MDD_AUTO_RESET_VF		BIT(32)
 
 	/* flag to enable/disable vf base mode support */
 	bool vf_base_mode_only;
@@ -712,6 +718,7 @@ struct i40e_pf {
 	u16 sw_int_count; /* SW interrupt count */
 
 	struct mutex switch_mutex;
+	struct mutex tc_mutex; /* Used to protect the dcb config */
 	u16 lan_vsi;       /* our default LAN VSI */
 	u16 lan_veb;       /* initial relay, if exists */
 #define I40E_NO_VEB	0xffff
@@ -740,7 +747,7 @@ struct i40e_pf {
 	int num_alloc_vfs;	/* actual number of VFs allocated */
 	u32 vf_aq_requests;
 	u32 arq_overflows;	/* Not fatal, possibly indicative of problems */
-
+	unsigned long last_printed_mdd_jiffies; /* MDD message rate limit */
 	/* DCBx/DCBNL capability for PF that indicates
 	 * whether DCBx is managed by firmware or host
 	 * based agent (LLDPAD). Also, indicates what
@@ -898,7 +905,7 @@ struct i40e_pf {
 };
 
 /**
- * i40e_mac_to_hkey - Convert a 6-byte MAC Address to a u64 hash key
+ * i40e_addr_to_hkey - Convert a 6-byte MAC Address to a u64 hash key
  * @macaddr: the MAC Address as the base key
  *
  * Simply copies the address and returns it as a u64 for hashing
@@ -1424,6 +1431,8 @@ bool i40e_dcb_need_reconfig(struct i40e_pf *pf,
 			    struct i40e_dcbx_config *old_cfg,
 			    struct i40e_dcbx_config *new_cfg);
 int i40e_hw_dcb_config(struct i40e_pf *pf, struct i40e_dcbx_config *new_cfg);
+int i40e_pf_dcb_cfg(struct i40e_pf *pf, struct i40e_dcbx_config *new_cfg);
+int i40e_enable_vf_queues(struct i40e_vsi *vsi, bool enable);
 #define I40E_ETS_NON_WILLING_MODE	0
 #define I40E_ETS_WILLING_MODE		1
 int i40e_dcb_sw_default_config(struct i40e_pf *pf, u8 ets_willing);

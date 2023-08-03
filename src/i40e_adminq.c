@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2023 Intel Corporation. */
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2023 Intel Corporation */
 
 #include "i40e_status.h"
 #include "i40e_type.h"
@@ -740,12 +740,26 @@ static u16 i40e_clean_asq(struct i40e_hw *hw)
 	u16 ntc = asq->next_to_clean;
 	struct i40e_aq_desc desc_cb;
 	struct i40e_aq_desc *desc;
+	u32 head = 0;
+
+	if (ntc >= (1 << 10))
+		goto clean_asq_exit;
 
 	desc = I40E_ADMINQ_DESC(*asq, ntc);
 	details = I40E_ADMINQ_DETAILS(*asq, ntc);
-	while (rd32(hw, hw->aq.asq.head) != ntc) {
+	while (true) {
+		head = rd32(hw, hw->aq.asq.head);
+
+		if (head >= asq->count) {
+			i40e_debug(hw, I40E_DEBUG_AQ_COMMAND, "Read head value is improper\n");
+			return 0;
+		}
+
+		if (head == ntc)
+			break;
+
 		i40e_debug(hw, I40E_DEBUG_AQ_COMMAND,
-			   "ntc %d head %d.\n", ntc, rd32(hw, hw->aq.asq.head));
+			   "ntc %d head %d.\n", ntc, head);
 
 		if (details->callback) {
 			I40E_ADMINQ_CALLBACK cb_func =
@@ -765,6 +779,7 @@ static u16 i40e_clean_asq(struct i40e_hw *hw)
 
 	asq->next_to_clean = ntc;
 
+clean_asq_exit:
 	return I40E_DESC_UNUSED(asq);
 }
 

@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2023 Intel Corporation. */
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2023 Intel Corporation */
 
 #include "kcompat.h"
 #include "kcompat_vfd.h"
@@ -2581,7 +2581,9 @@ static ssize_t pf_qos_tc_lsp_store(struct kobject *kobj,
 	if (ret)
 		return ret;
 
-	__parse_bool_data(pdev, buff, "lsp", &lsp);
+	ret = __parse_bool_data(pdev, buff, "lsp", &lsp);
+	if (ret)
+		return ret;
 
 	ret = vfd_ops->set_pf_qos_tc_lsp(pdev, tc, lsp);
 	if (ret) {

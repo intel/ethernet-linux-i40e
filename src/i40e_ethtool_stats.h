@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0 */
-/* Copyright(c) 2013 - 2023 Intel Corporation. */
+/* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2023 Intel Corporation */
 
 /* ethtool statistics helpers */
 
@@ -165,7 +165,7 @@ __i40e_add_ethtool_stats(u64 **data, void *pointer,
  * @ring: the ring to copy
  *
  * Queue statistics must be copied while protected by
- * u64_stats_fetch_begin_irq, so we can't directly use i40e_add_ethtool_stats.
+ * u64_stats_fetch_begin, so we can't directly use i40e_add_ethtool_stats.
  * Assumes that queue stats are defined in i40e_gstrings_queue_stats. If the
  * ring pointer is null, zero out the queue stat values and update the data
  * pointer. Otherwise safely copy the stats from the ring into the supplied
@@ -185,15 +185,15 @@ i40e_add_queue_stats(u64 **data, struct i40e_ring *ring)
 
 	/* To avoid invalid statistics values, ensure that we keep retrying
 	 * the copy until we get a consistent value according to
-	 * u64_stats_fetch_retry_irq. But first, make sure our ring is
+	 * u64_stats_fetch_retry. But first, make sure our ring is
 	 * non-null before attempting to access its syncp.
 	 */
 #ifdef HAVE_NDO_GET_STATS64
 	do {
-		start = !ring ? 0 : u64_stats_fetch_begin_irq(&ring->syncp);
+		start = !ring ? 0 : u64_stats_fetch_begin(&ring->syncp);
 		for (i = 0; i < size; i++)
 			i40e_add_one_ethtool_stat(&(*data)[i], ring, &stats[i]);
-	} while (ring && u64_stats_fetch_retry_irq(&ring->syncp, start));
+	} while (ring && u64_stats_fetch_retry(&ring->syncp, start));
 #else
 	for (i = 0; i < size; i++)
 		i40e_add_one_ethtool_stat(&(*data)[i], ring, &stats[i]);
@@ -210,7 +210,7 @@ i40e_add_queue_stats(u64 **data, struct i40e_ring *ring)
  * @rx_ring: the rx ring to copy
  *
  * RX queue XDP statistics must be copied while protected by
- * u64_stats_fetch_begin_irq, so we can't directly use i40e_add_ethtool_stats.
+ * u64_stats_fetch_begin, so we can't directly use i40e_add_ethtool_stats.
  * Assumes that queue stats are defined in i40e_gstrings_rx_queue_xdp_stats. If
  * the ring pointer is null, zero out the queue stat values and update the data
  * pointer. Otherwise safely copy the stats from the ring into the supplied
@@ -231,20 +231,20 @@ i40e_add_rx_queue_xdp_stats(u64 **data, struct i40e_ring *rx_ring)
 
 	/* To avoid invalid statistics values, ensure that we keep retrying
 	 * the copy until we get a consistent value according to
-	 * u64_stats_fetch_retry_irq. But first, make sure our ring is
+	 * u64_stats_fetch_retry. But first, make sure our ring is
 	 * non-null before attempting to access its syncp.
 	 */
 #ifdef HAVE_NDO_GET_STATS64
 	do {
 		start = !rx_ring ? 0 :
-			u64_stats_fetch_begin_irq(&rx_ring->syncp);
+			u64_stats_fetch_begin(&rx_ring->syncp);
 #endif
 	for (i = 0; i < xdp_size; i++) {
 		i40e_add_one_ethtool_stat(&(*data)[i], rx_ring,
 					  &xdp_stats[i]);
 	}
 #ifdef HAVE_NDO_GET_STATS64
-	} while (rx_ring && u64_stats_fetch_retry_irq(&rx_ring->syncp, start));
+	} while (rx_ring && u64_stats_fetch_retry(&rx_ring->syncp, start));
 #endif
 
 	/* Once we successfully copy the stats in, update the data pointer */
