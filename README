@@ -51,6 +51,19 @@ not support the following features:
   * Auto-media detect
 
 
+Related Documentation
+=====================
+
+See the "Intel(R) Ethernet Adapters and Devices User Guide" for additional
+information on features. It is available on the Intel website at either of the
+following:
+
+- https://cdrdv2.intel.com/v1/dl/getContent/705831
+-
+https://www.intel.com/content/www/us/en/download/19373/adapter-user-guide-for-in
+tel-ethernet-adapters.html
+
+
 Identifying Your Adapter
 ========================
 This driver is compatible with devices based on the following:
@@ -1268,7 +1281,7 @@ Example:
 # ethtool --set-eee <ethX> [eee on|off]
 
 
-Disabling physical link when the interface is brought down
+Disabling Physical Link When the Interface Is Brought Down
 ----------------------------------------------------------
 When the link-down-on-close private flag is set to "on", the port's link will
 go down when the interface is brought down using the 'ip link set <ethX> down'
@@ -1350,7 +1363,7 @@ For more details, please refer to the ethtool man page.
 NAPI
 ----
 This driver supports NAPI (Rx polling mode). For more information on NAPI, see
-https://www.linuxfoundation.org/collaborate/workgroups/networking/napi.
+https://docs.kernel.org/networking/napi.html.
 
 
 IEEE 802.1ad (QinQ) Support
@@ -2119,8 +2132,8 @@ releases. To resolve this issue, upgrade your kernel.
 Driver Buffer Overflow Fix
 --------------------------
 The fix to resolve CVE-2016-8105, referenced in Intel SA-00069
-<https://security-center.intel.com/advisory.aspx?intelid=INTEL-SA-00069&language
-id=en-fr>, is included in this and future versions of the driver.
+<https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-00069
+.html>, is included in this and future versions of the driver.
 
 
 depmod warning messages about unknown symbol during installation

@@ -17,8 +17,6 @@
  */
 
 /*
- * The trace subsystem name for i40e will be "i40e".
- *
  * This file is named i40e_trace.h.
  *
  * Since this include file's name is different from the trace
@@ -213,6 +211,230 @@ DEFINE_EVENT(
 /*
  * Events unique to the PF.
  */
+DECLARE_EVENT_CLASS(
+	i40e_state_template,
+
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val),
+
+	TP_STRUCT__entry(
+		__field(u64, val)
+		__field(u64, state)
+		__field(u64, bus)
+	),
+
+	TP_fast_assign(
+		__entry->val = val;
+		__entry->state = *(u64 *)pf->state;
+		__entry->bus = (((u64)pf->hw.bus.bus_id) << 32) |
+			(((u64)pf->hw.bus.device) << 16) | pf->hw.bus.func;
+	),
+
+	TP_printk(
+		"state: bus %02x:%02x.%1x state=%016llx val=%llx",
+		(unsigned int)(__entry->bus >> 32),
+		0xffff & (unsigned int)(__entry->bus >> 16),
+		0xffff & (unsigned int)__entry->bus,
+		 __entry->state, __entry->val)
+);
+
+DEFINE_EVENT(
+	i40e_state_template, i40e_state_reset,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DEFINE_EVENT(
+	i40e_state_template, i40e_state_reset_pci_prepare,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DEFINE_EVENT(
+	i40e_state_template, i40e_state_reset_pci_done,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DEFINE_EVENT(
+	i40e_state_template, i40e_state_reset_corer,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DEFINE_EVENT(
+	i40e_state_template, i40e_state_reset_globr,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DEFINE_EVENT(
+	i40e_state_template, i40e_state_reset_empr,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DEFINE_EVENT(
+	i40e_state_template, i40e_state_hmc_error,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DEFINE_EVENT(
+	i40e_state_template, i40e_state_rebuild,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DEFINE_EVENT(
+	i40e_state_template, i40e_state_arq,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DEFINE_EVENT(
+	i40e_state_template, i40e_state_asq,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DEFINE_EVENT(
+	i40e_state_template, i40e_state_udp_sync,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DEFINE_EVENT(
+	i40e_state_template, i40e_state_watchdog,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DEFINE_EVENT(
+	i40e_state_template, i40e_state_link,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DEFINE_EVENT(
+	i40e_state_template, i40e_state_recovery,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DECLARE_EVENT_CLASS(
+	i40e_ioctl_template,
+
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val),
+
+	TP_STRUCT__entry(
+		__field(u64, val)
+		__field(u64, state)
+		__field(u64, bus)
+		__field(pid_t, pid)
+		__array(char, comm, TASK_COMM_LEN)
+	),
+
+	TP_fast_assign(
+		__entry->val = val;
+		__entry->state = *(u64 *)pf->state;
+		__entry->bus = (((u64)pf->hw.bus.bus_id) << 32) |
+			(((u64)pf->hw.bus.device) << 16) | pf->hw.bus.func;
+		__entry->pid = current->pid;
+		memcpy(__entry->comm, current->comm, sizeof(__entry->comm) - 1);
+		__entry->comm[TASK_COMM_LEN - 1] = 0;
+	),
+
+	TP_printk(
+		"state: bus %02x:%02x.%1x state=%016llx val=%llx %5d:%s",
+		(unsigned int)(__entry->bus >> 32),
+		0xffff & (unsigned int)(__entry->bus >> 16),
+		0xffff & (unsigned int)__entry->bus,
+		__entry->state, __entry->val,
+		__entry->pid, __entry->comm)
+);
+
+DEFINE_EVENT(
+	i40e_ioctl_template, i40e_ioctl_get_drvinfo,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DEFINE_EVENT(
+	i40e_ioctl_template, i40e_ioctl_get_eeprom_len,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DEFINE_EVENT(
+	i40e_ioctl_template, i40e_ioctl_get_eeprom,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DEFINE_EVENT(
+	i40e_ioctl_template, i40e_ioctl_set_eeprom,
+	TP_PROTO(struct i40e_pf *pf, u64 val),
+
+	TP_ARGS(pf, val));
+
+DECLARE_EVENT_CLASS(
+	i40e_nvmupd_template,
+
+	TP_PROTO(struct i40e_hw *hw,
+		 struct i40e_nvm_access *cmd, int ret_val, int err),
+
+	TP_ARGS(hw, cmd, ret_val, err),
+
+	TP_STRUCT__entry(
+		__field(int, ret_val)
+		__field(int, err)
+		__field(int, status)
+		__field(u64, bus)
+		__field(u32, command)
+		__field(u32, config)
+		__field(u32, offset)
+		__field(u32, data_size)
+	),
+
+	TP_fast_assign(
+		__entry->ret_val = ret_val;
+		__entry->err = err;
+		__entry->status = hw->aq.asq_last_status;
+		__entry->bus = (((u64)hw->bus.bus_id) << 32) |
+			(((u64)hw->bus.device) << 16) | hw->bus.func;
+		__entry->command = cmd->command;
+		__entry->config = cmd->config;
+		__entry->offset = cmd->offset;
+		__entry->data_size = cmd->data_size;
+	),
+
+	TP_printk(
+		"nvmupd: bus %02x:%02x.%1x err=%d status=0x%x errno=%d module=%d offset=0x%x size=%d",
+		(unsigned int)(__entry->bus >> 32),
+		0xffff & (unsigned int)(__entry->bus >> 16),
+		0xffff & (unsigned int)__entry->bus,
+		__entry->ret_val, __entry->status, __entry->err,
+		(__entry->config & I40E_NVM_MOD_PNT_MASK),
+		__entry->offset, __entry->data_size)
+);
+
+DEFINE_EVENT(
+	i40e_nvmupd_template, i40e_nvmupd_write,
+	TP_PROTO(struct i40e_hw *hw,
+		 struct i40e_nvm_access *cmd, int ret_val, int err),
+
+	TP_ARGS(hw, cmd, ret_val, err));
+
+DEFINE_EVENT(
+	i40e_nvmupd_template, i40e_nvmupd_read,
+	TP_PROTO(struct i40e_hw *hw,
+		 struct i40e_nvm_access *cmd, int ret_val, int err),
+
+	TP_ARGS(hw, cmd, ret_val, err));
 
 #endif /* _I40E_TRACE_H_ */
 /* This must be outside ifdef _I40E_TRACE_H */

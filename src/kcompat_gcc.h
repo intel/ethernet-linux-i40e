@@ -10,6 +10,14 @@
 		     + __GNUC_PATCHLEVEL__)
 #endif /* GCC_VERSION */
 
+/* as GCC_VERSION yields 40201 for any modern clang (checked on clang 7 & 13)
+ * we want other means to add workarounds for "old GCC" */
+#ifdef __clang__
+#define GCC_IS_BELOW(x) 0
+#else
+#define GCC_IS_BELOW(x) (GCC_VERSION < (x))
+#endif
+
 #ifdef __has_attribute
 #if __has_attribute(__fallthrough__)
 # define fallthrough __attribute__((__fallthrough__))
@@ -22,7 +30,6 @@
 
 /* Backport macros for controlling GCC diagnostics */
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(4,18,0) )
-
 /* Compilers before gcc-4.6 do not understand "#pragma GCC diagnostic push" */
 #if GCC_VERSION >= 40600
 #define __diag_str1(s)		#s
@@ -35,7 +42,7 @@
 #define __diag_pop()	__diag(pop)
 #endif /* LINUX_VERSION < 4.18.0 */
 
-#if GCC_VERSION < 50000
+#if GCC_IS_BELOW(50000)
 /* Workaround for gcc bug - not accepting "(type)" before "{ ... }" as part of
  * static struct initializers [when used with -std=gnu11 switch]
  * https://bugzilla.redhat.com/show_bug.cgi?id=1672652
@@ -85,15 +92,13 @@
 #define STATIC_KEY_INIT_FALSE	\
 	{ .enabled = { 0 } }
 
-#ifdef NEED_DEFINE_STATIC_KEY_FALSE
 #undef STATIC_KEY_TRUE_INIT
 #define STATIC_KEY_TRUE_INIT \
-	(struct static_key_true) { .key = STATIC_KEY_INIT_TRUE }
+	/* (struct static_key_true) */ { .key = STATIC_KEY_INIT_TRUE }
 
 #undef STATIC_KEY_FALSE_INIT
 #define STATIC_KEY_FALSE_INIT \
-	(struct static_key_false) { .key = STATIC_KEY_INIT_FALSE }
-#endif /* NEED_DEFINE_STATIC_KEY_FALSE */
+	/* (struct static_key_false) */ { .key = STATIC_KEY_INIT_FALSE }
 
 #ifdef HAVE_JUMP_LABEL
 /* dd_key_init() is used (indirectly) with arg like "(STATIC_KEY_INIT_FALSE)"
@@ -115,6 +120,6 @@
 	   (d0), (d1), (d2), (d3), (d4), (d5), (d6), (d7)		\
 	}}
 
-#endif /* GCC_VERSION < 5.0 */
+#endif /* old GCC < 5.0 */
 
 #endif /* _KCOMPAT_GCC_H_ */

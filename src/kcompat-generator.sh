@@ -28,11 +28,12 @@ set -Eeuo pipefail
 # Most of the implementation is in kcompat-lib.sh, here are actual 'gen' calls.
 
 export LC_ALL=C
+SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
 ORIG_CWD="$(pwd)"
 trap 'rc=$?; echo >&2 "$(realpath "$ORIG_CWD/${BASH_SOURCE[0]}"):$LINENO: failed with rc: $rc"' ERR
 
 # shellcheck source=kcompat-lib.sh
-source "$ORIG_CWD"/kcompat-lib.sh
+source "$SCRIPT_DIR"/kcompat-lib.sh
 
 # DO NOT break gen calls below (via \), to make our compat code more grep-able,
 # keep them also grouped, first by feature (like DEVLINK), then by .h filename
@@ -40,6 +41,26 @@ source "$ORIG_CWD"/kcompat-lib.sh
 
 # handy line of DOC copy-pasted form kcompat-lib.sh:
 #   gen DEFINE if (KIND [METHOD of]) NAME [(matches|lacks) PATTERN|absent] in <list-of-files>
+
+function gen-aux() {
+	ah='include/linux/auxiliary_bus.h'
+	mh='include/linux/mod_devicetable.h'
+	if grep -qE CONFIG_AUXILIARY_BUS.+1 "$CONFFILE"; then
+		gen HAVE_AUXILIARY_DRIVER_INT_REMOVE if method remove of auxiliary_driver matches 'int' in "$ah"
+	fi
+
+	# generate HAVE_AUXILIARY_DEVICE_ID only for cases when it's disabled in .config
+	if ! grep -qE CONFIG_AUXILIARY_BUS.+1 "$CONFFILE"; then
+		gen HAVE_AUXILIARY_DEVICE_ID if struct auxiliary_device_id in "$mh"
+	fi
+}
+
+function gen-bitfield() {
+	bf='include/linux/bitfield.h'
+	gen HAVE_INCLUDE_BITFIELD if macro FIELD_PREP in "$bf"
+	gen NEED_BITFIELD_FIELD_FIT if macro FIELD_FIT absent in "$bf"
+	gen NEED_BITFIELD_FIELD_MAX if macro FIELD_MAX absent in "$bf"
+}
 
 function gen-device() {
 	dh='include/linux/device.h'
@@ -64,6 +85,7 @@ function gen-devlink() {
 	gen HAVE_DEVLINK_PARAMS if method validate of devlink_param matches ext_ack in "$dh"
 	gen HAVE_DEVLINK_PARAMS_PUBLISH if fun devlink_params_publish in "$dh"
 	gen HAVE_DEVLINK_PORT_NEW if method port_new of devlink_ops in "$dh"
+	gen HAVE_DEVLINK_PORT_OPS if struct devlink_port_ops in "$dh"
 	gen HAVE_DEVLINK_PORT_SPLIT if method port_split of devlink_ops in "$dh"
 	gen HAVE_DEVLINK_PORT_SPLIT_EXTACK if method port_split of devlink_ops matches netlink_ext_ack in "$dh"
 	gen HAVE_DEVLINK_PORT_SPLIT_PORT_STRUCT if method port_split of devlink_ops matches devlink_port in "$dh"
@@ -92,6 +114,7 @@ function gen-devlink() {
 function gen-ethtool() {
 	eth='include/linux/ethtool.h'
 	ueth='include/uapi/linux/ethtool.h'
+	gen HAVE_ETHTOOL_COALESCE_EXTACK if method get_coalesce of ethtool_ops matches 'struct kernel_ethtool_coalesce \\*' in "$eth"
 	gen HAVE_ETHTOOL_EXTENDED_RINGPARAMS if method get_ringparam of ethtool_ops matches 'struct kernel_ethtool_ringparam \\*' in "$eth"
 	gen NEED_ETHTOOL_SPRINTF if fun ethtool_sprintf absent in "$eth"
 	gen HAVE_ETHTOOL_FLOW_RSS if macro FLOW_RSS in "$ueth"
@@ -119,7 +142,7 @@ function gen-gnss() {
 	fh='include/linux/fs.h'
 
 	gen HAVE_CDEV_DEVICE if fun cdev_device_add in "$cdh"
-	gen HAVE_DEV_UEVENT_CONST if method dev_uevent of class matches 'const struct device' in "$clh"
+	gen HAVE_DEV_UEVENT_CONST if method dev_uevent of class matches '(const|CONST) struct device' in "$clh" "$dh"
 	gen HAVE_POLL_T if typedef __poll_t in "$th"
 	gen HAVE_STREAM_OPEN if fun stream_open in "$fh"
 	# There can be either macro class_create or a function
@@ -134,10 +157,13 @@ function gen-gnss() {
 function gen-netdevice() {
 	ndh='include/linux/netdevice.h'
 	gen HAVE_NDO_ETH_IOCTL if fun ndo_eth_ioctl in "$ndh"
+	gen HAVE_NDO_EXTENDED_SET_TX_MAXRATE if method ndo_set_tx_maxrate of net_device_ops_extended in "$ndh"
 	gen HAVE_NDO_FDB_ADD_VID    if method ndo_fdb_del of net_device_ops matches 'u16 vid' in "$ndh"
 	gen HAVE_NDO_FDB_DEL_EXTACK if method ndo_fdb_del of net_device_ops matches ext_ack in "$ndh"
 	gen HAVE_NDO_GET_DEVLINK_PORT if method ndo_get_devlink_port of net_device_ops in "$ndh"
 	gen HAVE_NDO_UDP_TUNNEL_CALLBACK if method ndo_udp_tunnel_add of net_device_ops in "$ndh"
+	gen HAVE_NETDEV_EXTENDED_MIN_MAX_MTU if struct net_device_extended matches min_mtu in "$ndh"
+	gen HAVE_NETDEV_MIN_MAX_MTU if struct net_device matches min_mtu in "$ndh"
 	gen HAVE_NETIF_SET_TSO_MAX if fun netif_set_tso_max_size in "$ndh"
 	gen HAVE_SET_NETDEV_DEVLINK_PORT if macro SET_NETDEV_DEVLINK_PORT in "$ndh"
 	gen NEED_NETIF_NAPI_ADD_NO_WEIGHT if fun netif_napi_add matches 'int weight' in "$ndh"
@@ -156,19 +182,27 @@ function gen-pci() {
 }
 
 function gen-other() {
-	gen NEED_PCI_AER_CLEAR_NONFATAL_STATUS if fun pci_aer_clear_nonfatal_status absent in include/linux/aer.h
+	pciaerh='include/linux/aer.h'
+	ush='include/linux/u64_stats_sync.h'
+	gen NEED_PCI_AER_CLEAR_NONFATAL_STATUS if fun pci_aer_clear_nonfatal_status absent in "$pciaerh"
+	gen NEED_PCI_ENABLE_PCIE_ERROR_REPORTING if fun pci_enable_pcie_error_reporting absent in "$pciaerh"
 	gen NEED_BITMAP_COPY_CLEAR_TAIL if fun bitmap_copy_clear_tail absent in include/linux/bitmap.h
 	gen NEED_BITMAP_FROM_ARR32 if fun bitmap_from_arr32 absent in include/linux/bitmap.h
 	gen NEED_BITMAP_TO_ARR32 if fun bitmap_to_arr32 absent in include/linux/bitmap.h
+	gen NEED_ASSIGN_BIT if fun assign_bit absent in include/linux/bitops.h
 	gen HAVE_COMPLETION_RAW_SPINLOCK if struct completion matches 'struct swait_queue_head' in include/linux/completion.h
 	gen NEED_DEBUGFS_LOOKUP if fun debugfs_lookup absent in include/linux/debugfs.h
 	gen NEED_DEBUGFS_LOOKUP_AND_REMOVE if fun debugfs_lookup_and_remove absent in include/linux/debugfs.h
 	gen NEED_ETH_HW_ADDR_SET if fun eth_hw_addr_set absent in include/linux/etherdevice.h
+	gen HAVE_HWMON_DEVICE_REGISTER_WITH_INFO if fun hwmon_device_register_with_info in include/linux/hwmon.h
+	gen NEED_HWMON_CHANNEL_INFO if macro HWMON_CHANNEL_INFO absent in include/linux/hwmon.h
 	gen HAVE_IOMMU_DEV_FEAT_AUX if enum iommu_dev_features matches IOMMU_DEV_FEAT_AUX in include/linux/iommu.h
 	gen NEED_DEFINE_STATIC_KEY_FALSE if macro DEFINE_STATIC_KEY_FALSE absent in include/linux/jump_label.h
 	gen NEED_STATIC_BRANCH_LIKELY if macro static_branch_likely absent in include/linux/jump_label.h
 	gen HAVE_STRUCT_STATIC_KEY_FALSE if struct static_key_false in include/linux/jump_label.h include/linux/jump_label_type.h
 	gen NEED_DECLARE_STATIC_KEY_FALSE if macro DECLARE_STATIC_KEY_FALSE absent in include/linux/jump_label.h include/linux/jump_label_type.h
+	gen NEED_LOWER_16_BITS if macro lower_16_bits absent in include/linux/kernel.h
+	gen NEED_UPPER_16_BITS if macro upper_16_bits absent in include/linux/kernel.h
 	gen NEED_MUL_U64_U64_DIV_U64 if fun mul_u64_u64_div_u64 absent in include/linux/math64.h
 	gen HAVE_MDEV_GET_DRVDATA if fun mdev_get_drvdata in include/linux/mdev.h
 	gen HAVE_MDEV_REGISTER_PARENT if fun mdev_register_parent in include/linux/mdev.h
@@ -176,13 +210,18 @@ function gen-other() {
 	gen NEED_DEV_PM_DOMAIN_DETACH if fun dev_pm_domain_detach absent in include/linux/pm_domain.h include/linux/pm.h
 	gen NEED_PTP_CLASSIFY_RAW if fun ptp_classify_raw absent in include/linux/ptp_classify.h
 	gen NEED_PTP_PARSE_HEADER if fun ptp_parse_header absent in include/linux/ptp_classify.h
+	gen HAVE_PTP_CLOCK_INFO_ADJFINE if method adjfine of ptp_clock_info in include/linux/ptp_clock_kernel.h
 	gen NEED_DIFF_BY_SCALED_PPM if fun diff_by_scaled_ppm absent in include/linux/ptp_clock_kernel.h
 	gen NEED_PTP_SYSTEM_TIMESTAMP if fun ptp_read_system_prets absent in include/linux/ptp_clock_kernel.h
 	gen NEED_DEV_PAGE_IS_REUSABLE if fun dev_page_is_reusable absent in include/linux/skbuff.h
+	gen NEED_NAPI_BUILD_SKB if fun napi_build_skb absent in include/linux/skbuff.h
 	gen NEED_SYSFS_EMIT if fun sysfs_emit absent in include/linux/sysfs.h
 	gen HAVE_TRACE_ENABLED_SUPPORT if implementation of macro __DECLARE_TRACE matches 'trace_##name##_enabled' in include/linux/tracepoint.h
-	gen HAVE_U64_STATS_FETCH_BEGIN_IRQ if fun u64_stats_fetch_begin_irq in include/linux/u64_stats_sync.h
-	gen HAVE_U64_STATS_FETCH_RETRY_IRQ if fun u64_stats_fetch_retry_irq in include/linux/u64_stats_sync.h
+	gen HAVE_U64_STATS_FETCH_BEGIN_IRQ if fun u64_stats_fetch_begin_irq in "$ush"
+	gen HAVE_U64_STATS_FETCH_RETRY_IRQ if fun u64_stats_fetch_retry_irq in "$ush"
+	gen NEED_U64_STATS_READ if fun u64_stats_read absent in "$ush"
+	gen NEED_U64_STATS_SET if fun u64_stats_set absent in "$ush"
+	gen HAVE_TTY_OP_WRITE_SIZE_T if method write of tty_operations matches size_t in include/linux/tty_driver.h
 	gen HAVE_LMV1_SUPPORT if macro VFIO_REGION_TYPE_MIGRATION in include/uapi/linux/vfio.h
 }
 
@@ -197,6 +236,8 @@ function gen-all() {
 	if [ -n "${JUST_UNIT_TESTING-}" ]; then
 		return
 	fi
+	gen-aux
+	gen-bitfield
 	gen-device
 	gen-ethtool
 	gen-filter
@@ -243,7 +284,10 @@ function main() {
 		exit 9
 	fi
 
+	echo "#ifndef _KCOMPAT_GENERATED_DEFS_H_"
+	echo "#define _KCOMPAT_GENERATED_DEFS_H_"
 	gen-all
+	echo "#endif /* _KCOMPAT_GENERATED_DEFS_H_ */"
 
 	if [ -n "${OUT-}" ]; then
 		cd "$ORIG_CWD"

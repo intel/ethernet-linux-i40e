@@ -42,8 +42,8 @@ static const char i40e_driver_string[] =
 #define DRV_VERSION_DESC ""
 
 #define DRV_VERSION_MAJOR 2
-#define DRV_VERSION_MINOR 23
-#define DRV_VERSION_BUILD 17
+#define DRV_VERSION_MINOR 24
+#define DRV_VERSION_BUILD 6
 #define DRV_VERSION_SUBBUILD 0
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
@@ -73,6 +73,7 @@ static bool i40e_check_recovery_mode(struct i40e_pf *pf);
 static int i40e_init_recovery_mode(struct i40e_pf *pf, struct i40e_hw *hw);
 static i40e_status i40e_force_link_state(struct i40e_pf *pf, bool is_up);
 static bool i40e_is_total_port_shutdown_enabled(struct i40e_pf *pf);
+static int i40e_set_mac_source_pruning(struct i40e_pf *pf, bool init);
 static void i40e_fdir_sb_setup(struct i40e_pf *pf);
 
 static int i40e_veb_get_bw_info(struct i40e_veb *veb);
@@ -2811,7 +2812,7 @@ int i40e_sync_vsi_filters(struct i40e_vsi *vsi)
 			retval = i40e_correct_mac_vlan_filters
 				(vsi, &tmp_add_list, &tmp_del_list,
 				 vlan_filters);
-		else
+		else if (pf->vf)
 			retval = i40e_correct_vf_mac_vlan_filters
 				(vsi, &tmp_add_list, &tmp_del_list,
 				 vlan_filters,
@@ -2986,7 +2987,8 @@ int i40e_sync_vsi_filters(struct i40e_vsi *vsi)
 		vsi->promisc_threshold = 0;
 	}
 	/* if the VF is not trusted do not do promisc */
-	if ((vsi->type == I40E_VSI_SRIOV) && !pf->vf[vsi->vf_id].trusted) {
+	if (vsi->type == I40E_VSI_SRIOV && pf->vf &&
+	    !pf->vf[vsi->vf_id].trusted) {
 		clear_bit(__I40E_VSI_OVERFLOW_PROMISC, vsi->state);
 		goto out;
 	}
@@ -5230,20 +5232,27 @@ static irqreturn_t i40e_intr(int irq, void *data)
 		       >> I40E_GLGEN_RSTAT_RESET_TYPE_SHIFT;
 		if (val == I40E_RESET_CORER) {
 			pf->corer_count++;
+			i40e_trace(state_reset_corer, pf, pf->corer_count);
 		} else if (val == I40E_RESET_GLOBR) {
 			pf->globr_count++;
+			i40e_trace(state_reset_globr, pf, pf->globr_count);
 		} else if (val == I40E_RESET_EMPR) {
 			pf->empr_count++;
 			set_bit(__I40E_EMP_RESET_INTR_RECEIVED, pf->state);
+			i40e_trace(state_reset_empr, pf, pf->empr_count);
 		}
 	}
 
 	if (icr0 & I40E_PFINT_ICR0_HMC_ERR_MASK) {
+		const u32 err_info = rd32(hw, I40E_PFHMC_ERRORINFO);
+		const u32 err_data = rd32(hw, I40E_PFHMC_ERRORDATA);
+
 		icr0 &= ~I40E_PFINT_ICR0_HMC_ERR_MASK;
+		i40e_trace(state_hmc_error, pf,
+			   ((u64)err_info << 32) | err_data);
 		dev_info(&pf->pdev->dev, "HMC error interrupt\n");
 		dev_info(&pf->pdev->dev, "HMC error info 0x%x, HMC error data 0x%x\n",
-			 rd32(hw, I40E_PFHMC_ERRORINFO),
-			 rd32(hw, I40E_PFHMC_ERRORDATA));
+			 err_info, err_data);
 	}
 
 #ifdef HAVE_PTP_1588_CLOCK
@@ -9296,8 +9305,8 @@ static int i40e_parse_cls_flower(struct i40e_vsi *vsi,
 	      BIT(FLOW_DISSECTOR_KEY_ENC_KEYID) |
 #endif
 	      BIT(FLOW_DISSECTOR_KEY_PORTS))) {
-		dev_err(&pf->pdev->dev, "Unsupported key used: 0x%x\n",
-			dissector->used_keys);
+		dev_err(&pf->pdev->dev, "Unsupported key used: 0x%llx\n",
+			(unsigned long long)dissector->used_keys);
 		return -EOPNOTSUPP;
 	}
 
@@ -10730,11 +10739,13 @@ static void i40e_link_event(struct i40e_pf *pf)
 	/* On success, disable temp link polling */
 	if (status == I40E_SUCCESS) {
 		clear_bit(__I40E_TEMP_LINK_POLLING, pf->state);
+		i40e_trace(state_link, pf, pf->hw.phy.link_info.link_speed);
 	} else {
 		/* Enable link polling temporarily until i40e_get_link_status
 		 * returns I40E_SUCCESS
 		 */
 		set_bit(__I40E_TEMP_LINK_POLLING, pf->state);
+		i40e_trace(state_link, pf, pf->hw.phy.link_info.link_speed);
 		dev_dbg(&pf->pdev->dev, "couldn't get link state, status: %d\n",
 			status);
 		return;
@@ -10817,6 +10828,7 @@ static void i40e_watchdog_subtask(struct i40e_pf *pf)
 				  pf->service_timer_period)))
 		return;
 	pf->service_timer_previous = jiffies;
+	i40e_trace(state_watchdog, pf, pf->service_timer_previous);
 
 	if ((pf->flags & I40E_FLAG_LINK_POLLING_ENABLED) ||
 	    test_bit(__I40E_TEMP_LINK_POLLING, pf->state))
@@ -10860,22 +10872,87 @@ static void i40e_reset_subtask(struct i40e_pf *pf)
 		reset_flags |= BIT(__I40E_GLOBAL_RESET_REQUESTED);
 	if (test_and_clear_bit(__I40E_DOWN_REQUESTED, pf->state))
 		reset_flags |= BIT(__I40E_DOWN_REQUESTED);
+	if (test_and_clear_bit(__I40E_RESET_INTR_RECEIVED, pf->state))
+		reset_flags |= BIT(__I40E_RESET_INTR_RECEIVED);
+
+	if (!(reset_flags & (BIT(__I40E_PF_RESET_REQUESTED)
+			     | BIT(__I40E_CORE_RESET_REQUESTED)
+			     | BIT(__I40E_GLOBAL_RESET_REQUESTED)
+			     | BIT(__I40E_RESET_INTR_RECEIVED))))
+		return;
+
+	rtnl_lock();
+	i40e_trace(state_reset, pf, reset_flags);
 
 	/* If there's a recovery already waiting, it takes
 	 * precedence before starting a new reset sequence.
 	 */
-	if (test_bit(__I40E_RESET_INTR_RECEIVED, pf->state)) {
+	if (reset_flags & BIT(__I40E_RESET_INTR_RECEIVED)) {
+		reset_flags &= ~BIT(__I40E_RESET_INTR_RECEIVED);
 		i40e_prep_for_reset(pf);
 		i40e_reset(pf);
-		i40e_rebuild(pf, false, false);
+		i40e_rebuild(pf, false, true);
 	}
 
 	/* If we're already down or resetting, just bail */
 	if (reset_flags &&
 	    !test_bit(__I40E_DOWN, pf->state) &&
 	    !test_bit(__I40E_CONFIG_BUSY, pf->state)) {
-		i40e_do_reset(pf, reset_flags, false);
+		i40e_do_reset(pf, reset_flags, true);
 	}
+
+	rtnl_unlock();
+}
+
+/**
+ * i40e_restore_supported_phy_link_speed - Restore default PHY speed
+ * @pf: board private structure
+ *
+ * Function set PHY module speeds according to values get from
+ * initial link speed abilites.
+ **/
+static i40e_status i40e_restore_supported_phy_link_speed(struct i40e_pf *pf)
+{
+	struct i40e_aq_get_phy_abilities_resp abilities;
+	struct i40e_aq_set_phy_config config = {0};
+	struct i40e_hw *hw = &pf->hw;
+	i40e_status err = I40E_SUCCESS;
+
+	err = i40e_aq_get_phy_capabilities(hw, false, false, &abilities, NULL);
+	if (err) {
+		dev_dbg(&pf->pdev->dev, "failed to get phy cap., ret =  %s last_status =  %s\n",
+			i40e_stat_str(&pf->hw, err),
+			i40e_aq_str(&pf->hw, pf->hw.aq.asq_last_status));
+		return err;
+	}
+	config.eee_capability = abilities.eee_capability;
+	config.phy_type_ext = abilities.phy_type_ext;
+	config.low_power_ctrl = abilities.d3_lpan;
+	config.abilities = abilities.abilities;
+	config.abilities |= I40E_AQ_PHY_ENABLE_AN;
+	config.phy_type = abilities.phy_type;
+	config.eeer = abilities.eeer_val;
+	config.fec_config = abilities.fec_cfg_curr_mod_ext_info &
+			    I40E_AQ_PHY_FEC_CONFIG_MASK;
+	err = i40e_aq_get_phy_capabilities(hw, false, true, &abilities, NULL);
+	if (err) {
+		dev_dbg(&pf->pdev->dev, "get supported phy types ret =  %s last_status =  %s\n",
+			i40e_stat_str(&pf->hw, err),
+			i40e_aq_str(&pf->hw, pf->hw.aq.asq_last_status));
+		return err;
+	}
+	config.link_speed = abilities.link_speed;
+
+	err = i40e_aq_set_phy_config(hw, &config, NULL);
+	if (err)
+		return err;
+	err = i40e_aq_set_link_restart_an(hw, true, NULL);
+	if (err)
+		return err;
+
+	pf->hw.phy.link_info.requested_speeds = config.link_speed;
+
+	return err;
 }
 
 /**
@@ -10888,6 +10965,7 @@ static void i40e_handle_link_event(struct i40e_pf *pf,
 {
 	struct i40e_aqc_get_link_status *status =
 		(struct i40e_aqc_get_link_status *)&e->desc.params.raw;
+	i40e_status err;
 
 	/* Do a new status request to re-enable LSE reporting
 	 * and load new status information into the hw struct
@@ -10911,10 +10989,17 @@ static void i40e_handle_link_event(struct i40e_pf *pf,
 		    (!(status->an_info & I40E_AQ_QUALIFIED_MODULE)) &&
 		    (!(status->link_info & I40E_AQ_LINK_UP)) &&
 		    (!(pf->flags & I40E_FLAG_LINK_DOWN_ON_CLOSE_ENABLED))) {
-			dev_err(&pf->pdev->dev,
-				"Rx/Tx is disabled on this device because an unsupported SFP+ module type was detected.\n");
-			dev_err(&pf->pdev->dev,
-				"Refer to the Intel(R) Ethernet Adapters and Devices User Guide for a list of supported modules.\n");
+			err = i40e_restore_supported_phy_link_speed(pf);
+			if (err) {
+				dev_err(&pf->pdev->dev,
+					"Rx/Tx is disabled on this device because an unsupported SFP+ module type was detected.\n");
+				dev_err(&pf->pdev->dev,
+					"Refer to the Intel(R) Ethernet Adapters and Devices User Guide for a list of supported modules.\n");
+
+				return;
+			}
+
+			dev_info(&pf->pdev->dev, "The selected speed is incompatible with the connected media type. Resetting to the default speed setting for the media type.");
 		}
 	}
 }
@@ -10939,6 +11024,7 @@ static void i40e_clean_adminq_subtask(struct i40e_pf *pf)
 
 	/* check for error indications */
 	val = rd32(&pf->hw, pf->hw.aq.arq.len);
+	i40e_trace(state_arq, pf, val);
 	oldval = val;
 	if (val & I40E_PF_ARQLEN_ARQVFE_MASK) {
 		if (hw->debug_mask & I40E_DEBUG_AQ)
@@ -10960,6 +11046,7 @@ static void i40e_clean_adminq_subtask(struct i40e_pf *pf)
 		wr32(&pf->hw, pf->hw.aq.arq.len, val);
 
 	val = rd32(&pf->hw, pf->hw.aq.asq.len);
+	i40e_trace(state_asq, pf, val);
 	oldval = val;
 	if (val & I40E_PF_ATQLEN_ATQVFE_MASK) {
 		if (pf->hw.debug_mask & I40E_DEBUG_AQ)
@@ -11394,7 +11481,6 @@ static void i40e_prep_for_reset(struct i40e_pf *pf)
 	struct i40e_hw *hw = &pf->hw;
 	u32 v;
 
-	clear_bit(__I40E_RESET_INTR_RECEIVED, pf->state);
 	if (test_and_set_bit(__I40E_RESET_RECOVERY_PENDING, pf->state))
 		return;
 	if (i40e_check_asq_alive(&pf->hw))
@@ -11837,6 +11923,7 @@ end_unlock:
 end_core_reset:
 	clear_bit(__I40E_RESET_FAILED, pf->state);
 clear_recovery:
+	i40e_trace(state_rebuild, pf, ret);
 	clear_bit(__I40E_RESET_RECOVERY_PENDING, pf->state);
 	clear_bit(__I40E_TIMEOUT_RECOVERY_PENDING, pf->state);
 }
@@ -12099,6 +12186,7 @@ static void i40e_sync_udp_filters_subtask(struct i40e_pf *pf)
 
 	/* acquire RTNL to maintain state of flags and port requests */
 	rtnl_lock();
+	i40e_trace(state_udp_sync, pf, pf->pending_udp_bitmap);
 
 	for (i = 0; i < I40E_MAX_PF_UDP_OFFLOAD_PORTS; i++) {
 		if (pf->pending_udp_bitmap & BIT_ULL(i)) {
@@ -13579,7 +13667,6 @@ i40e_status i40e_commit_partition_bw_setting(struct i40e_pf *pf)
 bw_commit_out:
 
 	return ret;
-
 }
 
 /**
@@ -13879,6 +13966,10 @@ static int i40e_sw_init(struct i40e_pf *pf)
 
 	/* VSIs by default have source pruning enabled */
 	pf->flags |= I40E_FLAG_VF_SOURCE_PRUNING;
+
+	/* store value of FLU mask */
+	pf->flags |= I40E_FLAG_MAC_SOURCE_PRUNING;
+	i40e_set_mac_source_pruning(pf, true);
 
 	mutex_init(&pf->switch_mutex);
 	mutex_init(&pf->tc_mutex);
@@ -15548,6 +15639,70 @@ i40e_status i40e_configure_source_pruning(struct i40e_vsi *vsi, bool enable)
 }
 
 /**
+ * i40e_set_mac_source_pruning
+ * @pf: board private structure
+ * @init: get FLU mask initial value
+ *
+ * Configure MAC source pruning
+ **/
+static int i40e_set_mac_source_pruning(struct i40e_pf *pf, bool init)
+{
+	bool mac_src_prun = !!(pf->flags & I40E_FLAG_MAC_SOURCE_PRUNING);
+	struct i40e_hw *hw = &pf->hw;
+	u32 mac_src_prun_mask[2];
+	int ret = 0;
+	u64 reg;
+
+	if (init) {
+		if (i40e_aq_debug_read_register
+			(hw, I40E_GL_PRE_FLU_MSK_PH1_H(0), &reg, NULL)) {
+			dev_info(&pf->pdev->dev, "Fail to read reg(addr=%x) could not get all source pruning state\n",
+				 I40E_GL_PRE_FLU_MSK_PH1_H(0));
+			ret = -EINVAL;
+			goto err;
+		}
+		pf->mac_src_prun_mask[1] = (u32)(reg  & 0xFFFFFFFF);
+		if (i40e_aq_debug_read_register
+			(hw, I40E_GL_PRE_FLU_MSK_PH1_L(0), &reg, NULL)) {
+			dev_info(&pf->pdev->dev, "Fail to read reg(addr=%x) could not get all source pruning state\n",
+				 I40E_GL_PRE_FLU_MSK_PH1_L(0));
+			ret = -EINVAL;
+			goto err;
+		}
+		pf->mac_src_prun_mask[0] = (u32)(reg & 0xFFFFFFFF);
+	}
+
+	if (mac_src_prun) {
+		mac_src_prun_mask[0] = pf->mac_src_prun_mask[0];
+		mac_src_prun_mask[1] = pf->mac_src_prun_mask[1];
+	} else {
+		mac_src_prun_mask[0] = 0;
+		mac_src_prun_mask[1] = 0;
+	}
+	reg = (u64)mac_src_prun_mask[1];
+	if (i40e_aq_debug_write_register(hw, I40E_GL_PRE_FLU_MSK_PH1_H(0),
+					 reg, NULL)) {
+		dev_info(&pf->pdev->dev, "Fail to write reg(addr=%x) could not restore source pruning mask register\n",
+			 I40E_GL_PRE_FLU_MSK_PH1_H(0));
+		ret = -EINVAL;
+		goto err;
+	}
+	reg = (u64)mac_src_prun_mask[0];
+	if (i40e_aq_debug_write_register(hw, I40E_GL_PRE_FLU_MSK_PH1_L(0),
+					 reg, NULL)) {
+		dev_info(&pf->pdev->dev, "Fail to write reg(addr=%x) could not restore source pruning mask register\n",
+			 I40E_GL_PRE_FLU_MSK_PH1_L(0));
+		ret = -EINVAL;
+		goto err;
+	}
+
+	dev_info(&pf->pdev->dev, "MAC source pruning %s on all VFs\n",
+		 mac_src_prun ? "enabled" : "disabled");
+err:
+	return ret;
+}
+
+/**
  * i40e_add_vsi - Add a VSI to the switch
  * @vsi: the VSI being configured
  *
@@ -15606,6 +15761,9 @@ static int i40e_add_vsi(struct i40e_vsi *vsi)
 			if (ret)
 				goto err;
 		}
+
+		/* MAC Source pruning is enabled by default */
+		i40e_set_mac_source_pruning(pf, false);
 
 		/* MFP mode setup queue map and update VSI */
 		if ((pf->flags & I40E_FLAG_MFP_ENABLED) &&
@@ -17018,7 +17176,7 @@ static void i40e_print_features(struct i40e_pf *pf)
 	char *buf;
 	int i;
 
-	buf = kmalloc(INFO_STRING_LEN, GFP_KERNEL);
+	buf = kzalloc(INFO_STRING_LEN, GFP_KERNEL);
 	if (!buf)
 		return;
 
@@ -17096,6 +17254,7 @@ static bool i40e_check_recovery_mode(struct i40e_pf *pf)
 		dev_crit(&pf->pdev->dev, "Firmware recovery mode detected. Limiting functionality.\n");
 		dev_crit(&pf->pdev->dev, "Refer to the Intel(R) Ethernet Adapters and Devices User Guide for details on firmware recovery mode.\n");
 		set_bit(__I40E_RECOVERY_MODE, pf->state);
+		i40e_trace(state_recovery, pf, val);
 
 		return true;
 	}
@@ -17393,7 +17552,6 @@ static int i40e_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 			 "pci_request_mem_regions failed %d\n", err);
 		goto err_pci_reg;
 	}
-
 	pci_enable_pcie_error_reporting(pdev);
 	pci_set_master(pdev);
 
@@ -18113,13 +18271,21 @@ static void i40e_remove(struct pci_dev *pdev)
 			i40e_switch_branch_release(pf->veb[i]);
 	}
 
-	/* Now we can shutdown the PF's VSI, just before we kill
+	/* Now we can shutdown the PF's VSIs, just before we kill
 	 * adminq and hmc.
 	 */
-	if (pf->vsi[pf->lan_vsi])
-		i40e_vsi_release(pf->vsi[pf->lan_vsi]);
+	for (i = pf->num_alloc_vsi; i-- ;)
+		if (pf->vsi[i]) {
+			i40e_vsi_close(pf->vsi[i]);
+			i40e_vsi_release(pf->vsi[i]);
+			pf->vsi[i] = NULL;
+		}
 
 	i40e_cloud_filter_exit(pf);
+
+	/* Restore FLU mask value */
+	pf->flags |= I40E_FLAG_MAC_SOURCE_PRUNING;
+	i40e_set_mac_source_pruning(pf, false);
 
 	/* remove attached clients */
 	if (pf->flags & I40E_FLAG_IWARP_ENABLED) {
@@ -18169,6 +18335,8 @@ debug_mode_clear:
 	/* destroy the locks only once, here */
 	i40e_destroy_spinlock_d(&hw->aq.arq_spinlock);
 	i40e_destroy_spinlock_d(&hw->aq.asq_spinlock);
+	mutex_destroy(&pf->tc_mutex);
+	mutex_destroy(&pf->switch_mutex);
 
 	for (i = 0; i < I40E_MAX_VEB; i++) {
 		kfree(pf->veb[i]);
@@ -18271,6 +18439,8 @@ static void i40e_pci_error_reset_prepare(struct pci_dev *pdev)
 {
 	struct i40e_pf *pf = pci_get_drvdata(pdev);
 
+	i40e_trace(state_reset_pci_prepare, pf,
+		   test_bit(__I40E_IN_REMOVE, pf->state));
 	i40e_prep_for_reset(pf);
 }
 
@@ -18282,6 +18452,8 @@ static void i40e_pci_error_reset_done(struct pci_dev *pdev)
 {
 	struct i40e_pf *pf = pci_get_drvdata(pdev);
 
+	i40e_trace(state_reset_pci_done, pf,
+		   test_bit(__I40E_IN_REMOVE, pf->state));
 	if (test_bit(__I40E_IN_REMOVE, pf->state))
 		return;
 

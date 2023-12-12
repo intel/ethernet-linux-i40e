@@ -4,6 +4,7 @@
 /* ethtool support for i40e */
 
 #include "i40e.h"
+#include "i40e_trace.h"
 #include "i40e_diag.h"
 #include "i40e_txrx_common.h"
 
@@ -324,6 +325,8 @@ static const struct i40e_priv_flags i40e_gstrings_priv_flags[] = {
 #endif
 	I40E_PRIV_FLAG("disable-source-pruning",
 		       I40E_FLAG_SOURCE_PRUNING_DISABLED, 0),
+	I40E_PRIV_FLAG("mac-source-pruning",
+		       I40E_FLAG_MAC_SOURCE_PRUNING, 0),
 	I40E_PRIV_FLAG("disable-fw-lldp", I40E_FLAG_DISABLE_FW_LLDP, 0),
 	I40E_PRIV_FLAG("rs-fec", I40E_FLAG_RS_FEC, 0),
 	I40E_PRIV_FLAG("base-r-fec", I40E_FLAG_BASE_R_FEC, 0),
@@ -2221,8 +2224,8 @@ static void i40e_get_regs(struct net_device *netdev, struct ethtool_regs *regs,
 
 }
 
-static int i40e_get_eeprom(struct net_device *netdev,
-			   struct ethtool_eeprom *eeprom, u8 *bytes)
+int i40e_get_eeprom(struct net_device *netdev,
+		    struct ethtool_eeprom *eeprom, u8 *bytes)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_hw *hw = &np->vsi->back->hw;
@@ -2233,6 +2236,8 @@ static int i40e_get_eeprom(struct net_device *netdev,
 	bool last;
 	u32 magic;
 
+	i40e_trace(ioctl_get_eeprom, pf,  ((u64)eeprom->offset << 32) |
+		   eeprom->len);
 #define I40E_NVM_SECTOR_SIZE  4096
 	if (eeprom->len == 0)
 		return -EINVAL;
@@ -2247,10 +2252,12 @@ static int i40e_get_eeprom(struct net_device *netdev,
 		if ((eeprom->magic >> 16) != hw->device_id)
 			err = -EINVAL;
 		else if (test_bit(__I40E_RESET_RECOVERY_PENDING, pf->state) ||
-			 test_bit(__I40E_RESET_INTR_RECEIVED, pf->state))
+			 test_bit(__I40E_RESET_INTR_RECEIVED, pf->state)) {
 			err = -EBUSY;
-		else
+		} else {
 			ret_val = i40e_nvmupd_command(hw, cmd, bytes, &err);
+			i40e_trace(nvmupd_read, hw, cmd, ret_val, err);
+		}
 
 		if ((err || ret_val) && (hw->debug_mask & I40E_DEBUG_NVM))
 			dev_info(&pf->pdev->dev,
@@ -2316,7 +2323,7 @@ free_buff:
 	return ret_val;
 }
 
-static int i40e_get_eeprom_len(struct net_device *netdev)
+int i40e_get_eeprom_len(struct net_device *netdev)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_hw *hw = &np->vsi->back->hw;
@@ -2325,6 +2332,7 @@ static int i40e_get_eeprom_len(struct net_device *netdev)
 #define X722_EEPROM_SCOPE_LIMIT 0x5B9FFF
 	if (hw->mac.type == I40E_MAC_X722) {
 		val = X722_EEPROM_SCOPE_LIMIT + 1;
+		i40e_trace(ioctl_get_eeprom_len, np->vsi->back, val);
 		return val;
 	}
 	val = (rd32(hw, I40E_GLPCI_LBARCTRL)
@@ -2332,11 +2340,12 @@ static int i40e_get_eeprom_len(struct net_device *netdev)
 		>> I40E_GLPCI_LBARCTRL_FL_SIZE_SHIFT;
 	/* register returns value in power of 2, 64Kbyte chunks. */
 	val = (64 * 1024) * BIT(val);
+	i40e_trace(ioctl_get_eeprom_len, np->vsi->back, val);
 	return val;
 }
 
-static int i40e_set_eeprom(struct net_device *netdev,
-			   struct ethtool_eeprom *eeprom, u8 *bytes)
+int i40e_set_eeprom(struct net_device *netdev,
+		    struct ethtool_eeprom *eeprom, u8 *bytes)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_hw *hw = &np->vsi->back->hw;
@@ -2346,6 +2355,8 @@ static int i40e_set_eeprom(struct net_device *netdev,
 	int err = 0;
 	u32 magic;
 
+	i40e_trace(ioctl_set_eeprom, pf,  ((u64)eeprom->offset << 32) |
+		   eeprom->len);
 	/* normal ethtool set_eeprom is not supported */
 	magic = hw->vendor_id | (hw->device_id << 16);
 	if (eeprom->magic == magic)
@@ -2354,10 +2365,12 @@ static int i40e_set_eeprom(struct net_device *netdev,
 	else if (!eeprom->magic || (eeprom->magic >> 16) != hw->device_id)
 		err = -EINVAL;
 	else if (test_bit(__I40E_RESET_RECOVERY_PENDING, pf->state) ||
-		 test_bit(__I40E_RESET_INTR_RECEIVED, pf->state))
+		 test_bit(__I40E_RESET_INTR_RECEIVED, pf->state)) {
 		err = -EBUSY;
-	else
+	} else {
 		ret_val = i40e_nvmupd_command(hw, cmd, bytes, &err);
+		i40e_trace(nvmupd_write, hw, cmd, ret_val, err);
+	}
 
 	if ((err || ret_val) && (hw->debug_mask & I40E_DEBUG_NVM))
 		dev_info(&pf->pdev->dev,
@@ -2388,6 +2401,7 @@ static void i40e_get_drvinfo(struct net_device *netdev,
 	if (pf->hw.pf_id == 0)
 		drvinfo->n_priv_flags += I40E_GL_PRIV_FLAGS_STR_LEN;
 #endif
+	i40e_trace(ioctl_get_drvinfo, pf, drvinfo->n_priv_flags);
 }
 
 #ifdef HAVE_ETHTOOL_EXTENDED_RINGPARAMS
@@ -3025,20 +3039,17 @@ static void i40e_get_priv_flag_strings(struct net_device *netdev, u8 *data)
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_pf *pf = vsi->back;
-	char *p = (char *)data;
 	unsigned int i;
 
 	for (i = 0; i < I40E_PRIV_FLAGS_STR_LEN; i++) {
-		snprintf(p, ETH_GSTRING_LEN, "%s",
-			 i40e_gstrings_priv_flags[i].flag_string);
-		p += ETH_GSTRING_LEN;
+		ethtool_sprintf(&data, "%s",
+				i40e_gstrings_priv_flags[i].flag_string);
 	}
 	if (pf->hw.pf_id != 0)
 		return;
 	for (i = 0; i < I40E_GL_PRIV_FLAGS_STR_LEN; i++) {
-		snprintf(p, ETH_GSTRING_LEN, "%s",
-			 i40e_gl_gstrings_priv_flags[i].flag_string);
-		p += ETH_GSTRING_LEN;
+		ethtool_sprintf(&data, "%s",
+				i40e_gl_gstrings_priv_flags[i].flag_string);
 	}
 }
 #endif
@@ -6769,6 +6780,7 @@ flags_complete:
 		reset_needed = I40E_PF_RESET_AND_REBUILD_FLAG;
 	if (changed_flags & (I40E_FLAG_VEB_STATS_ENABLED |
 	    I40E_FLAG_LEGACY_RX | I40E_FLAG_SOURCE_PRUNING_DISABLED |
+	    I40E_FLAG_MAC_SOURCE_PRUNING |
 	    I40E_FLAG_VF_SOURCE_PRUNING))
 		reset_needed = BIT(__I40E_PF_RESET_REQUESTED);
 
@@ -7259,6 +7271,32 @@ static int i40e_set_eee(struct net_device *netdev, struct ethtool_eee *edata)
 }
 #endif /* ETHTOOL_SEEE */
 
+#ifdef ETHTOOL_RESET
+/**
+ * i40e_ethtool_reset - trigger specific reset
+ * @netdev: network interface device structure
+ * @flags: reset type
+ **/
+static int i40e_ethtool_reset(struct net_device *netdev, u32 *flags)
+{
+	struct i40e_netdev_priv *np = netdev_priv(netdev);
+	struct i40e_vsi *vsi = np->vsi;
+	struct i40e_pf *pf = vsi->back;
+
+	if (!(*flags & ETH_RESET_MAC) &&
+	    !(*flags & (ETH_RESET_MAC << ETH_RESET_SHARED_SHIFT))) {
+		netdev_warn(vsi->netdev, "Reset component is not supported\n");
+		return 0;
+	}
+
+	set_bit(__I40E_CORE_RESET_REQUESTED, pf->state);
+
+	*flags &= ~(ETH_RESET_MAC | (ETH_RESET_MAC << ETH_RESET_SHARED_SHIFT));
+
+	return 0;
+}
+#endif /* ETHTOOL_RESET */
+
 static const struct ethtool_ops i40e_ethtool_recovery_mode_ops = {
 	.get_drvinfo		= i40e_get_drvinfo,
 	.set_eeprom		= i40e_set_eeprom,
@@ -7380,6 +7418,9 @@ static const struct ethtool_ops i40e_ethtool_ops = {
 #ifdef HAVE_DDP_PROFILE_UPLOAD_SUPPORT
 	.flash_device = i40e_ddp_flash,
 #endif /* DDP_PROFILE_UPLOAD_SUPPORT */
+#ifdef ETHTOOL_RESET
+	.reset = i40e_ethtool_reset,
+#endif /* ETHTOOL_RESET */
 };
 
 void i40e_set_ethtool_ops(struct net_device *netdev)

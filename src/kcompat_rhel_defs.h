@@ -142,14 +142,6 @@
 #endif /* 8.5 */
 
 /*****************************************************************************/
-#if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(8,6))
-#else /* >= 8.6 */
-#if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(9,0))
-#define HAVE_ETHTOOL_COALESCE_EXTACK
-#endif /* < 9.0 */
-#endif /* 8.6 */
-
-/*****************************************************************************/
 #if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(8,7))
 #else /* >= 8.7 */
 #undef NEED_DEVLINK_ALLOC_SETS_DEV
@@ -166,7 +158,6 @@
 #if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(9,1))
 #else /* >= 9.1 */
 #undef HAVE_PASID_SUPPORT
-#define HAVE_ETHTOOL_COALESCE_EXTACK
 #endif /* 9.1 */
 
 /*****************************************************************************/

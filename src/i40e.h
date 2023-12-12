@@ -26,12 +26,17 @@
 #include <net/checksum.h>
 #include <net/ipv6.h>
 #include <net/ip6_checksum.h>
+#include "kcompat.h"
+#ifdef HAVE_XDP_SUPPORT
+#ifdef HAVE_XDP_BUFF_RXQ
+#include <net/xdp.h>
+#endif /* HAVE_XDP_BUFF_RXQ */
+#endif /* HAVE_XDP_SUPPORT */
 #ifdef SIOCETHTOOL
 #include <linux/ethtool.h>
 #endif
 #include <linux/if_vlan.h>
 #include <linux/if_bridge.h>
-#include "kcompat.h"
 
 /* AF_XDP is currently only supported in kernel versions 4.20 to 5.1,
  * and only on redhat */
@@ -697,6 +702,8 @@ struct i40e_pf {
 #define I40E_FLAG_VF_SOURCE_PRUNING		BIT(31)
 #define I40E_FLAG_MDD_AUTO_RESET_VF		BIT(32)
 
+#define I40E_FLAG_MAC_SOURCE_PRUNING		BIT_ULL(60)
+	u32 mac_src_prun_mask[2];
 	/* flag to enable/disable vf base mode support */
 	bool vf_base_mode_only;
 
@@ -1306,6 +1313,11 @@ u32 i40e_get_current_atr_cnt(struct i40e_pf *pf);
 u32 i40e_get_global_fd_count(struct i40e_pf *pf);
 bool i40e_set_ntuple(struct i40e_pf *pf, netdev_features_t features);
 void i40e_set_ethtool_ops(struct net_device *netdev);
+int i40e_get_eeprom(struct net_device *netdev,
+		    struct ethtool_eeprom *eeprom, u8 *bytes);
+int i40e_get_eeprom_len(struct net_device *netdev);
+int i40e_set_eeprom(struct net_device *netdev,
+		    struct ethtool_eeprom *eeprom, u8 *bytes);
 struct i40e_mac_filter *i40e_find_filter(struct i40e_vsi *vsi,
 					 const u8 *macaddr, s16 vlan);
 struct i40e_mac_filter *i40e_add_filter(struct i40e_vsi *vsi,

@@ -348,7 +348,6 @@ static void i40e_ptp_convert_to_hwtstamp(struct skb_shared_hwtstamps *hwtstamps,
 	hwtstamps->hwtstamp = ns_to_ktime(timestamp);
 }
 
-#ifdef HAVE_PTP_CLOCK_INFO_ADJFINE
 /**
  * i40e_ptp_adjfine - Adjust the PHC frequency
  * @ptp: The PTP clock structure
@@ -360,7 +359,23 @@ static void i40e_ptp_convert_to_hwtstamp(struct skb_shared_hwtstamps *hwtstamps,
  * Scaled parts per million is ppm with a 16 bit binary fractional field.
  **/
 static int i40e_ptp_adjfine(struct ptp_clock_info *ptp, long scaled_ppm)
-#else
+{
+	struct i40e_pf *pf = container_of(ptp, struct i40e_pf, ptp_caps);
+	struct i40e_hw *hw = &pf->hw;
+	u64 adj, base_adj;
+
+	smp_mb(); /* Force any pending update before accessing. */
+	base_adj = I40E_PTP_40GB_INCVAL * READ_ONCE(pf->ptp_adj_mult);
+
+	adj = adjust_by_scaled_ppm(base_adj, scaled_ppm);
+
+	wr32(hw, I40E_PRTTSYN_INC_L, (u32)adj);
+	wr32(hw, I40E_PRTTSYN_INC_H, (u32)(adj >> 32));
+
+	return 0;
+}
+
+#ifndef HAVE_PTP_CLOCK_INFO_ADJFINE
 /*
  * i40e_ptp_adjfreq - Adjust the PHC frequency
  * @ptp: The PTP clock structure
@@ -370,54 +385,23 @@ static int i40e_ptp_adjfine(struct ptp_clock_info *ptp, long scaled_ppm)
  * base frequency.
  */
 static int i40e_ptp_adjfreq(struct ptp_clock_info *ptp, s32 ppb)
-#endif /* HAVE_PTP_CLOCK_INFO_ADJFINE */
 {
-	struct i40e_pf *pf = container_of(ptp, struct i40e_pf, ptp_caps);
-	struct i40e_hw *hw = &pf->hw;
-	u64 adj, freq, diff;
-	int neg_adj = 0;
+	long scaled_ppm;
 
-#ifdef HAVE_PTP_CLOCK_INFO_ADJFINE
-	if (scaled_ppm < 0) {
-		neg_adj = 1;
-		scaled_ppm = -scaled_ppm;
-	}
-#else
-	if (ppb < 0) {
-		neg_adj = 1;
-		ppb = -ppb;
-	}
-#endif
-
-	freq = I40E_PTP_40GB_INCVAL;
-#ifdef HAVE_PTP_CLOCK_INFO_ADJFINE
-	freq *= (u64)scaled_ppm;
-	diff = div64_u64(freq, 1000000ULL << 16);
-#else
-	freq *= ppb;
-	diff = div_u64(freq, 1000000000ULL);
-#endif
-
-	if (neg_adj)
-		adj = I40E_PTP_40GB_INCVAL - diff;
-	else
-		adj = I40E_PTP_40GB_INCVAL + diff;
-
-	/* At some link speeds, the base incval is so large that directly
-	 * multiplying by ppb would result in arithmetic overflow even when
-	 * using a u64. Avoid this by instead calculating the new incval
-	 * always in terms of the 40GbE clock rate and then multiplying by the
-	 * link speed factor afterwards. This does result in slightly lower
-	 * precision at lower link speeds, but it is fairly minor.
+	/*
+	 * We want to calculate
+	 *
+	 *    scaled_ppm = ppb * 2^16 / 1000
+	 *
+	 * which simplifies to
+	 *
+	 *    scaled_ppm = ppb * 2^13 / 125
 	 */
-	smp_mb(); /* Force any pending update before accessing. */
-	adj *= READ_ONCE(pf->ptp_adj_mult);
 
-	wr32(hw, I40E_PRTTSYN_INC_L, (u32)adj);
-	wr32(hw, I40E_PRTTSYN_INC_H, (u32)(adj >> 32));
-
-	return 0;
+	scaled_ppm = ((long)ppb << 13) / 125;
+	return i40e_ptp_adjfine(ptp, scaled_ppm);
 }
+#endif /* HAVE_PTP_CLOCK_INFO_ADJFINE */
 
 /**
  * i40e_ptp_set_1pps_signal_hw - configure 1PPS PTP signal for pins
@@ -964,7 +948,6 @@ static enum i40e_aq_link_speed i40e_ptp_get_link_speed_hw(struct i40e_pf *pf)
 		prtmac_linksta = (rd32(hw, I40E_PRTMAC_LINKSTA(0))
 			& I40E_PRTMAC_LINKSTA_MAC_LINK_SPEED_MASK)
 			>> I40E_PRTMAC_LINKSTA_MAC_LINK_SPEED_SHIFT;
-
 		if (prtmac_linksta == I40E_PRT_MAC_LINK_SPEED_40GB) {
 			link_speed = I40E_LINK_SPEED_40GB;
 		} else {
@@ -1313,7 +1296,7 @@ int i40e_ptp_alloc_pins(struct i40e_pf *pf)
 	if (!i40e_is_ptp_pin_dev(&pf->hw))
 		return 0;
 
-	pf->ptp_pins =
+	pf->ptp_pins = 
 		kzalloc(sizeof(struct i40e_ptp_pins_settings), GFP_KERNEL);
 
 	if (!pf->ptp_pins) {

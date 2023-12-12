@@ -2,9 +2,6 @@
 /* Copyright (C) 2013-2023 Intel Corporation */
 
 #include <linux/prefetch.h>
-#ifdef HAVE_XDP_SUPPORT
-#include <net/xdp.h>
-#endif
 #include "i40e.h"
 #include "i40e_trace.h"
 #include "i40e_prototype.h"
@@ -1125,7 +1122,6 @@ static bool i40e_clean_tx_irq(struct i40e_vsi *vsi,
 
 	return !!budget;
 }
-
 
 /**
  * i40e_enable_wb_on_itr - Arm hardware to do a wb, interrupts are not enabled
@@ -4800,3 +4796,4 @@ void i40e_xdp_flush(struct net_device *dev)
 	i40e_xdp_ring_update_tail(vsi->xdp_rings[queue_index]);
 }
 #endif
+
