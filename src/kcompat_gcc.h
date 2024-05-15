@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2023 Intel Corporation */
+/* Copyright (C) 2013-2024 Intel Corporation */
 
 #ifndef _KCOMPAT_GCC_H_
 #define _KCOMPAT_GCC_H_
@@ -27,6 +27,19 @@
 #else
 # define fallthrough do {} while (0)  /* fallthrough */
 #endif /* __has_attribute */
+
+/*
+ * upstream commit 4eb6bd55cfb2 ("compiler.h: drop fallback overflow checkers")
+ * removed bunch of code for builitin overflow fallback implementations, that
+ * we need for gcc prior to 5.1
+ */
+#if !GCC_IS_BELOW(50100)
+#ifndef COMPILER_HAS_GENERIC_BUILTIN_OVERFLOW
+#define COMPILER_HAS_GENERIC_BUILTIN_OVERFLOW	1
+#endif
+#endif /* GCC_VERSION >= 50100 */
+
+#include "kcompat_overflow.h"
 
 /* Backport macros for controlling GCC diagnostics */
 #if ( LINUX_VERSION_CODE < KERNEL_VERSION(4,18,0) )

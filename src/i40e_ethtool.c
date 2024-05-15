@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2023 Intel Corporation */
+/* Copyright (C) 2013-2024 Intel Corporation */
 
 /* ethtool support for i40e */
 
@@ -1032,6 +1032,7 @@ static int i40e_get_link_ksettings(struct net_device *netdev,
 	ethtool_link_ksettings_zero_link_mode(ks, supported);
 	ethtool_link_ksettings_zero_link_mode(ks, advertising);
 
+	i40e_trace(ioctl_get_link_ksettings, pf, hw_link_info->link_info);
 	if (link_up)
 		i40e_get_settings_link_up(hw, ks, netdev, pf);
 	else
@@ -2389,12 +2390,12 @@ static void i40e_get_drvinfo(struct net_device *netdev,
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_pf *pf = vsi->back;
 
-	strlcpy(drvinfo->driver, i40e_driver_name, sizeof(drvinfo->driver));
-	strlcpy(drvinfo->version, i40e_driver_version_str,
+	strscpy(drvinfo->driver, i40e_driver_name, sizeof(drvinfo->driver));
+	strscpy(drvinfo->version, i40e_driver_version_str,
 		sizeof(drvinfo->version));
-	strlcpy(drvinfo->fw_version, i40e_nvm_version_str(&pf->hw),
+	strscpy(drvinfo->fw_version, i40e_nvm_version_str(&pf->hw),
 		sizeof(drvinfo->fw_version));
-	strlcpy(drvinfo->bus_info, pci_name(pf->pdev),
+	strscpy(drvinfo->bus_info, pci_name(pf->pdev),
 		sizeof(drvinfo->bus_info));
 #ifdef HAVE_ETHTOOL_GET_SSET_COUNT
 	drvinfo->n_priv_flags = I40E_PRIV_FLAGS_STR_LEN;
@@ -2583,10 +2584,12 @@ static int i40e_set_ringparam(struct net_device *netdev,
 			 */
 			rx_rings[i].desc = NULL;
 			rx_rings[i].rx_bi = NULL;
+#ifdef HAVE_XDP_SUPPORT
 #ifdef HAVE_XDP_BUFF_RXQ
 			/* Clear cloned XDP RX-queue info before setup call */
 			memset(&rx_rings[i].xdp_rxq, 0,
 			       sizeof(rx_rings[i].xdp_rxq));
+#endif
 #endif
 			/* this is to allow wr32 to have something to write to
 			 * during early allocation of Rx buffers
@@ -6558,22 +6561,25 @@ static u32 i40e_get_rxfh_indir_size(struct net_device *netdev)
 	return I40E_HLUT_ARRAY_SIZE;
 }
 
+#ifdef HAVE_RXFH_HASHFUNC
+#ifdef HAVE_ETHTOOL_RXFH_PARAM
 /**
- * i40e_get_rxfh - get the rx flow hash indirection table
+ * i40e_get_rxfh - Get the Rx flow hash indirection table.
  * @netdev: network interface device structure
- * @indir: indirection table
- * @key: hash key
- * @hfunc: hash function
+ * @rxfh: pointer to param struct (indir, key, hfunc)
  *
  * Reads the indirection table directly from the hardware. Returns 0 on
  * success.
- **/
-#ifdef HAVE_RXFH_HASHFUNC
-static int i40e_get_rxfh(struct net_device *netdev, u32 *indir, u8 *key,
-			 u8 *hfunc)
+ */
+static int
+i40e_get_rxfh(struct net_device *netdev, struct ethtool_rxfh_param *rxfh)
+#else
+static int
+i40e_get_rxfh(struct net_device *netdev, u32 *indir, u8 *key, u8 *hfunc)
+#endif /* HAVE_ETHTOOL_RXFH_PARAM */
 #else
 static int i40e_get_rxfh(struct net_device *netdev, u32 *indir, u8 *key)
-#endif
+#endif /* HAVE_RXFH_HASHFUNC */
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_vsi *vsi = np->vsi;
@@ -6582,22 +6588,40 @@ static int i40e_get_rxfh(struct net_device *netdev, u32 *indir, u8 *key)
 	u16 i;
 
 #ifdef HAVE_RXFH_HASHFUNC
+#ifdef HAVE_ETHTOOL_RXFH_PARAM
+	rxfh->hfunc = ETH_RSS_HASH_TOP;
+#else
 	if (hfunc)
 		*hfunc = ETH_RSS_HASH_TOP;
+#endif /* HAVE_ETHTOOL_RXFH_PARAM */
+#endif /* HAVE_RXFH_HASHFUNC */
 
-#endif
+#ifdef HAVE_ETHTOOL_RXFH_PARAM
+	if (!rxfh->indir)
+#else
 	if (!indir)
+#endif /* HAVE_ETHTOOL_RXFH_PARAM */
 		return 0;
 
+#ifdef HAVE_ETHTOOL_RXFH_PARAM
+	seed = rxfh->key;
+#else
 	seed = key;
+#endif /* HAVE_ETHTOOL_RXFH_PARAM */
 	lut = (u8 *)kzalloc(I40E_HLUT_ARRAY_SIZE, GFP_KERNEL);
 	if (!lut)
 		return -ENOMEM;
+
 	ret = i40e_get_rss(vsi, seed, lut, I40E_HLUT_ARRAY_SIZE);
 	if (ret)
 		goto out;
+
 	for (i = 0; i < I40E_HLUT_ARRAY_SIZE; i++)
+#ifdef HAVE_ETHTOOL_RXFH_PARAM
+		rxfh->indir[i] = (u32)(lut[i]);
+#else
 		indir[i] = (u32)(lut[i]);
+#endif /* HAVE_ETHTOOL_RXFH_PARAM */
 
 out:
 	kfree(lut);
@@ -6605,26 +6629,30 @@ out:
 	return ret;
 }
 
+#ifdef HAVE_RXFH_HASHFUNC
+#ifdef HAVE_ETHTOOL_RXFH_PARAM
 /**
  * i40e_set_rxfh - set the rx flow hash indirection table
+ * i40e_set_rxfh - Set the Rx flow hash indirection table.
  * @netdev: network interface device structure
- * @indir: indirection table
- * @key: hash key
- * @hfunc: hash function to use
+ * @rxfh: pointer to param struct (indir, key, hfunc)
+ * @extack: extended ACK from the Netlink message
  *
- * Returns -EINVAL if the table specifies an invalid queue id, otherwise
+ * Returns -EINVAL if the table specifies an invalid queue ID, otherwise
  * returns 0 after programming the table.
- **/
-#ifdef HAVE_RXFH_HASHFUNC
+ */
+static int
+i40e_set_rxfh(struct net_device *netdev, struct ethtool_rxfh_param *rxfh,
+	      struct netlink_ext_ack *extack)
+#else
 static int i40e_set_rxfh(struct net_device *netdev, const u32 *indir,
 			 const u8 *key, const u8 hfunc)
-#else
-#ifdef HAVE_RXFH_NONCONST
+#endif /* HAVE_ETHTOOL_RXFH_PARAM */
+#elif defined(HAVE_RXFH_NONCONST)
 static int i40e_set_rxfh(struct net_device *netdev, u32 *indir, u8 *key)
 #else
 static int i40e_set_rxfh(struct net_device *netdev, const u32 *indir,
 			 const u8 *key)
-#endif /* HAVE_RXFH_NONCONST */
 #endif /* HAVE_RXFH_HASHFUNC */
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
@@ -6634,26 +6662,48 @@ static int i40e_set_rxfh(struct net_device *netdev, const u32 *indir,
 	u16 i;
 
 #ifdef HAVE_RXFH_HASHFUNC
+#ifdef HAVE_ETHTOOL_RXFH_PARAM
+	if (rxfh->hfunc != ETH_RSS_HASH_NO_CHANGE &&
+	    rxfh->hfunc != ETH_RSS_HASH_TOP)
+		return -EOPNOTSUPP;
+#else
 	if (hfunc != ETH_RSS_HASH_NO_CHANGE && hfunc != ETH_RSS_HASH_TOP)
 		return -EOPNOTSUPP;
-#endif
+#endif /* HAVE_ETHTOOL_RXFH_PARAM */
+#endif /* HAVE_RXFH_HASHFUNC */
 
 	/* Verify user input. */
+#ifdef HAVE_ETHTOOL_RXFH_PARAM
+	if (rxfh->indir) {
+#else
 	if (indir) {
+#endif /* HAVE_ETHTOOL_RXFH_PARAM */
 		for (i = 0; i < I40E_HLUT_ARRAY_SIZE; i++) {
+#ifdef HAVE_ETHTOOL_RXFH_PARAM
+			if (rxfh->indir[i] >= vsi->rss_size)
+#else
 			if (indir[i] >= vsi->rss_size)
+#endif /* HAVE_ETHTOOL_RXFH_PARAM */
 				return -EINVAL;
 		}
 	}
 
+#ifdef HAVE_ETHTOOL_RXFH_PARAM
+	if (rxfh->key) {
+#else
 	if (key) {
+#endif /* HAVE_ETHTOOL_RXFH_PARAM */
 		if (!vsi->rss_hkey_user) {
 			vsi->rss_hkey_user = (u8 *)
 				kzalloc(I40E_HKEY_ARRAY_SIZE, GFP_KERNEL);
 			if (!vsi->rss_hkey_user)
 				return -ENOMEM;
 		}
+#ifdef HAVE_ETHTOOL_RXFH_PARAM
+		memcpy(vsi->rss_hkey_user, rxfh->key, I40E_HKEY_ARRAY_SIZE);
+#else
 		memcpy(vsi->rss_hkey_user, key, I40E_HKEY_ARRAY_SIZE);
+#endif /* HAVE_ETHTOOL_RXFH_PARAM */
 		seed = vsi->rss_hkey_user;
 	}
 	if (!vsi->rss_lut_user) {
@@ -6664,9 +6714,18 @@ static int i40e_set_rxfh(struct net_device *netdev, const u32 *indir,
 	}
 
 	/* Each 32 bits pointed by 'indir' is stored with a lut entry */
+
+#ifdef HAVE_ETHTOOL_RXFH_PARAM
+	if (rxfh->indir)
+#else
 	if (indir)
+#endif /* HAVE_ETHTOOL_RXFH_PARAM */
 		for (i = 0; i < I40E_HLUT_ARRAY_SIZE; i++)
+#ifdef HAVE_ETHTOOL_RXFH_PARAM
+			vsi->rss_lut_user[i] = (u8)(rxfh->indir[i]);
+#else
 			vsi->rss_lut_user[i] = (u8)(indir[i]);
+#endif /* HAVE_ETHTOOL_RXFH_PARAM */
 	else
 		i40e_fill_rss_lut(pf, vsi->rss_lut_user, I40E_HLUT_ARRAY_SIZE,
 				  vsi->rss_size);
@@ -7078,9 +7137,12 @@ static int i40e_get_module_info(struct net_device *netdev,
 		modinfo->eeprom_len = I40E_MODULE_QSFP_MAX_LEN;
 		break;
 	default:
-		netdev_err(vsi->netdev, "SFP module type unrecognized or no SFP connector.\n");
-		return -EINVAL;
+		i40e_trace(ioctl_get_module_info, pf, ~0UL);
+		netdev_dbg(vsi->netdev, "SFP module type unrecognized or no SFP connector used.\n");
+		return -EOPNOTSUPP;
 	}
+	i40e_trace(ioctl_get_module_info, pf, (((u64)modinfo->type) << 32) |
+		   modinfo->eeprom_len);
 	return 0;
 }
 
@@ -7103,6 +7165,7 @@ static int i40e_get_module_eeprom(struct net_device *netdev,
 	u32 value = 0;
 	int i;
 
+	i40e_trace(ioctl_get_module_eeprom, pf, ee ? ee->len : 0U);
 	if (!ee || !ee->len || !data)
 		return -EINVAL;
 
@@ -7139,7 +7202,7 @@ static int i40e_get_module_eeprom(struct net_device *netdev,
 #endif /* ETHTOOL_GMODULEINFO */
 
 #ifdef ETHTOOL_GEEE
-static int i40e_get_eee(struct net_device *netdev, struct ethtool_eee *edata)
+static int i40e_get_keee(struct net_device *netdev, struct ethtool_keee *edata)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_aq_get_phy_abilities_resp phy_cfg;
@@ -7159,27 +7222,43 @@ static int i40e_get_eee(struct net_device *netdev, struct ethtool_eee *edata)
 	if (phy_cfg.eee_capability == 0)
 		return -EOPNOTSUPP;
 
-	edata->supported = SUPPORTED_Autoneg;
-	edata->lp_advertised = edata->supported;
+	edata->supported_u32 = SUPPORTED_Autoneg;
+	edata->lp_advertised_u32 = edata->supported_u32;
 
 	/* Get current configuration */
 	status = i40e_aq_get_phy_capabilities(hw, false, false, &phy_cfg, NULL);
 	if (status)
 		return -EAGAIN;
 
-	edata->advertised = phy_cfg.eee_capability ? SUPPORTED_Autoneg : 0U;
-	edata->eee_enabled = !!edata->advertised;
+	edata->advertised_u32 = phy_cfg.eee_capability ? SUPPORTED_Autoneg : 0U;
+	edata->eee_enabled = !!edata->advertised_u32;
 	edata->tx_lpi_enabled = pf->stats.tx_lpi_status;
 
 	edata->eee_active = pf->stats.tx_lpi_status && pf->stats.rx_lpi_status;
 
 	return 0;
 }
+
+#ifndef HAVE_ETHTOOL_KEEE
+static int i40e_get_eee(struct net_device *netdev, struct ethtool_eee *edata)
+{
+	struct ethtool_keee kedata;
+	int ret;
+
+	eee_to_keee(&kedata, edata);
+	ret = i40e_get_keee(netdev, &kedata);
+	keee_to_eee(edata, &kedata);
+
+	return ret;
+}
+#endif /* !HAVE_ETHTOOL_KEEE */
 #endif /* ETHTOOL_GEEE */
 
 #ifdef ETHTOOL_SEEE
-static int i40e_is_eee_param_supported(struct net_device *netdev,
-				       struct ethtool_eee *edata)
+// Currently is only called using the wrapper bellow
+// to accommodate both eee and keee interfaces
+static int i40e_is_keee_param_supported(struct net_device *netdev,
+					struct ethtool_keee *edata)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_vsi *vsi = np->vsi;
@@ -7188,7 +7267,7 @@ static int i40e_is_eee_param_supported(struct net_device *netdev,
 		u32 value;
 		const char *name;
 	} param[] = {
-		{edata->advertised & ~SUPPORTED_Autoneg, "advertise"},
+		{edata->advertised_u32 & ~SUPPORTED_Autoneg, "advertise"},
 		{edata->tx_lpi_timer, "tx-timer"},
 		{edata->tx_lpi_enabled != pf->stats.tx_lpi_status, "tx-lpi"}
 	};
@@ -7206,7 +7285,24 @@ static int i40e_is_eee_param_supported(struct net_device *netdev,
 	return 0;
 }
 
-static int i40e_set_eee(struct net_device *netdev, struct ethtool_eee *edata)
+static int i40e_is_eee_param_supported(struct net_device *netdev,
+				       struct ethtool_keee *kedata)
+{
+#ifdef HAVE_ETHTOOL_KEEE
+	return i40e_is_keee_param_supported(netdev, kedata);
+#else
+	struct ethtool_eee edata;
+	int ret;
+
+	keee_to_eee(&edata, kedata);
+	ret = i40e_is_keee_param_supported(netdev, kedata);
+	eee_to_keee(kedata, &edata);
+
+	return ret;
+#endif /* HAVE_ETHTOOL_KEEE */
+}
+
+static int i40e_set_keee(struct net_device *netdev, struct ethtool_keee *edata)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_aq_get_phy_abilities_resp abilities;
@@ -7269,6 +7365,20 @@ static int i40e_set_eee(struct net_device *netdev, struct ethtool_eee *edata)
 
 	return 0;
 }
+
+#ifndef HAVE_ETHTOOL_KEEE
+static int i40e_set_eee(struct net_device *netdev, struct ethtool_eee *edata)
+{
+	struct ethtool_keee kedata;
+	int ret;
+
+	eee_to_keee(&kedata, edata);
+	ret = i40e_set_keee(netdev, &kedata);
+	keee_to_eee(edata, &kedata);
+
+	return ret;
+}
+#endif /* !HAVE_ETHTOOL_KEEE */
 #endif /* ETHTOOL_SEEE */
 
 #ifdef ETHTOOL_RESET
@@ -7353,10 +7463,18 @@ static const struct ethtool_ops i40e_ethtool_ops = {
 	.get_strings		= i40e_get_strings,
 #ifndef HAVE_RHEL6_ETHTOOL_OPS_EXT_STRUCT
 #ifdef ETHTOOL_GEEE
+#ifdef HAVE_ETHTOOL_KEEE
+	.get_eee		= i40e_get_keee,
+#else
 	.get_eee		= i40e_get_eee,
+#endif /* HAVE_ETHTOOL_KEEE */
 #endif /* ETHTOOL_GEEE */
 #ifdef ETHTOOL_SEEE
+#ifdef HAVE_ETHTOOL_KEEE
+	.set_eee		= i40e_set_keee,
+#else
 	.set_eee		= i40e_set_eee,
+#endif /* HAVE_ETHTOOL_KEEE */
 #endif /* ETHTOOL_SEEE */
 #ifdef HAVE_ETHTOOL_SET_PHYS_ID
 	.set_phys_id		= i40e_set_phys_id,

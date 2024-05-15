@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2023 Intel Corporation */
+/* Copyright (C) 2013-2024 Intel Corporation */
 
 #include "kcompat.h"
 #include "kcompat_vfd.h"
@@ -155,7 +155,7 @@ static int __parse_bool_data(struct pci_dev *pdev, const char *buff,
  */
 static int __parse_egress_ingress_input(struct pci_dev *pdev, const char *buff,
 					const char *attr_name, int *data_new,
-					int *data_old)
+					const int *data_old)
 {
 	int ret = 0;
 	char *p;
@@ -246,7 +246,7 @@ static int __parse_add_rem_bitmap(struct pci_dev *pdev, const char *buff,
 		dev_err(&pdev->dev, "set %s: invalid input string", attr_name);
 		return -EINVAL;
 	}
-	return 0;
+	return ret;
 }
 
 /**
@@ -264,7 +264,7 @@ static int __parse_promisc_input(const char *buff, size_t count,
 	size_t idx = 0;
 
 	/* Remove start spaces */
-	while (buff[idx] == ' ' && idx < count)
+	while (idx < count && buff[idx] == ' ')
 		idx++;
 
 	/* Parse cmd */
@@ -282,7 +282,7 @@ static int __parse_promisc_input(const char *buff, size_t count,
 		return -EINVAL;
 
 	/* Remove spaces between cmd */
-	while (buff[idx] == ' ' && idx < count)
+	while (idx < count && buff[idx] == ' ')
 		idx++;
 
 	/* Parse subcmd */

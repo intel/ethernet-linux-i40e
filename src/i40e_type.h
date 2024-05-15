@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2023 Intel Corporation */
+/* Copyright (C) 2013-2024 Intel Corporation */
 
 #ifndef _I40E_TYPE_H_
 #define _I40E_TYPE_H_
@@ -1329,6 +1329,7 @@ struct i40e_hw_port_stats {
 	u64 rx_undersize;		/* ruc */
 	u64 rx_fragments;		/* rfc */
 	u64 rx_oversize;		/* roc */
+	u64 rx_err1;			/* rxerr1 */
 	u64 rx_jabber;			/* rjc */
 	u64 tx_size_64;			/* ptc64 */
 	u64 tx_size_127;		/* ptc127 */
@@ -1542,6 +1543,10 @@ struct i40e_lldp_variables {
 #define I40E_ALT_BW_VALUE_MASK		0xFF
 #define I40E_ALT_BW_RELATIVE_MASK	0x40000000
 #define I40E_ALT_BW_VALID_MASK		0x80000000
+
+/* Alternate Ram Trace Buffer*/
+#define I40E_ALT_CANARY			0xABCDEFAB
+#define I40E_ALT_BUFF_DWORD_SIZE	0x14 /* in dwords */
 
 /* RSS Hash Table Size */
 #define I40E_PFQF_CTL_0_HASHLUTSIZE_512	0x00010000

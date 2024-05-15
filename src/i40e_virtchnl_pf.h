@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2023 Intel Corporation */
+/* Copyright (C) 2013-2024 Intel Corporation */
 
 #ifndef _I40E_VIRTCHNL_PF_H_
 #define _I40E_VIRTCHNL_PF_H_
@@ -159,9 +159,9 @@ struct i40e_vf {
 	u8 bw_share;
 	bool bw_share_applied; /* true if config is applied to the device */
 	bool tc_bw_share_req;
-	bool pf_ctrl_disable; /* bool for PF ctrl of VF enable/disable */
 	u8 queue_type;
 	bool allow_bcast;
+	bool is_disabled_from_host; /* bool for PF ctrl of VF enable/disable */
 	/* VLAN list created by VM for trusted and untrusted VF */
 	struct list_head vm_vlan_list;
 	/* MAC list created by VM */
@@ -184,6 +184,7 @@ int i40e_alloc_vfs(struct i40e_pf *pf, u16 num_alloc_vfs);
 int i40e_vc_process_vf_msg(struct i40e_pf *pf, s16 vf_id, u32 v_opcode,
 			   u32 v_retval, u8 *msg, u16 msglen);
 int i40e_vc_process_vflr_event(struct i40e_pf *pf);
+void i40e_vc_reset_vf(struct i40e_vf *vf, bool notify_vf);
 bool i40e_reset_vf(struct i40e_vf *vf, bool flr);
 bool i40e_reset_all_vfs(struct i40e_pf *pf, bool flr);
 void i40e_vc_notify_vf_reset(struct i40e_vf *vf);

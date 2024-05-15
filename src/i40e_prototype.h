@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2023 Intel Corporation */
+/* Copyright (C) 2013-2024 Intel Corporation */
 
 #ifndef _I40E_PROTOTYPE_H_
 #define _I40E_PROTOTYPE_H_
@@ -215,7 +215,7 @@ i40e_status i40e_aq_set_switch_config(struct i40e_hw *hw,
 i40e_status i40e_aq_request_resource(struct i40e_hw *hw,
 				enum i40e_aq_resources_ids resource,
 				enum i40e_aq_resource_access_type access,
-				u8 sdp_number, u64 *timeout,
+				u8 sdp_number, u32 *timeout,
 				struct i40e_asq_cmd_details *cmd_details);
 i40e_status i40e_aq_release_resource(struct i40e_hw *hw,
 				enum i40e_aq_resources_ids resource,
@@ -382,6 +382,8 @@ i40e_status i40e_aq_replace_cloud_filters(struct i40e_hw *hw,
 i40e_status i40e_aq_alternate_read(struct i40e_hw *hw,
 				u32 reg_addr0, u32 *reg_val0,
 				u32 reg_addr1, u32 *reg_val1);
+i40e_status i40e_aq_alternate_read_indirect(struct i40e_hw *hw,
+				u32 addr, u32 dw_count, void *buffer);
 /* i40e_common */
 i40e_status i40e_init_shared_code(struct i40e_hw *hw);
 i40e_status i40e_pf_reset(struct i40e_hw *hw);
@@ -403,9 +405,14 @@ void i40e_pre_tx_queue_cfg(struct i40e_hw *hw, u32 queue, bool enable);
 i40e_status i40e_init_nvm(struct i40e_hw *hw);
 i40e_status i40e_acquire_nvm(struct i40e_hw *hw,
 				      enum i40e_aq_resource_access_type access);
+i40e_status i40e_acquire_nvm_ex(struct i40e_hw *hw,
+				       enum i40e_aq_resource_access_type access,
+					   u32 custom_timeout);
 void i40e_release_nvm(struct i40e_hw *hw);
 i40e_status i40e_read_nvm_word(struct i40e_hw *hw, u16 offset,
 					 u16 *data);
+i40e_status i40e_read_nvm_word_ex(struct i40e_hw *hw, u16 offset,
+					 u16 *data, u32 custom_timeout);
 enum i40e_status_code
 i40e_read_nvm_module_data(struct i40e_hw *hw, u8 module_ptr, u16 module_offset,
 			  u16 data_offset, u16 words_data_size, u16 *data_ptr);

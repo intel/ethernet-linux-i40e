@@ -1,10 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2023 Intel Corporation */
+/* Copyright (C) 2013-2024 Intel Corporation */
 
 #ifndef _I40E_HELPER_H_
 #define _I40E_HELPER_H_
 
 #include "i40e_alloc.h"
+
+void i40e_client_device_register(struct i40e_info *ldev, struct i40e_client *client);
+void i40e_client_device_unregister(struct i40e_info *ldev);
 
 /**
  * i40e_allocate_dma_mem_d - OS specific memory alloc for shared code

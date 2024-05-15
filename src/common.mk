@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-# Copyright (C) 2013-2023 Intel Corporation
+# Copyright (C) 2013-2024 Intel Corporation
 
 #
 # common Makefile rules useful for out-of-tree Linux driver builds
@@ -50,10 +50,8 @@ endif
 KSP :=  /lib/modules/${BUILD_KERNEL}/source \
         /lib/modules/${BUILD_KERNEL}/build \
         /usr/src/linux-${BUILD_KERNEL} \
-        /usr/src/linux-$(${BUILD_KERNEL} | sed 's/-.*//') \
         /usr/src/kernel-headers-${BUILD_KERNEL} \
         /usr/src/kernel-source-${BUILD_KERNEL} \
-        /usr/src/linux-$(${BUILD_KERNEL} | sed 's/\([0-9]*\.[0-9]*\)\..*/\1/') \
         /usr/src/linux \
         /usr/src/kernels/${BUILD_KERNEL} \
         /usr/src/kernels
@@ -344,7 +342,9 @@ minimum_kver_check = $(eval $(call _minimum_kver_check,${1},${2},${3}))
 # since is_kcompat_defined() is a macro, it's "computed" before any target
 # recipe, kcompat_generated_defs.h is needed prior to that, so needs to be
 # generated also via $(shell) call, which makes error handling ugly
-$(if $(shell KSRC=${KSRC} OUT=${src}/kcompat_generated_defs.h CONFFILE=${CONFIG_FILE} \
+$(if $(shell \
+    $(if $(findstring 1,${V}),,QUIET_COMPAT=1) \
+    KSRC=${KSRC} OUT=${src}/kcompat_generated_defs.h CONFFILE=${CONFIG_FILE} \
     bash ${src}/kcompat-generator.sh && echo ok), , $(error kcompat-generator.sh failed))
 
 KCOMPAT_DEFINITIONS := $(shell ${CC} ${EXTRA_CFLAGS} -E -dM \
@@ -479,7 +479,7 @@ endif
 # W -- if set, enables the W= kernel warnings options
 # C -- if set, enables the C= kernel sparse build options
 #
-kernelbuild = $(call warn_signed_modules) \
+kernelbuild = ${Q}$(call warn_signed_modules) \
               ${MAKE} $(if ${GCC_I_SYS},CC="${GCC_I_SYS}") \
                       ${CCFLAGS_VAR}="${EXTRA_CFLAGS}" \
                       -C "${KSRC}" \

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2023 Intel Corporation */
+/* Copyright (C) 2013-2024 Intel Corporation */
 
 #ifndef _I40E_TXRX_H_
 #define _I40E_TXRX_H_
@@ -466,9 +466,11 @@ struct i40e_ring {
 					 */
 
 	struct i40e_channel *ch;
+#ifdef HAVE_XDP_SUPPORT
 #ifdef HAVE_XDP_BUFF_RXQ
 	struct xdp_rxq_info xdp_rxq;
-#endif
+#endif /* HAVE_XDP_BUFF_RXQ */
+#endif /* HAVE_XDP_SUPPORT */
 
 #ifdef HAVE_AF_XDP_ZC_SUPPORT
 #ifdef HAVE_NETDEV_BPF_XSK_POOL

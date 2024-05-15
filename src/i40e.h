@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2023 Intel Corporation */
+/* Copyright (C) 2013-2024 Intel Corporation */
 
 #ifndef _I40E_H_
 #define _I40E_H_
@@ -27,6 +27,7 @@
 #include <net/ipv6.h>
 #include <net/ip6_checksum.h>
 #include "kcompat.h"
+#include <linux/filter.h>
 #ifdef HAVE_XDP_SUPPORT
 #ifdef HAVE_XDP_BUFF_RXQ
 #include <net/xdp.h>
@@ -90,6 +91,8 @@
 
 /* Useful i40e defaults */
 #define I40E_MAX_VEB			16
+
+#define I40_BYTES_PER_WORD		2
 
 #define I40E_MAX_NUM_DESCRIPTORS	4096
 #define I40E_MAX_CSR_SPACE		(4 * 1024 * 1024 - 64 * 1024)
@@ -1444,11 +1447,13 @@ bool i40e_dcb_need_reconfig(struct i40e_pf *pf,
 			    struct i40e_dcbx_config *new_cfg);
 int i40e_hw_dcb_config(struct i40e_pf *pf, struct i40e_dcbx_config *new_cfg);
 int i40e_pf_dcb_cfg(struct i40e_pf *pf, struct i40e_dcbx_config *new_cfg);
-int i40e_enable_vf_queues(struct i40e_vsi *vsi, bool enable);
 #define I40E_ETS_NON_WILLING_MODE	0
 #define I40E_ETS_WILLING_MODE		1
 int i40e_dcb_sw_default_config(struct i40e_pf *pf, u8 ets_willing);
 #endif /* CONFIG_DCB */
+#ifdef CONFIG_PCI_IOV
+int i40e_enable_vf_queues(struct i40e_vsi *vsi, bool enable);
+#endif /* CONFIG_PCI_IOV */
 #ifdef HAVE_PTP_1588_CLOCK
 void i40e_ptp_rx_hang(struct i40e_pf *pf);
 void i40e_ptp_tx_hang(struct i40e_pf *pf);

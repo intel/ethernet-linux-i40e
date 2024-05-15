@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2023 Intel Corporation */
+/* Copyright (C) 2013-2024 Intel Corporation */
 
 #ifdef HAVE_XDP_SUPPORT
 #include <linux/bpf.h>
@@ -42,15 +42,15 @@ static const char i40e_driver_string[] =
 #define DRV_VERSION_DESC ""
 
 #define DRV_VERSION_MAJOR 2
-#define DRV_VERSION_MINOR 24
-#define DRV_VERSION_BUILD 6
+#define DRV_VERSION_MINOR 25
+#define DRV_VERSION_BUILD 7
 #define DRV_VERSION_SUBBUILD 0
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
 	__stringify(DRV_VERSION_BUILD) \
 	DRV_VERSION_DESC __stringify(DRV_VERSION_LOCAL)
 const char i40e_driver_version_str[] = DRV_VERSION;
-static const char i40e_copyright[] = "Copyright (C) 2013-2023 Intel Corporation";
+static const char i40e_copyright[] = "Copyright (C) 2013-2024 Intel Corporation";
 
 /* a bit of forward declarations */
 static void i40e_vsi_reinit_locked(struct i40e_vsi *vsi);
@@ -2533,6 +2533,7 @@ void i40e_aqc_add_filters(struct i40e_vsi *vsi, const char *vsi_name,
 	struct i40e_hw *hw = &vsi->back->hw;
 	enum i40e_admin_queue_err aq_status;
 	int fcnt;
+	const char *msg;
 
 	i40e_aq_add_macvlan_v2(hw, vsi->seid, list, num_add, NULL, &aq_status);
 	fcnt = i40e_update_filter_state(num_add, list, add_head);
@@ -2540,9 +2541,12 @@ void i40e_aqc_add_filters(struct i40e_vsi *vsi, const char *vsi_name,
 	if (fcnt != num_add) {
 		if (vsi->type == I40E_VSI_MAIN) {
 			set_bit(__I40E_VSI_OVERFLOW_PROMISC, vsi->state);
+			msg = aq_status == I40E_AQ_RC_ENOSPC ?
+				"from f/w reports no space" :
+				i40e_aq_str(hw, aq_status);
 			dev_warn(&vsi->back->pdev->dev,
 				 "Error %s adding RX filters on %s, promiscuous mode forced on\n",
-				 i40e_aq_str(hw, aq_status), vsi_name);
+				 msg, vsi_name);
 		} else if (vsi->type == I40E_VSI_SRIOV ||
 			   vsi->type == I40E_VSI_VMDQ1 ||
 			   vsi->type == I40E_VSI_VMDQ2) {
@@ -2576,6 +2580,7 @@ i40e_aqc_broadcast_filter(struct i40e_vsi *vsi, const char *vsi_name,
 	bool enable = f->state == I40E_FILTER_NEW;
 	struct i40e_hw *hw = &vsi->back->hw;
 	i40e_status aq_ret;
+	const char *msg;
 
 	if (f->vlan == I40E_VLAN_ANY) {
 		aq_ret = i40e_aq_set_vsi_broadcast(hw,
@@ -2592,9 +2597,12 @@ i40e_aqc_broadcast_filter(struct i40e_vsi *vsi, const char *vsi_name,
 
 	if (aq_ret) {
 		set_bit(__I40E_VSI_OVERFLOW_PROMISC, vsi->state);
+		msg = hw->aq.asq_last_status == I40E_AQ_RC_ENOSPC ?
+			"from f/w reports no space" :
+			i40e_aq_str(hw, hw->aq.asq_last_status);
 		dev_warn(&vsi->back->pdev->dev,
 			 "Error %s, forcing overflow promiscuous on %s\n",
-			 i40e_aq_str(hw, hw->aq.asq_last_status),
+			 msg,
 			 vsi_name);
 	}
 
@@ -4995,9 +5003,6 @@ int i40e_vsi_request_irq_msix(struct i40e_vsi *vsi, char *basename)
 	int tx_int_idx = 0;
 	int vector, err;
 	int irq_num;
-#ifdef HAVE_IRQ_AFFINITY_HINT
-	int cpu;
-#endif
 
 	for (vector = 0; vector < q_vectors; vector++) {
 		struct i40e_q_vector *q_vector = vsi->q_vectors[vector];
@@ -5035,16 +5040,6 @@ int i40e_vsi_request_irq_msix(struct i40e_vsi *vsi, char *basename)
 		q_vector->affinity_notify.release = i40e_irq_affinity_release;
 		irq_set_affinity_notifier(irq_num, &q_vector->affinity_notify);
 #endif
-#ifdef HAVE_IRQ_AFFINITY_HINT
-		/* Spread affinity hints out across online CPUs.
-		 *
-		 * get_cpu_mask returns a static constant mask with
-		 * a permanent lifetime so it's ok to pass to
-		 * irq_set_affinity_hint without making a copy.
-		 */
-		cpu = cpumask_local_spread(q_vector->v_idx, -1);
-		irq_set_affinity_hint(irq_num, get_cpu_mask(cpu));
-#endif /* HAVE_IRQ_AFFINITY_HINT */
 	}
 
 	vsi->irqs_ready = true;
@@ -5056,9 +5051,6 @@ free_queue_irqs:
 		irq_num = pf->msix_entries[base + vector].vector;
 #ifdef HAVE_IRQ_AFFINITY_NOTIFY
 		irq_set_affinity_notifier(irq_num, NULL);
-#endif
-#ifdef HAVE_IRQ_AFFINITY_HINT
-		irq_set_affinity_hint(irq_num, NULL);
 #endif
 		free_irq(irq_num, &vsi->q_vectors[vector]);
 	}
@@ -5877,10 +5869,6 @@ static void i40e_vsi_free_irq(struct i40e_vsi *vsi)
 #ifdef HAVE_IRQ_AFFINITY_NOTIFY
 			/* clear the affinity notifier in the IRQ descriptor */
 			irq_set_affinity_notifier(irq_num, NULL);
-#endif
-#ifdef HAVE_IRQ_AFFINITY_HINT
-			/* remove our suggested affinity mask for this IRQ */
-			irq_set_affinity_hint(irq_num, NULL);
 #endif
 			synchronize_irq(irq_num);
 			free_irq(irq_num, vsi->q_vectors[i]);
@@ -7580,6 +7568,45 @@ out:
 }
 
 #endif /* CONFIG_DCB */
+
+static void i40e_check_eee(struct i40e_vsi *vsi, struct ethtool_keee *kedata,
+			   const char *speed, const char *fc)
+{
+#ifndef HAVE_ETHTOOL_KEEE
+	struct ethtool_eee edata;
+
+	keee_to_eee(&edata, kedata);
+#endif /* HAVE_ETHTOOL_KEEE */
+
+	if (vsi->netdev->ethtool_ops->get_eee)
+#ifdef HAVE_ETHTOOL_KEEE
+		vsi->netdev->ethtool_ops->get_eee(vsi->netdev, kedata);
+#else
+		vsi->netdev->ethtool_ops->get_eee(vsi->netdev, &edata);
+#endif /* HAVE_ETHTOOL_KEEE */
+
+#ifdef HAVE_ETHTOOL_KEEE
+	if (kedata->supported_u32)
+#else
+	if (edata.supported)
+#endif /* HAVE_ETHTOOL_KEEE */
+		netdev_info(vsi->netdev,
+			    "NIC Link is Up, %sbps Full Duplex, Flow Control: %s, EEE: %s\n",
+			    speed, fc,
+#ifdef HAVE_ETHTOOL_KEEE
+			    kedata->eee_enabled ? "Enabled" : "Disabled");
+#else
+			    edata.eee_enabled ? "Enabled" : "Disabled");
+#endif /* HAVE_ETHTOOL_KEEE */
+	else
+		netdev_info(vsi->netdev,
+			    "NIC Link is Up, %sbps Full Duplex, Flow Control: %s\n",
+			    speed, fc);
+#ifndef HAVE_ETHTOOL_KEEE
+	eee_to_keee(kedata, &edata);
+#endif /* HAVE_ETHTOOL_KEEE */
+}
+
 #define SPEED_SIZE 14
 #define FC_SIZE 8
 /**
@@ -7724,22 +7751,12 @@ void i40e_print_link_message(struct i40e_vsi *vsi, bool isup)
 			    "NIC Link is Up, %sbps Full Duplex, Requested FEC: %s, Negotiated FEC: %s, Autoneg: %s, Flow Control: %s\n",
 			    speed, req_fec, fec, an, fc);
 	} else {
-		struct ethtool_eee edata;
+		struct ethtool_keee edata;
 
-		edata.supported = 0;
+		edata.supported_u32 = 0;
 		edata.eee_enabled = false;
-		if (vsi->netdev->ethtool_ops->get_eee)
-			vsi->netdev->ethtool_ops->get_eee(vsi->netdev, &edata);
 
-		if (edata.supported)
-			netdev_info(vsi->netdev,
-				    "NIC Link is Up, %sbps Full Duplex, Flow Control: %s, EEE: %s\n",
-				    speed, fc,
-				    edata.eee_enabled ? "Enabled" : "Disabled");
-		else
-			netdev_info(vsi->netdev,
-				    "NIC Link is Up, %sbps Full Duplex, Flow Control: %s\n",
-				    speed, fc);
+		i40e_check_eee(vsi, &edata, speed, fc);
 	}
 
 }
@@ -11527,7 +11544,7 @@ static void i40e_send_version(struct i40e_pf *pf)
 	dv.minor_version = DRV_VERSION_MINOR;
 	dv.build_version = DRV_VERSION_BUILD;
 	dv.subbuild_version = DRV_VERSION_SUBBUILD;
-	strlcpy(dv.driver_string, DRV_VERSION, sizeof(dv.driver_string));
+	strscpy(dv.driver_string, DRV_VERSION, sizeof(dv.driver_string));
 	i40e_aq_send_driver_version(&pf->hw, &dv, NULL);
 }
 
@@ -11608,7 +11625,7 @@ static void i40e_rebuild(struct i40e_pf *pf, bool reinit, bool lock_acquired)
 	const bool is_recovery_mode_reported = i40e_check_recovery_mode(pf);
 	struct i40e_vsi *vsi = pf->vsi[pf->lan_vsi];
 	struct i40e_hw *hw = &pf->hw;
-	i40e_status ret;
+	i40e_status ret = I40E_SUCCESS;
 	u32 val;
 	int v;
 
@@ -11982,6 +11999,21 @@ static void i40e_print_vf_rx_mdd_event(struct i40e_pf *pf, struct i40e_vf *vf)
 }
 
 /**
+ * i40e_print_vf_tx_mdd_event - print VF Tx malicious driver detect event
+ * @pf: board private structure
+ * @vf: pointer to the VF structure
+ */
+static void i40e_print_vf_tx_mdd_event(struct i40e_pf *pf, struct i40e_vf *vf)
+{
+	dev_err(&pf->pdev->dev, "%lld Tx Malicious Driver Detection events detected on PF %d VF %d MAC %pm. mdd-auto-reset-vfs=%s\n",
+		vf->mdd_tx_events.count,
+		pf->hw.pf_id,
+		vf->vf_id,
+		vf->default_lan_addr.addr,
+		(I40E_FLAG_MDD_AUTO_RESET_VF & pf->flags) ? "on" : "off");
+}
+
+/**
  * i40e_print_vfs_mdd_events - print VFs malicious driver detect event
  * @pf: pointer to the PF structure
  *
@@ -11989,7 +12021,6 @@ static void i40e_print_vf_rx_mdd_event(struct i40e_pf *pf, struct i40e_vf *vf)
  */
 static void i40e_print_vfs_mdd_events(struct i40e_pf *pf)
 {
-	struct i40e_vf *vf;
 	unsigned int i;
 
 	/* check that there are pending MDD events to print */
@@ -12003,22 +12034,27 @@ static void i40e_print_vfs_mdd_events(struct i40e_pf *pf)
 	pf->last_printed_mdd_jiffies = jiffies;
 
 	for (i = 0; i < pf->num_alloc_vfs; i++) {
-		vf = &pf->vf[i];
+		struct i40e_vf *vf = &pf->vf[i];
+		bool is_printed = false;
+
 		/* only print Rx MDD event message if there are new events */
 		if (vf->mdd_rx_events.count != vf->mdd_rx_events.last_printed) {
 			vf->mdd_rx_events.last_printed = vf->mdd_rx_events.count;
 			i40e_print_vf_rx_mdd_event(pf, vf);
+			is_printed = true;
 		}
 
 		/* only print Tx MDD event message if there are new events */
 		if (vf->mdd_tx_events.count != vf->mdd_tx_events.last_printed) {
 			vf->mdd_tx_events.last_printed = vf->mdd_tx_events.count;
-			dev_err(&pf->pdev->dev, "%lld Tx Malicious Driver Detection events detected on PF %d VF %d MAC %pM.\n",
-				vf->mdd_tx_events.count,
-				pf->hw.pf_id,
-				vf->vf_id,
-				vf->default_lan_addr.addr);
+			i40e_print_vf_tx_mdd_event(pf, vf);
+			is_printed = true;
 		}
+
+		if (is_printed && !(I40E_FLAG_MDD_AUTO_RESET_VF & pf->flags))
+			dev_info(&pf->pdev->dev,
+				 "Use PF Control I/F to re-enable the VF #%d\n",
+				 i);
 	}
 }
 
@@ -12093,6 +12129,9 @@ static void i40e_handle_mdd_event(struct i40e_pf *pf)
 
 	/* see if one of the VFs needs its hand slapped */
 	for (i = 0; i < pf->num_alloc_vfs && mdd_detected; i++) {
+		bool is_mdd_on_tx = false;
+		bool is_mdd_on_rx = false;
+
 		vf = &(pf->vf[i]);
 		reg = rd32(hw, I40E_VP_MDET_TX(i));
 		if (reg & I40E_VP_MDET_TX_VALID_MASK) {
@@ -12100,6 +12139,7 @@ static void i40e_handle_mdd_event(struct i40e_pf *pf)
 			wr32(hw, I40E_VP_MDET_TX(i), 0xFFFF);
 			vf->mdd_tx_events.count++;
 			set_bit(I40E_VF_STATE_DISABLED, &vf->vf_states);
+			is_mdd_on_tx = true;
 		}
 
 		reg = rd32(hw, I40E_VP_MDET_RX(i));
@@ -12107,23 +12147,21 @@ static void i40e_handle_mdd_event(struct i40e_pf *pf)
 			set_bit(__I40E_MDD_VF_PRINT_PENDING, pf->state);
 			wr32(hw, I40E_VP_MDET_RX(i), 0xFFFF);
 			vf->mdd_rx_events.count++;
-			dev_info(&pf->pdev->dev, "RX driver issue detected on VF %d\n",
-				 i);
-			dev_info(&pf->pdev->dev,
-				 "Use PF Control I/F to re-enable the VF\n");
 			set_bit(I40E_VF_STATE_DISABLED, &vf->vf_states);
+			is_mdd_on_rx = true;
+		}
 
-			if (pf->flags & I40E_FLAG_MDD_AUTO_RESET_VF) {
-				/* VF MDD event counters will be cleared by
-				 * reset, so print the event prior to reset.
-				 */
+		if ((is_mdd_on_tx || is_mdd_on_rx) &&
+		    pf->flags & I40E_FLAG_MDD_AUTO_RESET_VF) {
+			/* VF MDD event counters will be cleared by
+			 * reset, so print the event prior to reset.
+			 */
+			if (is_mdd_on_rx)
 				i40e_print_vf_rx_mdd_event(pf, vf);
-				i40e_vc_notify_vf_reset(vf);
-				/* Allow VF to process pending reset notification */
-				msleep(20);
+			if (is_mdd_on_tx)
+				i40e_print_vf_tx_mdd_event(pf, vf);
 
-				i40e_reset_vf(vf, false);
-			}
+			i40e_vc_reset_vf(vf, true);
 		}
 	}
 
@@ -14801,9 +14839,11 @@ static int i40e_xdp_setup(struct i40e_vsi *vsi, struct bpf_prog *prog,
 	old_prog = xchg(&vsi->xdp_prog, prog);
 
 	if (need_reset) {
-		if (!prog)
+		if (!prog) {
+			xdp_features_clear_redirect_target(vsi->netdev);
 			/* wait until ndo_xsk_wakeup completes */
 			synchronize_rcu();
+		}
 		i40e_reset_and_rebuild(pf, true, true);
 	}
 
@@ -14816,7 +14856,7 @@ static int i40e_xdp_setup(struct i40e_vsi *vsi, struct bpf_prog *prog,
 	/* Kick start the NAPI context if there is an AF_XDP socket open
 	 * on that queue id. This so that receiving will start.
 	 */
-	if (need_reset && prog)
+	if (need_reset && prog) {
 		for (i = 0; i < vsi->num_queue_pairs; i++)
 #ifdef HAVE_NETDEV_BPF_XSK_POOL
 			if (vsi->xdp_rings[i]->xsk_pool)
@@ -14829,6 +14869,8 @@ static int i40e_xdp_setup(struct i40e_vsi *vsi, struct bpf_prog *prog,
 #else
 				(void)i40e_xsk_async_xmit(vsi->netdev, i);
 #endif /* HAVE_NDO_XSK_WAKEUP */
+		xdp_features_set_redirect_target(vsi->netdev, false);
+	}
 #endif /* HAVE_AF_XDP_ZC_SUPPORT */
 
 	return 0;
@@ -15456,6 +15498,14 @@ static int i40e_config_netdev(struct i40e_vsi *vsi)
 		spin_lock_bh(&vsi->mac_filter_hash_lock);
 		i40e_add_mac_filter(vsi, mac_addr);
 		spin_unlock_bh(&vsi->mac_filter_hash_lock);
+
+#ifdef HAVE_XDP_SUPPORT
+		xdp_set_features_flag(netdev, NETDEV_XDP_ACT_BASIC	  |
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
+					      NETDEV_XDP_ACT_XSK_ZEROCOPY |
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
+					      NETDEV_XDP_ACT_REDIRECT);
+#endif /* HAVE_XDP_SUPPORT */
 	} else {
 		/* Relate the VSI_VMDQ name to the VSI_MAIN name. Note that we
 		 * are still limited by IFNAMSIZ, but we're adding 'v%d\0' to
@@ -17349,6 +17399,42 @@ static inline i40e_status i40e_handle_resets(struct i40e_pf * const pf)
 
 	return is_empr ? I40E_ERR_RESET_FAILED : pfr;
 }
+#define I40E_FW_STATE_BUFF_SIZE		80
+/**
+ * i40e_log_fw_recovery_mode - log current FW state in Recovery Mode
+ * @pf: board private structure
+ *
+ * Read alternate RAM and CSR registers and print them to the log
+ **/
+static void i40e_log_fw_recovery_mode(struct i40e_pf *pf)
+{
+	u8 buf[I40E_FW_STATE_BUFF_SIZE] = {0};
+	struct i40e_hw *hw = &pf->hw;
+	u8 fws0b, fws1b;
+	u32 fwsts;
+	int ret;
+
+	ret = i40e_aq_alternate_read_indirect(hw, I40E_ALT_CANARY,
+					      I40E_ALT_BUFF_DWORD_SIZE, buf);
+	if (ret) {
+		dev_warn(&pf->pdev->dev,
+			 "Cannot get FW trace buffer due to FW err %s aq_err %s\n",
+			 i40e_stat_str(hw, ret),
+			 i40e_aq_str(hw, hw->aq.asq_last_status));
+		return;
+	}
+
+	fwsts = rd32(&pf->hw, I40E_GL_FWSTS);
+	fws0b = (u8)((fwsts & I40E_GL_FWSTS_FWS0B_MASK) >>
+		      I40E_GL_FWSTS_FWS0B_SHIFT);
+	fws1b = (u8)((fwsts & I40E_GL_FWSTS_FWS1B_MASK) >>
+		      I40E_GL_FWSTS_FWS1B_SHIFT);
+
+	print_hex_dump(KERN_DEBUG, "Trace Buffer: ", DUMP_PREFIX_NONE,
+		       BITS_PER_BYTE * I40_BYTES_PER_WORD, 1, buf,
+		       I40E_FW_STATE_BUFF_SIZE, true);
+	dev_dbg(&pf->pdev->dev, "FWS0B=0x%x, FWS1B=0x%x\n", fws0b, fws1b);
+}
 
 /**
  * i40e_init_recovery_mode - initialize subsystems needed in recovery mode
@@ -17430,7 +17516,9 @@ static int i40e_init_recovery_mode(struct i40e_pf *pf, struct i40e_hw *hw)
 	mod_timer(&pf->service_timer,
 		  round_jiffies(jiffies + pf->service_timer_period));
 
-	return 0;
+	i40e_log_fw_recovery_mode(pf);
+
+	return err;
 
 err_switch_setup:
 	i40e_reset_interrupt_capability(pf);
@@ -17552,7 +17640,9 @@ static int i40e_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 			 "pci_request_mem_regions failed %d\n", err);
 		goto err_pci_reg;
 	}
+#ifdef HAVE_PCI_ENABLE_PCIE_ERROR_REPORTING
 	pci_enable_pcie_error_reporting(pdev);
+#endif /* HAVE_PCI_ENABLE_PCIE_ERROR_REPORTING */
 	pci_set_master(pdev);
 
 	/* Now that we have a PCI connection, we need to do the
@@ -18078,23 +18168,23 @@ static int i40e_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 
 		switch (hw->bus.speed) {
 		case i40e_bus_speed_8000:
-			strlcpy(speed, "8.0", PCI_SPEED_SIZE); break;
+			strscpy(speed, "8.0", PCI_SPEED_SIZE); break;
 		case i40e_bus_speed_5000:
-			strlcpy(speed, "5.0", PCI_SPEED_SIZE); break;
+			strscpy(speed, "5.0", PCI_SPEED_SIZE); break;
 		case i40e_bus_speed_2500:
-			strlcpy(speed, "2.5", PCI_SPEED_SIZE); break;
+			strscpy(speed, "2.5", PCI_SPEED_SIZE); break;
 		default:
 			break;
 		}
 		switch (hw->bus.width) {
 		case i40e_bus_width_pcie_x8:
-			strlcpy(width, "8", PCI_WIDTH_SIZE); break;
+			strscpy(width, "8", PCI_WIDTH_SIZE); break;
 		case i40e_bus_width_pcie_x4:
-			strlcpy(width, "4", PCI_WIDTH_SIZE); break;
+			strscpy(width, "4", PCI_WIDTH_SIZE); break;
 		case i40e_bus_width_pcie_x2:
-			strlcpy(width, "2", PCI_WIDTH_SIZE); break;
+			strscpy(width, "2", PCI_WIDTH_SIZE); break;
 		case i40e_bus_width_pcie_x1:
-			strlcpy(width, "1", PCI_WIDTH_SIZE); break;
+			strscpy(width, "1", PCI_WIDTH_SIZE); break;
 		default:
 			break;
 		}
@@ -18174,7 +18264,9 @@ err_pf_reset:
 err_ioremap:
 	kfree(pf);
 err_pf_alloc:
+#ifdef HAVE_PCI_ENABLE_PCIE_ERROR_REPORTING
 	pci_disable_pcie_error_reporting(pdev);
+#endif /* HAVE_PCI_ENABLE_PCIE_ERROR_REPORTING */
 	pci_release_mem_regions(pdev);
 err_pci_reg:
 err_dma:
@@ -18350,7 +18442,9 @@ debug_mode_clear:
 	kfree(pf);
 	pci_release_mem_regions(pdev);
 
+#ifdef HAVE_PCI_ENABLE_PCIE_ERROR_REPORTING
 	pci_disable_pcie_error_reporting(pdev);
+#endif /* HAVE_PCI_ENABLE_PCIE_ERROR_REPORTING */
 	pci_disable_device(pdev);
 }
 
@@ -18922,3 +19016,14 @@ static void __exit i40e_exit_module(void)
 #endif
 }
 module_exit(i40e_exit_module);
+
+void i40e_client_device_register(struct i40e_info *ldev, struct i40e_client *client)
+{
+	pr_err("Please update irdma driver. In-tree irdma driver is disabled.\n");
+}
+EXPORT_SYMBOL_GPL(i40e_client_device_register);
+
+void i40e_client_device_unregister(struct i40e_info *ldev)
+{
+}
+EXPORT_SYMBOL_GPL(i40e_client_device_unregister);

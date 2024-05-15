@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2023 Intel Corporation */
+/* Copyright (C) 2013-2024 Intel Corporation */
 
 #include "i40e_type.h"
 #include "i40e_adminq.h"
@@ -3241,7 +3241,7 @@ i40e_status i40e_aq_debug_write_register(struct i40e_hw *hw,
 i40e_status i40e_aq_request_resource(struct i40e_hw *hw,
 				enum i40e_aq_resources_ids resource,
 				enum i40e_aq_resource_access_type access,
-				u8 sdp_number, u64 *timeout,
+				u8 sdp_number, u32 *timeout,
 				struct i40e_asq_cmd_details *cmd_details)
 {
 	struct i40e_aq_desc desc;
@@ -5360,6 +5360,46 @@ i40e_status i40e_aq_alternate_read(struct i40e_hw *hw,
 		if (reg_val1 != NULL)
 			*reg_val1 = LE32_TO_CPU(cmd_resp->data1);
 	}
+
+	return status;
+}
+
+/**
+ * i40e_aq_alternate_read_indirect
+ * @hw: pointer to the hardware structure
+ * @addr: address of the alternate structure field
+ * @dw_count: number of alternate structure fields to read
+ * @buffer: pointer to the command buffer
+ *
+ * Read 'dw_count' dwords from alternate structure starting at 'addr' and
+ * place them in 'buffer'. The buffer should be allocated by caller.
+ *
+ **/
+i40e_status i40e_aq_alternate_read_indirect(struct i40e_hw *hw,
+				u32 addr, u32 dw_count, void *buffer)
+{
+	struct i40e_aq_desc desc;
+	struct i40e_aqc_alternate_ind_write *cmd_resp =
+		(struct i40e_aqc_alternate_ind_write *)&desc.params.raw;
+	i40e_status status;
+
+	if (buffer == NULL)
+		return I40E_ERR_PARAM;
+
+	/* Indirect command */
+	i40e_fill_default_direct_cmd_desc(&desc,
+		i40e_aqc_opc_alternate_read_indirect);
+
+	desc.flags |= CPU_TO_LE16(I40E_AQ_FLAG_RD);
+	desc.flags |= CPU_TO_LE16(I40E_AQ_FLAG_BUF);
+	if (dw_count > (I40E_AQ_LARGE_BUF/4))
+		desc.flags |= CPU_TO_LE16((u16)I40E_AQ_FLAG_LB);
+
+	cmd_resp->address = CPU_TO_LE32(addr);
+	cmd_resp->length = CPU_TO_LE32(dw_count);
+
+	status = i40e_asq_send_command(hw, &desc, buffer,
+				       low_16_bits(4*dw_count), NULL);
 
 	return status;
 }

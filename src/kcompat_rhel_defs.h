@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2023 Intel Corporation */
+/* Copyright (C) 2013-2024 Intel Corporation */
 
 #ifndef _KCOMPAT_RHEL_DEFS_H_
 #define _KCOMPAT_RHEL_DEFS_H_
@@ -35,7 +35,6 @@
 #define NEED_BUILD_BUG_ON
 #else /* >= 7.4 */
 #define HAVE_RHEL7_EXTENDED_OFFLOAD_STATS
-#define HAVE_INCLUDE_BITFIELD
 #endif /* 7.4 */
 
 /*****************************************************************************/
@@ -111,6 +110,7 @@
 #else /* >= 8.3 */
 #undef NEED_CPU_LATENCY_QOS_RENAME
 #undef NEED_DEVLINK_REGION_CREATE_OPS
+#define HAVE_RT_IRQ_SCHED_FIX
 #endif /* 8.3 */
 
 /*****************************************************************************/

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2023 Intel Corporation */
+/* Copyright (C) 2013-2024 Intel Corporation */
 
 #ifndef _KCOMPAT_STD_DEFS_H_
 #define _KCOMPAT_STD_DEFS_H_
@@ -44,7 +44,6 @@
 #else /* >= 4,9,0 */
 #define HAVE_KTHREAD_DELAYED_API
 #define HAVE_NDO_OFFLOAD_STATS
-#define HAVE_INCLUDE_BITFIELD
 #endif /* 4,9,0 */
 
 /*****************************************************************************/
@@ -176,6 +175,7 @@
 #define NEED_XSK_UMEM_GET_RX_FRAME_SIZE
 #else /* >= 5.8.0 */
 #undef HAVE_XSK_UNALIGNED_CHUNK_PLACEMENT
+#define HAVE_RT_IRQ_SCHED_FIX
 #endif /* 5.8.0 */
 
 /*****************************************************************************/
