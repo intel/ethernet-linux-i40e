@@ -1,6 +1,6 @@
 Name: i40e
 Summary: Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
-Version: 2.25.7
+Version: 2.26.8
 Release: 1
 Source: %{name}-%{version}.tar.gz
 Vendor: Intel Corporation
@@ -394,7 +394,7 @@ fi
 uname -r | grep BOOT || /sbin/depmod -a > /dev/null 2>&1 || true
 
 if [ -x "/usr/sbin/weak-modules" ]; then
-    modules=( $(cat %{_docdir}/%{name}/file.list | grep '\.ko$' | xargs realpath) )
+    modules=( $(cat $LD/file.list | grep '\.ko$' | xargs realpath) )
     printf '%s\n' "${modules[@]}" | /usr/sbin/weak-modules --no-initramfs --add-modules
 fi
 
@@ -423,8 +423,13 @@ else
 fi
 
 %preun
+LD="%{_docdir}/%{name}";
+if [ -d %{_docdir}/%{name}-%{version} ]; then
+	LD="%{_docdir}/%{name}-%{version}";
+fi
+
 # save tmp list of installed kernel modules for weak-modules
-cat %{_docdir}/%{name}/file.list | grep '\.ko$' | xargs realpath > /var/run/rpm-%{name}-modules.list
+cat $LD/file.list | grep '\.ko$' | xargs realpath > /var/run/rpm-%{name}-modules.list
 
 rm -rf /usr/local/share/%{name}
 

@@ -1,78 +1,4545 @@
-.\" LICENSE
-.\"
-.\" This software program is released under the terms of a license agreement between you ('Licensee') and Intel. Do not use or load this software or any associated materials (collectively, the 'Software') until you have carefully read the full terms and conditions of the LICENSE located in this software package. By loading or using the Software, you agree to the terms of this Agreement. If you do not agree with the terms of this Agreement, do not install or use the Software.
-.\"
-.\" * Other names and brands may be claimed as the property of others.
-.\"
+.\" Man page generated from reStructuredText.
 .
-.TH i40e 1 "February 24, 2022"
+.
+.nr rst2man-indent-level 0
+.
+.de1 rstReportMargin
+\\$1 \\n[an-margin]
+level \\n[rst2man-indent-level]
+level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
+-
+\\n[rst2man-indent0]
+\\n[rst2man-indent1]
+\\n[rst2man-indent2]
+..
+.de1 INDENT
+.\" .rstReportMargin pre:
+. RS \\$1
+. nr rst2man-indent\\n[rst2man-indent-level] \\n[an-margin]
+. nr rst2man-indent-level +1
+.\" .rstReportMargin post:
+..
+.de UNINDENT
+. RE
+.\" indent \\n[an-margin]
+.\" old: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.nr rst2man-indent-level -1
+.\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
+.in \\n[rst2man-indent\\n[rst2man-indent-level]]u
+..
+.TH "I40E" "7" "August 27, 2024" "" "Linux i40e README"
 .SH NAME
-i40e \-This file describes the Linux* Base Driver
-for the Intel Ethernet Controller XL710 Family of Controllers.
-.SH SYNOPSIS
-.PD 0.4v
-modprobe i40e [<option>=<VAL1>,<VAL2>,...]
-.PD 1v
-.SH DESCRIPTION
-This driver is intended for \fB2.6.32\fR and newer kernels. A version of the driver may already be included by your distribution and/or the kernel.org kernel.
-
-This driver includes support for any 64 bit Linux supported system, x86_64, PPC64, ARM, etc.
-.LP
-This driver is only supported as a loadable module at this time. Intel is not supplying patches against the kernel source to allow for static linking of the drivers.
-
-
+i40e \- i40e Linux* Base Driver for the Intel(R) Ethernet 700 Series
+.SS Contents
+.INDENT 0.0
+.IP \(bu 2
+\fI\%i40e Linux* Base Driver for the Intel(R) Ethernet 700 Series\fP
+.INDENT 2.0
+.IP \(bu 2
+\fI\%Overview\fP
+.IP \(bu 2
+\fI\%Related Documentation\fP
+.IP \(bu 2
+\fI\%Identifying Your Adapter\fP
+.IP \(bu 2
+\fI\%Important Notes\fP
+.IP \(bu 2
+\fI\%Building and Installation\fP
+.IP \(bu 2
+\fI\%Command Line Parameters\fP
+.IP \(bu 2
+\fI\%Additional Features and Configurations\fP
+.IP \(bu 2
+\fI\%Performance Optimization\fP
+.IP \(bu 2
+\fI\%Known Issues/Troubleshooting\fP
+.IP \(bu 2
+\fI\%Support\fP
+.IP \(bu 2
+\fI\%License\fP
+.IP \(bu 2
+\fI\%Trademarks\fP
+.UNINDENT
+.UNINDENT
+.SH OVERVIEW
+.sp
+This driver supports Linux* kernel versions 2.6.32 and newer. However, some
+features may require a newer kernel version. The associated Virtual Function
+(VF) driver for this driver is iavf. The associated RDMA driver for this driver
+is irdma.
+.sp
+Driver information can be obtained using ethtool, lspci, and ip. Instructions
+on updating ethtool can be found in the section Additional Configurations later
+in this document.
+.sp
+This driver is only supported as a loadable module at this time. Intel is not
+supplying patches against the kernel source to allow for static linking of the
+drivers.
+.sp
 For questions related to hardware requirements, refer to the documentation
-supplied with your Intel adapter. All hardware requirements listed apply to
-use with Linux.
-.LP
-.B Jumbo Frames
-.IP
-Jumbo Frames support is enabled by changing the Maximum Transmission Unit (MTU) to a value larger than the default value of 1500.
+supplied with your Intel adapter. All hardware requirements listed apply to use
+with Linux.
+.sp
+This driver supports XDP (Express Data Path) on kernel 4.14 and later and
+AF_XDP zero\-copy on kernel 4.18 and later. Note that XDP is blocked for frame
+sizes larger than 3KB.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+1 Gb devices based on the Intel(R) Ethernet Network Connection X722
+do not support the following features:
+.INDENT 0.0
+.IP \(bu 2
+Data Center Bridging (DCB)
+.IP \(bu 2
+QOS
+.IP \(bu 2
+VMQ
+.IP \(bu 2
+SR\-IOV
+.IP \(bu 2
+Task Encapsulation offload (VXLAN, NVGRE)
+.IP \(bu 2
+Energy Efficient Ethernet (EEE)
+.IP \(bu 2
+Auto\-media detect
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SH RELATED DOCUMENTATION
+.sp
+See the \(dqIntel(R) Ethernet Adapters and Devices User Guide\(dq for additional
+information on features. It is available on the Intel website at
+\fI\%https://cdrdv2.intel.com/v1/dl/getContent/705831\fP\&.
+.SH IDENTIFYING YOUR ADAPTER
+.sp
+This driver is compatible with devices based on the following:
+.INDENT 0.0
+.IP \(bu 2
+Intel(R) Ethernet Controller I710
+.IP \(bu 2
+Intel(R) Ethernet Controller X710
+.IP \(bu 2
+Intel(R) Ethernet Controller XL710
+.IP \(bu 2
+Intel(R) Ethernet Network Connection X722
+.IP \(bu 2
+Intel(R) Ethernet Controller XXV710
+.IP \(bu 2
+Intel(R) Ethernet Controller V710
+.UNINDENT
+.sp
+For the best performance, make sure the latest NVM/FW is installed on your
+device and that you are using the newest drivers.
+.sp
+For information on how to identify your adapter, and for the latest NVM/FW
+images and Intel network drivers, refer to the Intel Support website at
+\fI\%https://www.intel.com/support\fP\&.
+.SS SFP+ and QSFP+ Devices
+.sp
+For information about supported media, refer to this document:
+\fI\%http://www.intel.com/content/dam/www/public/us/en/documents/release\-notes/xl710\-ethernet\-controller\-feature\-matrix.pdf\fP
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.IP \(bu 2
+Some adapters based on the Intel(R) Ethernet 700 Series only support
+Intel Ethernet Optics modules. On these adapters, other modules are not
+supported and will not function.
+.IP \(bu 2
+For connections based on Intel(R) Ethernet 700 Series, support is
+dependent on your system board. Please see your vendor for details.
+.IP \(bu 2
+In all cases Intel recommends using Intel Ethernet Optics; other modules
+may function but are not validated by Intel. Contact Intel for supported
+media types.
+.IP \(bu 2
+In systems that do not have adequate airflow to cool the adapter and
+optical modules, you must use high temperature optical modules.
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SH IMPORTANT NOTES
+.SS TC0 must be enabled when setting up DCB on a switch
+.sp
+The kernel assumes that TC0 is available, and will disable Priority Flow
+Control (PFC) on the device if TC0 is not available. To fix this, ensure TC0 is
+enabled when setting up DCB on your switch.
+.SS Enabling a VF link if the port is disconnected
+.sp
+If the physical function (PF) link is down, you can force link up (from the
+host PF) on any virtual functions (VF) bound to the PF. Note that this requires
+kernel support (Red Hat kernel 3.10.0\-327 or newer, upstream kernel 3.11.0 or
+newer) and associated iproute2 user space support.
+.sp
+For example, to force link up on VF 0 bound to PF eth0:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ip link set eth0 vf 0 state enable
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+If the command does not work, it may not be supported by your system.
+.UNINDENT
+.UNINDENT
+.SS Do not unload port driver if VF with active VM is bound to it
+.sp
+Do not unload a port\(aqs driver if a Virtual Function (VF) with an active Virtual
+Machine (VM) is bound to it. Doing so will cause the port to appear to hang.
+Once the VM shuts down, or otherwise releases the VF, the command will complete.
+.SS Configuring SR\-IOV for improved network security
+.sp
+In a virtualized environment, on Intel(R) Ethernet Network Adapters that
+support SR\-IOV or Intel(R) Scalable I/O Virtualization (Intel(R) Scalable IOV),
+the virtual function (VF) may be subject to malicious behavior.
+Software\-generated layer two frames, like IEEE 802.3x (link flow control), IEEE
+802.1Qbb (priority based flow\-control), and others of this type, are not
+expected and can throttle traffic between the host and the virtual switch,
+reducing performance. To resolve this issue, and to ensure isolation from
+unintended traffic streams, configure all SR\-IOV or Intel Scalable IOV enabled
+ports for VLAN tagging from the administrative interface on the PF. This
+configuration allows unexpected, and potentially malicious, frames to be
+dropped.
+.sp
+See \fI\%Configuring VLAN Tagging on SR\-IOV Enabled Adapter Ports\fP later in this README for configuration
+instructions.
+.SS Firmware Recovery Mode
+.sp
+A device will enter Firmware Recovery mode if it detects a problem that
+requires the firmware to be reprogrammed. When a device is in Firmware Recovery
+mode it will not pass traffic or allow any configuration; you can only attempt
+to recover the device\(aqs firmware. Refer to the Intel(R) Ethernet Adapters and
+Devices User Guide for details on Firmware Recovery Mode and how to recover
+from it.
+.SH BUILDING AND INSTALLATION
+.SS To manually build the driver
+.INDENT 0.0
+.IP 1. 3
+Move the base driver tar file to the directory of your choice.
+For example, use \fB/home/username/i40e\fP or \fB/usr/local/src/i40e\fP\&.
+.IP 2. 3
+Untar/unzip the archive, where \fB<x.x.x>\fP is the version number for the
+driver tar file:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+tar zxf i40e\-<x.x.x>.tar.gz
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.IP 3. 3
+Change to the driver src directory, where <x.x.x> is the version number
+for the driver tar:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cd i40e\-<x.x.x>/src/
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.IP 4. 3
+Compile the driver module:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+make install
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+The binary will be installed as:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+/lib/modules/<KERNEL VER>/updates/drivers/net/ethernet/intel/i40e/i40e.ko
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+The install location listed above is the default location. This may differ
+for various Linux distributions.
+.sp
+\fBNOTE:\fP
+.INDENT 3.0
+.INDENT 3.5
+To gather and display additional statistics, use the
+\fBI40E_ADD_PROBES\fP pre\-processor macro:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+make CFLAGS_EXTRA=\-DI40E_ADD_PROBES
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Please note that this additional statistics gathering can impact
+performance.
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 3.0
+.INDENT 3.5
+You may see warnings from depmod related to unknown RDMA symbols
+during the make of the OOT base driver. These warnings are normal and
+appear because the in\-tree RDMA driver will not work with the OOT base
+driver. To address the issue, you need to install the latest OOT versions
+of the base and RDMA drivers.
+.UNINDENT
+.UNINDENT
+.IP 5. 3
+Load the module using the modprobe command.
+.sp
+To check the version of the driver and then load it:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+modinfo i40e
+modprobe i40e [parameter=port1_value,port2_value]
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Alternately, make sure that any older i40e drivers are removed from the
+kernel before loading the new module:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+rmmod i40e; modprobe i40e
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.IP 6. 3
+Assign an IP address to the interface by entering the following,
+where \fB<ethX>\fP is the interface name that was shown in dmesg after
+modprobe:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ip address add <IP_address>/<netmask bits> dev <ethX>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.IP 7. 3
+Verify that the interface works. Enter the following, where \fB<IP_address>\fP
+is the IP address for another machine on the same subnet as the interface
+that is being tested:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ping <IP_address>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+For certain distributions like (but not limited to) Red Hat Enterprise
+Linux 7 and Ubuntu, once the driver is installed, you may need to update the
+initrd/initramfs file to prevent the OS loading old versions of the i40e
+driver.
+.sp
+For Red Hat distributions:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+dracut \-\-force
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+For Ubuntu:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+update\-initramfs \-u
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SS To build a binary RPM package of this driver
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+RPM functionality has only been tested in Red Hat distributions.
+.UNINDENT
+.UNINDENT
+.INDENT 0.0
+.IP 1. 3
+Run the following command, where \fB<x.x.x>\fP is the version number for the
+driver tar file:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+rpmbuild \-tb i40e\-<x.x.x>.tar.gz
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 3.0
+.INDENT 3.5
+For the build to work properly, the currently running kernel MUST
+match the version and configuration of the installed kernel sources. If
+you have just recompiled the kernel, reboot the system before building.
+.UNINDENT
+.UNINDENT
+.IP 2. 3
+After building the RPM, the last few lines of the tool output contain the
+location of the RPM file that was built. Install the RPM with one of the
+following commands, where \fB<RPM>\fP is the location of the RPM file:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+rpm \-Uvh <RPM>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+or:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+dnf/yum localinstall <RPM>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.IP 3. 3
+If your distribution or kernel does not contain inbox support for auxiliary
+bus, you must also install the auxiliary RPM:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+rpm \-Uvh <i40e RPM> <auxiliary RPM>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+or:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+dnf/yum localinstall <i40e RPM> <auxiliary RPM>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 3.0
+.INDENT 3.5
+On some distributions, the auxiliary RPM may fail to install due
+to missing kernel\-devel headers. To workaround this issue, specify
+\fB\-\-excludepath\fP during installation. For example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+rpm \-Uvh auxiliary\-1.0.0\-1.x86_64.rpm \-\-excludepath=/lib/modules/3.10.0\-957.el7.x86_64/source/include/linux/auxiliary_bus.h
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.IP \(bu 2
+To compile the driver on some kernel/arch combinations, you may need to
+install a package with the development version of libelf (e.g. libelf\-dev,
+libelf\-devel, elfutils\-libelf\-devel).
+.IP \(bu 2
+When compiling an out\-of\-tree driver, details will vary by distribution.
+However, you will usually need a kernel\-devel RPM or some RPM that provides
+the kernel headers at a minimum. The RPM kernel\-devel will usually fill in
+the link at \fB/lib/modules/\(aquname \-r\(aq/build\fP\&.
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SH COMMAND LINE PARAMETERS
+.sp
+If the driver is built as a module, enter optional parameters on the command
+line with the following syntax:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+modprobe i40e [<option>=<VAL1>]
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+There needs to be a \fB<VAL#>\fP for each network port in the system supported by
+this driver. The values will be applied to each instance, in function order.
+For example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+modprobe i40e max_vfs=7
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.INDENT 0.0
+.IP \(bu 2
+The i40e driver only supports the \fBmax_vfs\fP kernel parameter on older
+kernels that do not have the standard sysfs interface.
+.IP \(bu 2
+The only other module parameter supported is the \fBdebug\fP parameter that can
+control the default logging verbosity of the driver.
+.IP \(bu 2
+In general, use ethtool and other OS\-specific commands to configure
+user\-changeable parameters after the driver is loaded.
+.IP \(bu 2
+The default value for each parameter is generally the recommended setting,
+unless otherwise noted.
+.UNINDENT
+.SS max_vfs
+.sp
+This parameter adds support for SR\-IOV. It causes the driver to spawn up to
+max_vfs worth of virtual functions.
+.sp
+Valid Range:
+.INDENT 0.0
+.IP \(bu 2
+1\-32 (Intel Ethernet Controller X710 based devices)
+.IP \(bu 2
+1\-64 (Intel Ethernet Controller XXV710/XL710 based devices)
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+This parameter is only used on kernel 3.7.x and below. On kernel 3.8.x
+and above, use sysfs to enable VFs. Use sysfs for Red Hat distributions.
+.UNINDENT
+.UNINDENT
+.sp
+For example, you can create 4 VFs as follows:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo 4 > /sys/class/net/<ethX>/device/sriov_numvfs
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+To disable VFs, write 0 to the same file:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo 0 > /sys/class/net/<ethX>/device/sriov_numvfs
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+The parameters for the driver are referenced by position. Thus, if you have a
+dual port adapter, or more than one adapter in your system, and want N virtual
+functions per port, you must specify a number for each port with each parameter
+separated by a comma. For example, the following will spawn 4 VFs on the first
+port:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+modprobe i40e max_vfs=4
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+The following will spawn 2 VFs on the first port and 4 VFs on the second port:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+modprobe i40e max_vfs=2,4
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.IP \(bu 2
+Caution must be used in loading the driver with these parameters.
+Depending on your system configuration, number of slots, etc., it is
+impossible to predict in all cases where the positions would be on the
+command line.
+.IP \(bu 2
+Neither the device nor the driver control how VFs are mapped into config
+space. Bus layout will vary by operating system. On operating systems
+that support it, you can check sysfs to find the mapping.
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+Some hardware configurations support fewer SR\-IOV instances, as the whole Intel
+Ethernet Controller XL710 (all functions) is limited to 128 SR\-IOV interfaces
+in total.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+When SR\-IOV mode is enabled, hardware VLAN filtering and VLAN tag
+stripping/insertion will remain enabled. Please remove the old VLAN filter
+before the new VLAN filter is added. For example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ip link set eth0 vf 0 vlan 100      // set vlan 100 for VF 0
+ip link set eth0 vf 0 vlan 0        // Delete vlan 100
+ip link set eth0 vf 0 vlan 200      // set a new vlan 200 for VF 0
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SH ADDITIONAL FEATURES AND CONFIGURATIONS
+.SS ethtool
+.sp
+The driver utilizes the ethtool interface for driver configuration and
+diagnostics, as well as displaying statistical information. The latest ethtool
+version is required for this functionality. Download it at:
+\fI\%https://kernel.org/pub/software/network/ethtool/\fP
+.SS Viewing Link Messages
+.sp
+Link messages will not be displayed to the console if the distribution is
+restricting system messages. In order to see network driver link messages on
+your console, set dmesg to eight by entering the following:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+dmesg \-n 8
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+This setting is not saved across reboots.
+.UNINDENT
+.UNINDENT
+.SS Configuring the Driver on Different Distributions
+.sp
+Configuring a network driver to load properly when the system is started is
+distribution dependent. Typically, the configuration process involves adding an
+alias line to \fB/etc/modules.conf\fP or \fB/etc/modprobe.conf\fP as well as editing
+other system startup scripts and/or configuration files. Many popular Linux
+distributions ship with tools to make these changes for you.
+.sp
+To learn the proper way to configure a network device for your system, refer to
+your distribution documentation. If during this process you are asked for the
+driver or module name, the name for the Base Driver is i40e.
+.SS Displaying VF Statistics on the PF
+.sp
+Use the following command to display the statistics for all VFs on the PF:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-S <ethX>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+The output of this command can be very large due to the large number
+of VF statistics and the maximum number of possible VFs.
+.UNINDENT
+.UNINDENT
+.sp
+The PF driver will display a subset of the statistics for the PF and for all
+VFs that are configured. The PF will always print a statistics block for each
+of the possible VFs, and it will show zero for all unconfigured VFs.
+.sp
+VF stats are listed in a single block at the end of the PF statistics, using
+the following naming convention:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+vf<XXX>.<statistic name>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Where:
+.INDENT 0.0
+.TP
+.B <XXX>
+The VF number (for example, vf008)
+.TP
+.B <statistic name>
+The name of the statistic as supplied by the VF driver
+.UNINDENT
+.sp
+For example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+vf008.rx_bytes: 0
+vf008.rx_unicast: 0
+vf008.rx_multicast: 0
+vf008.rx_broadcast: 0
+vf008.rx_discards: 0
+vf008.rx_unknown_protocol: 0
+vf008.tx_bytes: 0
+vf008.tx_unicast: 0
+vf008.tx_multicast: 0
+vf008.tx_broadcast: 0
+vf008.tx_discards: 0
+vf008.tx_errors: 0
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SS Configuring VLAN Tagging on SR\-IOV Enabled Adapter Ports
+.sp
+To configure VLAN tagging for the ports on an SR\-IOV enabled adapter, use the
+following command. The VLAN configuration should be done before the VF driver
+is loaded or the VM is booted. The VF is not aware of the VLAN tag being
+inserted on transmit and removed on received frames (sometimes called \(dqport
+VLAN\(dq mode).
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ip link set dev <ethX> vf <id> vlan <vlan id>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+For example, the following will configure PF eth0 and the first VF on VLAN 10:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ip link set dev eth0 vf 0 vlan 10
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SS Setting the MAC Address for a VF
+.sp
+To change the MAC address for the specified VF:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ip link set <ethX> vf 0 mac <address>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+For example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ip link set <ethX> vf 0 mac 00:01:02:03:04:05
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+This setting lasts until the PF is reloaded.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+For untrusted VFs, assigning a MAC address for a VF from the host
+will disable any subsequent requests to change the MAC address from within
+the VM. This is a security feature. The VM is not aware of this restriction,
+so if this is attempted in the VM, it will trigger MDD events. Trusted VFs
+are allowed to change the MAC address from within the VM.
+.UNINDENT
+.UNINDENT
+.SS Trusted VFs and VF Promiscuous Mode
+.sp
+This feature allows you to designate a particular VF as trusted and allows that
+trusted VF to request selective promiscuous mode on the Physical Function (PF).
+.sp
+To set a VF as trusted or untrusted, enter the following command in the
+Hypervisor:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ip link set dev <ethX> vf 1 trust [on|off]
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+It\(aqs important to set the VF to trusted before setting promiscuous
+mode. If the VM is not trusted, the PF will ignore promiscuous mode requests
+from the VF. If the VM becomes trusted after the VF driver is loaded, you
+must make a new request to set the VF to promiscuous.
+.UNINDENT
+.UNINDENT
+.sp
+Once the VF is designated as trusted, use the following commands in the VM to
+set the VF to promiscuous mode.
+.INDENT 0.0
+.IP \(bu 2
+For promiscuous all, use the following, where \fB<ethX>\fP is a VF interface
+in the VM:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ip link set <ethX> promisc on
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.IP \(bu 2
+For promiscuous multicast:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ip link set <ethX> allmulticast on
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+By default, the ethtool private flag \fBvf\-true\-promisc\-support\fP is
+set to \(dqoff,\(dq meaning that promiscuous mode for the VF will be limited. To
+set the promiscuous mode for the VF to true promiscuous and allow the VF to
+see all ingress traffic, use the following command:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-\-set\-priv\-flags <ethX> vf\-true\-promisc\-support on
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+The \fBvf\-true\-promisc\-support\fP private flag does not enable promiscuous mode;
+rather, it designates which type of promiscuous mode (limited or true) you will
+get when you enable promiscuous mode using the \fBip link\fP commands above. Note
+that this is a global setting that affects the entire device. However, the
+\fBvf\-true\-promisc\-support\fP private flag is only exposed to the first PF of the
+device. The PF remains in limited promiscuous mode (unless it is in MFP mode)
+regardless of the \fBvf\-true\-promisc\-support\fP setting.
+.sp
+Next, add a VLAN interface on the VF interface. For example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ip link add link eth2 name eth2.100 type vlan id 100
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Note that the order in which you set the VF to promiscuous mode and add the
+VLAN interface does not matter (you can do either first). The result in this
+example is that the VF will get all traffic that is tagged with VLAN 100.
+.SS Virtual Function (VF) Tx Rate Limit
+.sp
+Use the ip command to configure the Tx rate limit for a VF from the PF
+interface.
+.sp
+For example, to set a Tx rate limit of 1000Mbps for VF 0:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ip link set eth0 vf 0 rate 1000
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SS Malicious Driver Detection (MDD) for VFs
+.sp
+Some Intel Ethernet devices use Malicious Driver Detection (MDD) to detect
+malicious traffic from the VF and disable Tx/Rx queues or drop the offending
+packet until a VF driver reset occurs. You can view MDD messages in the PF\(aqs
+system log using the dmesg command.
+.INDENT 0.0
+.IP \(bu 2
+If the PF driver logs MDD events from the VF, confirm that the correct VF
+driver is installed.
+.IP \(bu 2
+To restore functionality, you can manually reload the VF or VM or enable
+automatic VF resets.
+.IP \(bu 2
+When automatic VF resets are enabled, the PF driver will immediately reset
+the VF and reenable queues when it detects MDD events on the receive path.
+.IP \(bu 2
+If automatic VF resets are disabled, the PF will not automatically reset the
+VF when it detects MDD events.
+.UNINDENT
+.sp
+To enable or disable automatic VF resets, use the following command:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-\-set\-priv\-flags <ethX> mdd\-auto\-reset\-vf on|off
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SS MAC and VLAN Anti\-Spoofing Feature for VFs
+.sp
+When a malicious driver on a Virtual Function (VF) interface attempts to send a
+spoofed packet, it is dropped by the hardware and not transmitted.
+.sp
+To disable this feature for a specific VF:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ip link set <ethX> vf <vf id> spoofchk {off|on}
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SS VLAN Pruning
+.sp
+The i40e driver allows you to enable or disable VLAN pruning for the VF VSI
+using the ethtool private flag \fBvf\-vlan\-pruning\fP\&.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.IP \(bu 2
+You cannot change this private flag while any VFs are active.
+.IP \(bu 2
+If a port VLAN is configured, VLAN pruning will always be enabled.
+.IP \(bu 2
+When VLAN pruning is enabled, the interface will:
+.INDENT 2.0
+.IP \(bu 2
+Discard all packets with a VLAN tag when Rx VLAN filtering is disabled.
+.IP \(bu 2
+Discard untagged packets when Rx VLAN filtering is enabled.
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+To disable or enable VLAN pruning on all VFs, do the following:
+.INDENT 0.0
+.IP 1. 3
+Deinitialize any VFs.
+.IP 2. 3
+On the PF, use the following command:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-\-set\-priv\-flags <ethX> vf\-vlan\-pruning on|off
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Where:
+.INDENT 3.0
+.TP
+.B on
+Enables VLAN pruning
+.TP
+.B off
+Disables VLAN pruning (default)
+.UNINDENT
+.IP 3. 3
+Initialize and configure any VFs.
+.UNINDENT
+.sp
+VLAN pruning will then be disabled or enabled on any of these VFs, depending on
+the flag you set.
+.SS Intel(R) Ethernet Flow Director
+.sp
+The Intel(R) Ethernet Flow Director (Intel(R) Ethernet FD) performs the
+following tasks:
+.INDENT 0.0
+.IP \(bu 2
+Directs receive packets according to their flows to different queues
+.IP \(bu 2
+Enables tight control on routing a flow in the platform
+.IP \(bu 2
+Matches flows and CPU cores for flow affinity
+.IP \(bu 2
+Supports multiple parameters for flexible flow classification and load
+balancing (in SFP mode only)
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+An included script (\fBset_irq_affinity\fP) automates setting the
+IRQ to CPU affinity.
+.UNINDENT
+.UNINDENT
+.sp
+This driver supports the following flow types:
+.INDENT 0.0
+.IP \(bu 2
+IPv4
+.IP \(bu 2
+TCPv4
+.IP \(bu 2
+UDPv4
+.IP \(bu 2
+SCTPv4
+.IP \(bu 2
+IPv6
+.IP \(bu 2
+TCPv6
+.IP \(bu 2
+UDPv6
+.IP \(bu 2
+SCTPv6
+.UNINDENT
+.sp
+Each flow type supports valid combinations of IP addresses (source or
+destination) and UDP/TCP ports (source and destination). You can supply only a
+source IP address, a source IP address and a destination port, or any
+combination of one or more of these four parameters.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+This driver allows you to filter traffic based on a user\-defined
+flexible two\-byte pattern and offset by using the ethtool user\-def and mask
+fields. Only L3 and L4 flow types are supported for user\-defined flexible
+filters. For a given flow type, you must clear all Intel Ethernet Flow
+Director filters before changing the input set (for that flow type).
+.UNINDENT
+.UNINDENT
+.sp
+See the Intel(R) Ethernet Adapters and Devices User Guide for a table that
+summarizes supported Intel Ethernet Flow Director features across Intel(R)
+Ethernet controllers.
+.SS Application Targeted Routing (ATR) Perfect Filters
+.sp
+Intel Ethernet Flow Director ATR is enabled by default when the kernel is in
+multiple transmit queue mode. A rule is added when a TCP flow starts and is
+deleted when the flow ends. Because this would interfere with sideband TCP
+rules, the driver automatically disables ATR when a TCP rule is added via
+ethtool (sideband). ATR is automatically re\-enabled when all TCP sideband rules
+are deleted or when sideband is disabled.
+.sp
+You can disable or enable ATR using the ethtool private flags interface. To
+view the current setting:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-\-show\-priv\-flags <ethX>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+To change the setting:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-\-set\-priv\-flags <ethX> flow\-director\-atr [off|on]
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Packets that match the ATR rules will increment the \fBport.fdir_atr_match\fP
+stat in ethtool. The current operational state of ATR is reflected by the
+stat \fBport.fdir_atr_status\fP\&.
+.SS Sideband Perfect Filters
+.sp
+Sideband Perfect Filters are used to direct traffic that matches specified
+characteristics. They are enabled through ethtool\(aqs ntuple interface. To enable
+or disable the Intel Ethernet Flow Director and these filters:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-K <ethX> ntuple <off|on>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+When you disable ntuple filters, all the user programmed filters are
+flushed from the driver cache and hardware. All needed filters must be
+re\-added when ntuple is re\-enabled.
+.UNINDENT
+.UNINDENT
+.sp
+To display all of the active filters:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-u <ethX>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+To add a new filter:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-U <ethX> flow\-type <type> src\-ip <ip> [m <ip_mask>] dst\-ip <ip>
+[m <ip_mask>] src\-port <port> [m <port_mask>] dst\-port <port> [m <port_mask>]
+action <queue>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Where:
+.INDENT 0.0
+.TP
+.B <ethX>
+The Ethernet device to program.
+.TP
+.B <type>
+Can be ip4, tcp4, udp4, sctp4, ip6, tcp6, udp6, sctp6.
+.TP
+.B <ip>
+The IP address to match on.
+.TP
+.B <ip_mask>
+The IPv4 address to mask on. Note: These filters use inverted masks.
+Address masks can be either all 0 (to ignore a match) or all F (for
+a full match).
+.TP
+.B <port>
+The port number to match on.
+.TP
+.B <port_mask>
+The 16\-bit integer for masking. Note: These filters use inverted
+masks. Port masks can be either all 0 (to ignore a match) or all F
+(for a full match).
+.TP
+.B <queue>
+The queue to direct traffic toward (\fB\-1\fP discards the matched
+traffic).
+.UNINDENT
+.sp
+To delete a filter:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-U <ethX> delete <N>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Where \fB<N>\fP is the filter ID displayed when printing all the active filters,
+and may also have been specified using \fBloc <N>\fP when adding the filter.
+.sp
+\fBEXAMPLES:\fP
+.sp
+To add a filter that directs packet to queue 2:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-U <ethX> flow\-type tcp4 src\-ip 192.168.10.1 dst\-ip \e
+192.168.10.2 src\-port 2000 dst\-port 2001 action 2 [loc 1]
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+To set a filter using only the source and destination IP address:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-U <ethX> flow\-type tcp4 src\-ip 192.168.10.1 dst\-ip \e
+192.168.10.2 action 2 [loc 1]
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+To set a filter based on a user\-defined pattern and offset:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-U <ethX> flow\-type tcp4 src\-ip 192.168.10.1 dst\-ip \e
+192.168.10.2 user\-def 0x4FFFF action 2 [loc 1]
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+where the value of the \fBuser\-def\fP field contains the offset (4 bytes) and
+the pattern (0xffff).
+.sp
+To match TCP traffic sent from 192.168.0.1, port 5300, directed to 192.168.0.5,
+port 80, and then send it to queue 7:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-U enp130s0 flow\-type tcp4 src\-ip 192.168.0.1 dst\-ip 192.168.0.5 \e
+src\-port 5300 dst\-port 80 action 7
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+To add a TCPv4 filter with a partial mask for a source IP:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-U <ethX> flow\-type tcp4 src\-ip 192.168.0.0 m 0.255.255.255 \e
+dst\-ip 192.168.5.12 src\-port 12600 dst\-port 31 action 12
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+For each flow\-type, the programmed filters must all have the same matching
+input set. For example, issuing the following two commands is acceptable:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-U enp130s0 flow\-type ip4 src\-ip 192.168.0.1 src\-port 5300 action 7
+ethtool \-U enp130s0 flow\-type ip4 src\-ip 192.168.0.5 src\-port 55 action 10
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Issuing the next two commands, however, is not acceptable, since the first
+specifies \fBsrc\-ip\fP and the second specifies \fBdst\-ip\fP:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-U enp130s0 flow\-type ip4 src\-ip 192.168.0.1 src\-port 5300 action 7
+ethtool \-U enp130s0 flow\-type ip4 dst\-ip 192.168.0.5 src\-port 55 action 10
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+The second command will fail with an error. You may program multiple
+filters with the same fields, using different values, but, on one device,
+you may not program two tcp4 filters with different matching fields.
+.sp
+The i40e driver does not support matching on a subportion of a field, thus
+partial mask fields are not supported.
+.UNINDENT
+.UNINDENT
+.SS Filters to Direct Traffic to a Specific VF
+.sp
+It is possible to create filters that direct traffic to a specific Virtual
+Function. For older versions of ethtool, this depends on the \fBaction\fP
+parameter. Specify the action as a 64\-bit value, where the lower 32 bits
+represent the queue number, while the next 8 bits represent the VF ID. Note
+that 0 is the PF, so the VF identifier is offset by 1. For example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-U <ethX> flow\-type tcp4 src\-ip 192.168.10.1 dst\-ip \e
+192.168.10.2 src\-port 2000 dst\-port 2001 action 0x800000002 [loc 1]
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+The action field specifies to direct traffic to Virtual Function 7 (8 minus 1)
+into queue 2 of that VF.
+.sp
+Newer versions of ethtool (version 4.11 and later) use \fBvf\fP and \fBqueue\fP
+parameters instead of the \fBaction\fP parameter. Note that using the new ethtool
+\fBvf\fP parameter does not require the value to be offset by 1. This command is
+equivalent to the above example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-U <ethX> flow\-type tcp4 src\-ip 192.168.10.1 dst\-ip \e
+192.168.10.2 src\-port 2000 dst\-port 2001 vf 7 queue 2 [loc 1]
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Note that these filters will not break internal routing rules, and will not
+route traffic that otherwise would not have been sent to the specified VF.
+.SS Flex Byte Intel Ethernet Flow Director Filters
+.sp
+The driver also supports matching user\-defined data within the packet payload.
+This flexible data is specified using the \(dquser\-def\(dq field of the ethtool
+command in the following way:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
++\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-+
+| 31    28    24    20    16 | 15    12    8    4    0  |
++\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-+
+| offset into packet payload | 2 bytes of flexible data |
++\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-+\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-\-+
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+For example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+\&... user\-def 0x4FFFF ...
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+tells the filter to look 4 bytes into the payload and match that value against
+0xFFFF. The offset is based on the beginning of the payload, and not the
+beginning of the packet. Thus:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+flow\-type tcp4 ... user\-def 0x8BEAF ...
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+would match TCP/IPv4 packets which have the value 0xBEAF 8 bytes into the
+TCP/IPv4 payload.
+.sp
+Note that ICMP headers are parsed as 4 bytes of header and 4 bytes of payload.
+Thus to match the first byte of the payload, you must actually add 4 bytes to
+the offset. Also note that ip4 filters match both ICMP frames as well as raw
+(unknown) ip4 frames, where the payload will be the L3 payload of the IP4 frame.
+.sp
+The maximum offset is 64. The hardware will only read up to 64 bytes of data
+from the payload. The offset must be even because the flexible data is 2 bytes
+long and must be aligned to byte 0 of the packet payload.
+.sp
+The user\-defined flexible offset is also considered part of the input set and
+cannot be programmed separately for multiple filters of the same type. However,
+the flexible data is not part of the input set and multiple filters may use the
+same offset but match against different data.
+.SS Cloud Filter Support
+.sp
+On a complex network that supports multiple types of traffic (such as for
+storage as well as cloud), cloud filter support allows you to send one type of
+traffic (for example, the storage traffic) to the Physical Function (PF) and
+another type (say, the cloud traffic) to a Virtual Function (VF). Because cloud
+networks are typically VXLAN/GENEVE\-based, you can define a cloud filter to
+identify VXLAN/GENEVE packets and send them to a queue in the VF to be
+processed by the virtual machine (VM). Similarly, other cloud filters can be
+designed for various other traffic tunneling.
+.INDENT 0.0
+.IP \(bu 2
+Cloud filters are only supported when the underlying device is in Single
+Function per Port mode.
+.IP \(bu 2
+The \fBaction \-1\fP option, which drops matching packets in regular Intel
+Ethernet Flow Director filters, is not available to drop packets when used
+with cloud filters.
+.IP \(bu 2
+For IPv4 and ether flow\-types, cloud filters cannot be used for TCP or
+UDP filters.
+.IP \(bu 2
+Cloud filters can be used as a method for implementing queue splitting in
+the PF.
+.IP \(bu 2
+Queue 0xffff, set through either \fBqueue 0xffff\fP or \fBaction 0x1000ffff\fP,
+is used for RSS.
+.UNINDENT
+.sp
+The following filters are supported:
+.INDENT 0.0
+.IP \(bu 2
+Cloud filters:
+.INDENT 2.0
+.IP \(bu 2
+Inner MAC, Inner VLAN (for NVGRE, VXLAN or GENEVE packets)
+.IP \(bu 2
+Inner MAC, Inner VLAN, Tenant ID (for NVGRE, VXLAN or GENEVE packets)
+.IP \(bu 2
+Inner MAC, Tenant ID (NVGRE packet or VXLAN/GENEVE packets)
+.IP \(bu 2
+Outer MAC L2 filter
+.IP \(bu 2
+Inner MAC filter
+.IP \(bu 2
+Outer MAC, Tenant ID, Inner MAC
+.IP \(bu 2
+Application Destination IP
+.IP \(bu 2
+Application Source\-IP, Inner MAC (see NOTES below)
+.IP \(bu 2
+Destination Port: TCP, UDP, or both, depending on module parameter
+.IP \(bu 2
+ToQueue: Use MAC, VLAN to point to a queue
+.UNINDENT
+.IP \(bu 2
+L3 filters:
+.INDENT 2.0
+.IP \(bu 2
+Application Destination IP
+.UNINDENT
+.UNINDENT
+.sp
+Note the following:
+.INDENT 0.0
+.IP \(bu 2
+Cloud filters are not compatible with ADQ.
+.IP \(bu 2
+The Destination Port cloud filter is a load time option; use the \fBl4mode\fP
+module parameter to enable it. The \fBl4mode\fP module parameter supports the
+following settings:
+.INDENT 2.0
+.IP \(bu 2
+parameter not present = destination port filters disabled
+.IP \(bu 2
+0 = UDP cloud filter mode enabled; destination port applies to UDP
+.IP \(bu 2
+1 = TCP cloud filter mode enabled; destination port applies to TCP
+.IP \(bu 2
+2 = both TCP and UDP filters are enabled; destination port applies to
+both UDP and TCP protocols
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 2.0
+.INDENT 3.5
+When the \fBl4mode\fP parameter specifies TCP (1) or both (2), the
+i40e driver will disable Application Targeted Routing (ATR). The driver
+will reenable ATR when the last Destination Port cloud filter rule is
+removed.
+.UNINDENT
+.UNINDENT
+.IP \(bu 2
+The Application Source\-IP, Inner MAC filter is not available when the
+Destination Port cloud filter is selected.
+.IP \(bu 2
+To change back to default mode (which supports the Application Source\-IP,
+Inner MAC filter listed above), you must reboot the system.
+.UNINDENT
+.sp
+Cloud filters are specified using ethtool\(aqs ntuple interface, but the driver
+uses the \fBuser\-def\fP field to determine whether to treat the filter as a cloud
+filter or a regular filter. To enable a cloud filter, set the highest bit of
+the user\-def field, \fBuser\-def 0x8000000000000000\fP to enable the cloud features
+described below. This specifies to the driver to treat the filter specially and
+not treat it like the regular filters described above. Note that cloud filters
+also read the other bits in the user\-def field separately so you cannot use the
+flexible data feature described above.
+.sp
+For regular Intel Ethernet Flow Director filters:
+.INDENT 0.0
+.IP \(bu 2
+No user\-def specified or highest bit (bit 63) is 0. For example:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+# ethtool \-U enp130s0 flow\-type ip4 src\-ip 192.168.0.1 dst\-ip 192.168.0.109
+action 6 loc <N>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+For L3 filters (non\-tunneled packets):
+.INDENT 0.0
+.IP \(bu 2
+\fBuser\-def 0x8000000000000000\fP (no Tenant ID/VNI specified in remaining
+bits of the user\-def field)
+.IP \(bu 2
+Only L3 parameters (src\-IP, dst\-IP) are considered.
+.IP \(bu 2
+For example, to redirect traffic coming from 192.168.42.13 with destination
+192.168.42.33 into VF id 1, and call this \(dqrule 3\(dq:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-U enp130s0 flow\-type ip4 src\-ip 192.168.42.13 dst\-ip 192.168.42.33
+user\-def 0x8000000000000000 action 0x200000000 loc 3
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+For cloud filters (tunneled packets):
+.INDENT 0.0
+.IP \(bu 2
+All other filters, including where Tenant ID/VNI is specified.
+The lower 32 bits of the user\-def field can carry the tenant ID/VNI
+if required.
+.IP \(bu 2
+The \fBloc\fP parameter specifies the rule number of the filter as being
+stored in the base driver.
+.IP \(bu 2
+The VF can be specified using the \fBaction\fP field, just as regular filters
+described in the \fI\%Sideband Perfect Filters\fP section above.
+.IP \(bu 2
+To forward tunneled GRE packets directly to the VF, set bit 24 of the
+\fBuser\-def\fP field. (Note: This feature is not supported on Intel(R) Ethernet
+Network Connection X722 devices.)
+.IP \(bu 2
+Cloud filters can be defined with inner MAC, outer MAC, inner IP address,
+inner VLAN, and VNI as part of the cloud tuple. Cloud filters filter on
+destination (not source) MAC and IP. The destination and source MAC
+address fields in the ethtool command are overloaded as dst = outer,
+src = inner MAC address to facilitate tuple definition for a cloud filter.
+.IP \(bu 2
+Examples:
+.sp
+To redirect traffic on VXLAN using tunnel id 34 (hex 0x22) coming from
+outer MAC address 8b:9d:ed:6a:ce:43 and inner MAC address
+1d:44:9d:54:da:de into VF id 1 and call this \(dqrule 38\(dq:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-U enp130s0 flow\-type ether dst 8b:9d:ed:6a:ce:43 \e
+src 1d:44:9d:54:da:de user\-def 0x8000000000000022 loc 38 \e
+action 0x200000000
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+To forward tunneled GRE packets to VF 0:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-U enp130s0 flow\-type ether user\-def 0x8000000001000000
+action 0x10000ffff
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+To redirect traffic to L4 destination port 4789 to VF 0, when the l4mode
+module parameter is set to UDP:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-U enp130s0 flow\-type udp4 dst\-port 4789 action 0xffffffff00000000
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SS Link\-Level Flow Control (LFC)
+.sp
+Ethernet Flow Control (IEEE 802.3x) can be configured with ethtool to enable
+receiving and transmitting pause frames for i40e. When transmit is enabled,
+pause frames are generated when the receive packet buffer crosses a predefined
+threshold. When receive is enabled, the transmit unit will halt for the time
+delay specified when a pause frame is received.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+You must have a flow control capable link partner.
+.UNINDENT
+.UNINDENT
+.sp
+Flow Control is disabled by default.
+.sp
+Use ethtool to change the flow control settings.
+.sp
+To enable or disable Rx or Tx Flow Control:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-A <ethX> rx <on|off> tx <on|off>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+This command only enables or disables Flow Control if auto\-negotiation
+is disabled. If auto\-negotiation is enabled, this command changes the
+parameters used for auto\-negotiation with the link partner.
+.UNINDENT
+.UNINDENT
+.sp
+To enable or disable auto\-negotiation:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-s <ethX> autoneg <on|off>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.IP \(bu 2
+Flow Control auto\-negotiation is part of link auto\-negotiation. Depending
+on your device, you may not be able to change the auto\-negotiation setting.
+.IP \(bu 2
+The i40e driver requires flow control on both the port and link partner.
+If flow control is disabled on one of the sides, the port may appear to
+hang on heavy traffic.
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SS RSS Hash Flow
+.sp
+Allows you to set the hash bytes per flow type and any combination of one or
+more options for Receive Side Scaling (RSS) hash byte configuration.
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-N <ethX> rx\-flow\-hash <type> <option>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Where \fB<type>\fP is:
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.TP
+.B tcp4
+signifying TCP over IPv4
+.TP
+.B udp4
+signifying UDP over IPv4
+.TP
+.B tcp6
+signifying TCP over IPv6
+.TP
+.B udp6
+signifying UDP over IPv6
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+And \fB<option>\fP is one or more of:
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.TP
+.B s
+Hash on the IP source address of the Rx packet.
+.TP
+.B d
+Hash on the IP destination address of the Rx packet.
+.TP
+.B f
+Hash on bytes 0 and 1 of the Layer 4 header of the Rx packet.
+.TP
+.B n
+Hash on bytes 2 and 3 of the Layer 4 header of the Rx packet.
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+For example, to hash on the source and destination IP address for TCP IPv4
+traffic, use the following:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-N <ethX> rx\-flow\-hash tcp4 sd
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+To hash on the source and destination ports for UDP IPv6 traffic, use the
+following:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-N <ethX> rx\-flow\-hash udp6 sdfn
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SS Application Device Queues (ADQ)
+.sp
+Application Device Queues (ADQ) allow you to dedicate one or more queues to a
+specific application. This can reduce latency for the specified application,
+and allow Tx traffic to be rate limited per application.
+.sp
+Requirements:
+.INDENT 0.0
+.IP \(bu 2
+Kernel version 4.19.58 or later
+.IP \(bu 2
+The \fBsch_mqprio\fP, \fBact_mirred\fP, and \fBcls_flower\fP modules must be
+loaded. For example:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+modprobe sch_mqprio
+modprobe act_mirred
+modprobe cls_flower
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.IP \(bu 2
+The latest version of iproute2
+.sp
+We recommend the following installation method:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cd iproute2
+\&./configure
+make DESTDIR=/opt/iproute2 install
+ln \-s /opt/iproute2/sbin/tc /usr/local/sbin/tc
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.IP \(bu 2
+NVM version 6.01 or later
+.IP \(bu 2
+ADQ cannot be enabled when the following features are enabled:
+.INDENT 2.0
+.IP \(bu 2
+Data Center Bridging (DCB)
+.IP \(bu 2
+Multiple Functions per Port (MFP)
+.IP \(bu 2
+Sideband Filters
+.UNINDENT
+.IP \(bu 2
+If another driver (for example, DPDK) has set cloud filters, you cannot
+enable ADQ.
+.UNINDENT
+.SS Creating Traffic Classes
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+These instructions are not specific to ADQ configuration. Refer to
+the tc and tc\-flower man pages for more information on creating traffic
+classes (TCs).
+.UNINDENT
+.UNINDENT
+.sp
+To create traffic classes on the interface:
+.INDENT 0.0
+.IP 1. 3
+Use the tc command to create traffic classes. You can create a maximum of
+8 TCs per interface:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+tc qdisc add dev <ethX> root mqprio num_tc <tcs> map <priorities>
+queues <count1@offset1 ...> hw 1 mode channel shaper bw_rlimit
+min_rate <min_rate1 ...> max_rate <max_rate1 ...>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.INDENT 0.0
+.INDENT 3.5
+Where:
+.INDENT 0.0
+.TP
+.B num_tc <tcs>
+The number of TCs to use.
+.TP
+.B map <priorities>
+The map of priorities to TCs. You can map up to
+16 priorities to TCs.
+.TP
+.B queues <count1@offset1 ...>
+For each TC, \fB<num queues>@<offset>\fP\&. The max total
+number of queues for all TCs is the number of cores.
+.TP
+.B hw 1 mode channel
+\fBchannel\fP with \fBhw\fP set to 1 is a new hardware
+offload mode in mqprio that makes full use of the mqprio
+options, the TCs, the queue configurations, and the QoS
+parameters.
+.TP
+.B shaper bw_rlimit
+For each TC, sets the minimum and maximum bandwidth
+rates. The totals must be equal to or less than the port
+speed. This parameter is optional and is required only
+to set up the Tx rates.
+.TP
+.B min_rate <min_rate1>
+Sets the minimum bandwidth rate limit for each TC.
+.TP
+.B max_rate <max_rate1 ...>
+Sets the maximum bandwidth rate limit for each TC. You
+can set a min and max rate together.
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+If you set \fBmax_rate\fP to less than 50Mbps, then \fBmax_rate\fP is
+rounded up to 50Mbps and a warning is logged in dmesg.
+.sp
+See the mqprio man page and the examples below for more information.
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.INDENT 0.0
+.IP 1. 3
+Verify the bandwidth limit using network monitoring tools such as ifstat
+or \fBsar \-n DEV [interval] [number of samples]\fP\&.
+.sp
+\fBNOTE:\fP
+.INDENT 3.0
+.INDENT 3.5
+Setting up channels via ethtool (\fBethtool \-L\fP) is not supported
+when the TCs are configured using mqprio.
+.UNINDENT
+.UNINDENT
+.IP 2. 3
+Enable hardware TC offload on the interface:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-K <ethX> hw\-tc\-offload on
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.IP 3. 3
+Add \fBclsact\fP qdisc to enable adding ingress/egress filters for Rx/Tx:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+tc qdisc add dev <ethX> clsact
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.IP 4. 3
+Verify successful TC creation after qdisc is created:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+tc qdisc show dev <ethX> ingress
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SS Traffic Class Examples
+.sp
+See the tc and tc\-flower man pages for more information on traffic control and
+TC flower filters.
+.sp
+To set up two TCs (tc0 and tc1), with 16 queues each, priorities 0\-3 for
+tc0 and 4\-7 for tc1, and max Tx rate set to 1Gbit for tc0 and 3Gbit for tc1:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+tc qdisc add dev ens4f0 root mqprio num_tc 2 map 0 0 0 0 1 1 1 1 queues
+16@0 16@16 hw 1 mode channel shaper bw_rlimit max_rate 1Gbit 3Gbit
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Where:
+.INDENT 0.0
+.TP
+.B map 0 0 0 0 1 1 1 1
+Sets priorities 0\-3 to use tc0 and 4\-7 to use tc1
+.TP
+.B queues 16@0 16@16
+Assigns 16 queues to tc0 at offset 0 and 16 queues
+to tc1 at offset 16
+.UNINDENT
+.SS Creating Traffic Class Filters
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+These instructions are not specific to ADQ configuration.
+.UNINDENT
+.UNINDENT
+.sp
+After creating traffic classes, use the tc command to create filters for
+traffic. Refer to the tc and tc\-flower man pages for more information.
+.sp
+To view all TC filters:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+tc filter show dev <ethX> ingress
+tc filter show dev <ethX> egress
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.INDENT 0.0
+.IP \(bu 2
+Tunnel filters are not supported in ADQ. If encapsulated packets do arrive in
+non\-tunnel mode, filtering will be done on the inner headers. For example,
+for VXLAN traffic in non\-tunnel mode, if PCTYPE is identified as a VXLAN
+encapsulated packet, then the outer headers are ignored. Therefore, inner
+headers are matched.
+.IP \(bu 2
+If a TC filter on a PF matches traffic over a VF (on the PF), that traffic
+will be routed to the appropriate queue of the PF, and will not be passed on
+the VF. Such traffic will end up getting dropped higher up in the TCP/IP
+stack as it does not match PF address data.
+.IP \(bu 2
+If traffic matches multiple TC filters that point to different TCs, that
+traffic will be duplicated and sent to all matching TC queues. The hardware
+switch mirrors the packet to a VSI list when multiple filters are matched.
+.UNINDENT
+.SS TC Filter Examples
+.sp
+To configure TCP traffic class filters, where:
+.INDENT 0.0
+.TP
+.B protocol
+Encapsulation protocol (valid options are IP and 802.1Q).
+.TP
+.B prio
+Priority.
+.TP
+.B flower
+Flow\-based traffic control filter.
+.TP
+.B dst_ip
+IP address of the device.
+.TP
+.B ip_proto
+IP protocol to use (TCP or UDP).
+.TP
+.B dst_port
+Destination port.
+.TP
+.B src_port
+Source port.
+.TP
+.B skip_sw
+Flag to add the rule only in hardware.
+.TP
+.B hw_tc
+Route incoming traffic flow to this hardware TC. The TC count
+starts at 0. For example, \fBhw_tc 1\fP indicates that the filter
+is on the second TC.
+.TP
+.B vlan_id
+VLAN ID.
+.UNINDENT
+.INDENT 0.0
+.IP \(bu 2
+TCP: Destination IP + L4 Destination Port
+.sp
+To route incoming TCP traffic with a matching destination IP address and
+destination port to the given TC:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+tc filter add dev <ethX> protocol ip ingress prio 1 flower dst_ip
+<ip_address> ip_proto tcp dst_port <port_number> skip_sw hw_tc 1
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.IP \(bu 2
+TCP: Source IP + L4 Source Port
+.sp
+To route outgoing TCP traffic with a matching source IP address and
+source port to the given TC associated with the given priority:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+tc filter add dev <ethX> protocol ip egress prio 1 flower src_ip
+<ip_address> ip_proto tcp src_port <port_number> action skbedit priority 1
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.IP \(bu 2
+TCP: Destination IP + L4 Destination Port + VLAN Protocol
+.sp
+To route incoming TCP traffic with a matching destination IP address and
+destination port to the given TC using the VLAN protocol (802.1Q):
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+tc filter add dev <ethX> protocol 802.1Q ingress prio 1 flower
+dst_ip <ip address> eth_type ipv4 ip_proto tcp dst_port <port_number>
+vlan_id <vlan_id> skip_sw hw_tc 1
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+You can add multiple filters to the device, using the same recipe
+(and requires no additional recipe resources), either on the same interface
+or on different interfaces. Each filter uses the same fields for matching,
+but can have different match values.
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+tc filter add dev <ethX> protocol ip ingress prio 1 flower ip_proto
+tcp dst_port <port_number> skip_sw hw_tc 1
 
-.IP
-Use the ip command to increase the MTU size. For example, enter the following where <ethX> is the interface number:
+tc filter add dev <ethX> protocol ip egress prio 1 flower ip_proto tcp
+src_port <port_number> action skbedit priority 1
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+For example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+tc filter add dev ens4f0 protocol ip ingress prio 1 flower ip_proto
+tcp dst_port 5555 skip_sw hw_tc 1
 
-.IP
-# ip link set mtu 9000 dev <ethX>
-.IP
-# ip link set up dev <ethX>
-
-.LP
-NOTE: The maximum MTU setting for jumbo frames is 9702. This corresponds to the maximum jumbo frame size of 9728 bytes.
-
-NOTE: This driver will attempt to use multiple page sized buffers to receive each jumbo packet. This should help to avoid buffer starvation issues when allocating receive packets.
-
-NOTE: Packet loss may have a greater impact on throughput when you use jumbo frames. If you observe a drop in performance after enabling jumbo frames, enabling flow control may mitigate the issue.
-See the section "Jumbo Frames" in the Readme.
-.LP
-.B EEE (Energy Efficient Ethernet)
-.IP
-.B Valid Range: 0-1
-.IP
+tc filter add dev ens4f0 protocol ip egress prio 1 flower ip_proto
+tcp src_port 5555 action skbedit priority 1
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SS RDMA (Remote Direct Memory Access)
+.sp
+Remote Direct Memory Access, or RDMA, allows a network device to transfer data
+directly to and from application memory on another system, increasing
+throughput and lowering latency in certain networking environments.
+.sp
+The i40e driver supports the following RDMA protocols:
+.INDENT 0.0
+.IP \(bu 2
+iWARP (Internet Wide Area RDMA Protocol)
+.UNINDENT
+.sp
+RDMA requires auxiliary bus support. Refer to \fI\%Auxiliary Bus\fP in this
+README for more information.
+.sp
+For detailed installation and configuration information for RDMA, see the
+README file in the irdma driver tarball.
+.SS Auxiliary Bus
+.sp
+Inter\-Driver Communication (IDC) is the mechanism in which LAN drivers (such as
+i40e) communicate with peer drivers (such as irdma). Starting in kernel 5.11,
+Intel LAN and RDMA drivers use an auxiliary bus mechanism for IDC.
+.sp
+RDMA functionality requires use of the auxiliary bus.
+.sp
+If your kernel supports the auxiliary bus, the LAN and RDMA drivers will use
+the inbox auxiliary bus for IDC. For kernels lower than 5.11, the base driver
+will automatically install an out\-of\-tree auxiliary bus module.
+.SS Source Pruning
+.sp
+The i40e driver allows you to enable or disable source MAC address pruning of
+Ethernet packets. You can use this feature without a bond created or when
+active\-backup bonding is configured with ARP monitoring.
+.sp
+Use the ethtool private flag disable\-source\-pruning to enable or disable source
+MAC pruning on received packets:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-\-set\-priv\-flags <ethX> disable\-source\-pruning on|off
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Where:
+.INDENT 0.0
+.TP
+.B off
+Discards packets with source MAC address matching the source MAC
+address of the interface (default)
+.TP
+.B on
+Receives packets with source MAC address matching the source MAC
+address of the interface
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+When you set disable\-source\-pruning to on (enabled):
+.INDENT 0.0
+.IP \(bu 2
+The driver will disable spoof check.
+.IP \(bu 2
+The network interface will receive all packets with a source MAC address
+matching the network interface\(aqs MAC address.
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+The i40e driver allows you to enable or disable source pruning on a specified
+VF using the \fBvf\-source\-pruning\fP private flag. You must also disable MAC
+anti\-spoofing for the VF and enable trust mode for the VF. All three must be
+set for source pruning on a VF to function. This will allow you to configure
+VRRP (virtual router redundancy protocol) where one VF is designated as the
+primary device and all other VFs are secondary devices.
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-\-set\-priv\-flags <ethX> vf\-source\-pruning on|off
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Where:
+.INDENT 0.0
+.TP
+.B on
+Discards packets with source MAC address matching the source MAC
+address of the interface (default)
+.TP
+.B off
+Receives packets with source MAC address matching the source MAC
+address of the interface
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+Enabling vf\-source\-pruning will not automatically set anti\-spoofing
+and trust mode automatically. You must perform these steps yourself. They
+can be perfomed in any order. For example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ip link set <ethX> vf <vf id> spoofchk off
+ip link set <ethX> vf <vf id> trust on
+ethtool \-\-set\-priv\-flag <ethX> vf\-source\-pruning off
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+For more information, refer to \fI\%MAC and VLAN Anti\-Spoofing Feature for VFs\fP and
+\fI\%Trusted VFs and VF Promiscuous Mode\fP in this README.
+.SS EEE (Energy Efficient Ethernet)
+.sp
+Valid Range: 0\-1
+.INDENT 0.0
+.IP \(bu 2
 0 = Disables EEE
-.IP
+.IP \(bu 2
 1 = Enables EEE
-.IP
-
-A link between two EEE-compliant devices will result in periodic bursts of data followed by periods where the link is in an idle state. This Low Power Idle (LPI) state is supported at 2.5 Gbps and 5 Gbps link speeds.
-
-NOTES:
-- EEE support requires auto-negotiation.
-- Both link partners must support EEE.
-- EEE is not supported on all Intel(R) Ethernet Network devices or at all link speeds.
-
+.UNINDENT
+.sp
+A link between two EEE\-compliant devices will result in periodic bursts of data
+followed by periods where the link is in an idle state. This Low Power Idle
+(LPI) state is supported at 2.5Gbps and 5Gbps link speeds.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.IP \(bu 2
+EEE support requires auto\-negotiation.
+.IP \(bu 2
+Both link partners must support EEE.
+.IP \(bu 2
+EEE is not supported on all Intel(R) Ethernet Network devices or at all
+link speeds.
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
 Example:
-
-# ethtool --show-eee <ethX>
-# ethtool --set-eee <ethX> [eee on|off]
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-\-show\-eee <ethX>
+ethtool \-\-set\-eee <ethX> [eee on|off]
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SS Disabling Physical Link When the Interface Is Brought Down
+.sp
+When the \fBlink\-down\-on\-close\fP private flag is set to \(dqon\(dq, the port\(aqs link
+will go down when the interface is brought down using the \fBip link set <ethX> down\fP
+command.
+.sp
+Use ethtool to view and set link\-down\-on\-close, as follows:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-\-show\-priv\-flags <ethX>
+ethtool \-\-set\-priv\-flags <ethX> link\-down\-on\-close [on|off]
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SS Jumbo Frames
+.sp
+Jumbo Frames support is enabled by changing the Maximum Transmission Unit (MTU)
+to a value larger than the default value of 1500.
+.sp
+Use the ip command to increase the MTU size. For example, enter the following
+where \fB<ethX>\fP is the interface number:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ip link set mtu 9000 dev <ethX>
+ip link set up dev <ethX>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+This setting is not saved across reboots.
+.sp
+Add \fBMTU=9000\fP to the following file to make the setting change permanent:
+.INDENT 0.0
+.IP \(bu 2
+For RHEL: \fB/etc/sysconfig/network\-scripts/ifcfg\-<ethX>\fP
+.IP \(bu 2
+For SLES: \fB/etc/sysconfig/network/<config_file>\fP
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.IP \(bu 2
+The maximum MTU setting for jumbo frames is 9702. This corresponds to the
+maximum jumbo frame size of 9728 bytes.
+.IP \(bu 2
+This driver will attempt to use multiple page sized buffers to receive
+each jumbo packet. This should help to avoid buffer starvation issues when
+allocating receive packets.
+.IP \(bu 2
+Packet loss may have a greater impact on throughput when you use jumbo
+frames. If you observe a drop in performance after enabling jumbo frames,
+enabling flow control may mitigate the issue.
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SS Speed and Duplex Configuration
+.sp
+The i40e driver supports setting the link speed using ethtool. You can only set
+speeds that the device actually supports. You cannot set duplex settings using
+ethtool.
+.sp
+To see the speed configurations your device supports, run the following:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool <ethX>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+To set your device to a supported speed on Intel Ethernet 710 Series devices,
+use the following:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-s <ethX> speed <desired speed in Mbps>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+For example, to set the speed to 10Gbps, use:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-s <ethX> speed 10000
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+The \fBspeed\fP parameter is not supported on Intel Ethernet Network
+Connection X722.
+.UNINDENT
+.UNINDENT
+.sp
+Alternately, you can use the \fBadvertise\fP parameter to set the link speed.
+The \fBadvertise\fP method is supported on all Intel Ethernet 700 Series devices.
+.sp
+To have your device advertise supported speeds, use the following, where \fBN\fP
+is a bitmask of the desired speeds:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-s <ethX> advertise N
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+For example, to have your device advertise 10000baseSR Full, use:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-s <ethX> advertise 0x80000000000
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+For more details, please refer to the ethtool man page.
+.SS NAPI
+.sp
+This driver supports NAPI (Rx polling mode). For more information on NAPI, see
+\fI\%https://docs.kernel.org/networking/napi.html\fP\&.
+.SS IEEE 802.1ad (QinQ) Support
+.sp
+The IEEE 802.1ad standard, informally known as QinQ, allows for multiple VLAN
+IDs within a single Ethernet frame. VLAN IDs are sometimes referred to as
+\(dqtags,\(dq and multiple VLAN IDs are thus referred to as a \(dqtag stack.\(dq Tag stacks
+allow L2 tunneling and the ability to separate traffic within a particular VLAN
+ID, among other uses.
+.sp
+The following are examples of how to configure 802.1ad (QinQ):
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ip link add link eth0 eth0.24 type vlan proto 802.1ad id 24
+ip link add link eth0.24 eth0.24.371 type vlan proto 802.1Q id 371
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Where \fB24\fP and \fB371\fP are example VLAN IDs.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.IP \(bu 2
+802.1ad (QinQ) is supported in 3.19 and later kernels.
+.IP \(bu 2
+Receive checksum offloads, cloud filters, and VLAN acceleration are not
+supported for 802.1ad (QinQ) packets.
+.IP \(bu 2
+VLAN protocols use the following EtherTypes:
+.INDENT 2.0
+.IP \(bu 2
+802.1Q = EtherType 0x8100
+.IP \(bu 2
+802.1ad = EtherType 0x88A8
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SS IEEE 1588 Precision Time Protocol (PTP) Hardware Clock (PHC)
+.sp
+Precision Time Protocol (PTP) is used to synchronize clocks in a computer
+network. PTP support varies among Intel devices that support this driver. Use
+the following to get a definitive list of PTP capabilities supported by
+the device:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-T <ethX>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SS Tunnel/Overlay Stateless Offloads
+.sp
+Supported tunnels and overlays include VXLAN, GENEVE, and others depending on
+hardware and software configuration. Stateless offloads are enabled by default.
+.sp
+To view the current state of all offloads:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-k <ethX>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SS Multiple Functions per Port
+.sp
+Some adapters based on the Intel Ethernet Controller X710/XL710 support
+multiple functions on a single physical port. Configure these functions through
+the System Setup/BIOS.
+.sp
+Minimum TX Bandwidth is the guaranteed minimum data transmission bandwidth, as
+a percentage of the full physical port link speed, that the partition will
+receive. The bandwidth the partition is awarded will never fall below the level
+you specify.
+.sp
+The range for the minimum bandwidth values is:
+.INDENT 0.0
+.IP \(bu 2
+1 to ((100 minus # of partitions on the physical port) plus 1)
+.UNINDENT
+.sp
+For example, if a physical port has 4 partitions, the range would be:
+.INDENT 0.0
+.IP \(bu 2
+1 to ((100 \- 4) + 1 = 97)
+.UNINDENT
+.sp
+The Maximum Bandwidth percentage represents the maximum transmit bandwidth
+allocated to the partition as a percentage of the full physical port link
+speed. The accepted range of values is 1\-100. The value is used as a limiter,
+should you chose that any one particular function not be able to consume 100%
+of a port\(aqs bandwidth (should it be available). The sum of all the values for
+Maximum Bandwidth is not restricted, because no more than 100% of a port\(aqs
+bandwidth can ever be used.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+X710/XXV710 devices fail to enable Max VFs (64) when Multiple
+Functions per Port (MFP) and SR\-IOV are enabled. An error from i40e is
+logged that says \(dqadd vsi failed for VF N, aq_err 16\(dq. To work around
+the issue, enable less than 64 virtual functions (VFs).
+.UNINDENT
+.UNINDENT
+.SS Data Center Bridging (DCB)
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+The kernel assumes that TC0 is available, and will disable Priority
+Flow Control (PFC) on the device if TC0 is not available. To fix this,
+ensure TC0 is enabled when setting up DCB on your switch.
+.UNINDENT
+.UNINDENT
+.sp
+DCB is a configuration Quality of Service implementation in hardware. It uses
+the VLAN priority tag (802.1p) to filter traffic. That means that there are 8
+different priorities that traffic can be filtered into. It also enables
+priority flow control (802.1Qbb) which can limit or eliminate the number of
+dropped packets during network stress. Bandwidth can be allocated to each of
+these priorities, which is enforced at the hardware level (802.1Qaz).
+.sp
+DCB is normally configured on the network using the DCBX protocol (802.1Qaz), a
+specialization of LLDP (802.1AB). The i40e driver supports the following
+mutually exclusive variants of DCBX support:
+.INDENT 0.0
+.IP \(bu 2
+Firmware\-based LLDP Agent
+.IP \(bu 2
+Software\-based LLDP Agent
+.UNINDENT
+.sp
+In firmware\-based mode, firmware intercepts all LLDP traffic and handles DCBX
+negotiation transparently for the user. In this mode, the adapter operates in
+\(dqwilling\(dq DCBX mode, receiving DCB settings from the link partner (typically a
+switch). The local user can only query the negotiated DCB configuration. For
+information on configuring DCBX parameters on a switch, please consult the
+switch manufacturer\(aqs documentation.
+.sp
+In software\-based mode, LLDP traffic is forwarded to the network stack and user
+space, where a software agent can handle it. In this mode, the adapter can
+operate in either \(dqwilling\(dq or \(dqnonwilling\(dq DCBX mode and DCB configuration can
+be both queried and set locally. This mode requires the FW\-based LLDP Agent to
+be disabled.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.IP \(bu 2
+You can enable and disable the firmware\-based LLDP Agent using an ethtool
+private flag. Refer to the \fI\%FW\-LLDP (Firmware Link Layer Discovery Protocol)\fP section in this README for more
+information.
+.IP \(bu 2
+In software\-based DCBX mode, you can configure DCB parameters using
+software LLDP/DCBX agents that interface with the Linux kernel\(aqs DCB
+Netlink API. We recommend using OpenLLDP as the DCBX agent when running
+in software mode. For more information, see the OpenLLDP man pages and
+\fI\%https://github.com/intel/openlldp\fP\&.
+.IP \(bu 2
+The driver implements the DCB netlink interface layer to allow the user
+space to communicate with the driver and query DCB configuration for the
+port.
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SS FW\-LLDP (Firmware Link Layer Discovery Protocol)
+.sp
+Use ethtool to change FW\-LLDP settings. The FW\-LLDP setting is per port and
+persists across boots.
+.sp
+To enable LLDP:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-\-set\-priv\-flags <ethX> disable\-fw\-lldp off
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+To disable LLDP:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-\-set\-priv\-flags <ethX> disable\-fw\-lldp on
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+To check the current LLDP setting:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-\-show\-priv\-flags <ethX>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+You must enable the UEFI HII \fBLLDP Agent\fP attribute for this
+setting to take effect. If \fBLLDP AGENT\fP is set to disabled, you cannot
+enable it from the OS.
+.UNINDENT
+.UNINDENT
+.SS Forward Error Correction (FEC)
+.sp
+Allows you to set the Forward Error Correction (FEC) mode. FEC improves link
+stability, but increases latency. Many high quality optics, direct attach
+cables, and backplane channels provide a stable link without FEC.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.IP \(bu 2
+For devices to benefit from this feature, link partners must have FEC
+enabled.
+.IP \(bu 2
+Intel(R) Ethernet Controller XXV710 devices support all FEC modes listed
+below.
+.IP \(bu 2
+Intel(R) Ethernet Connection X722 for 10GbE backplane devices only support
+BASE\-R FEC mode. They do not support auto FEC or RS\-FEC modes.
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+On kernels older than 4.14, use the following private flags to disable
+FEC modes:
+.INDENT 0.0
+.TP
+.B rs\-fec
+0 to disable, 1 to enable
+.TP
+.B base\-r\-fec
+0 to disable, 1 to enable
+.UNINDENT
+.sp
+On kernel 4.14 or later, use ethtool to get/set the following FEC modes:
+.INDENT 0.0
+.IP \(bu 2
+No FEC
+.IP \(bu 2
+Auto FEC
+.IP \(bu 2
+BASE\-R FEC
+.IP \(bu 2
+RS\-FEC
+.UNINDENT
+.SS Dynamic Device Personalization
+.sp
+Dynamic Device Personalization (DDP) allows you to change the packet processing
+pipeline of a device by applying a profile package to the device at runtime.
+Profiles can be used to, for example, add support for new protocols, change
+existing protocols, or change default settings. DDP profiles can also be rolled
+back without rebooting the system.
+.sp
+Requirements:
+.INDENT 0.0
+.IP \(bu 2
+Intel Ethernet X710/XXV710/XL710 adapter (X722 series devices are not
+supported at this time)
+.IP \(bu 2
+Firmware 6.0 or newer
+.IP \(bu 2
+RHEL 7.5 or later or Linux Kernel 4.0.1 or newer
+.UNINDENT
+.sp
+To apply a profile, copy it first to the \fBintel/i40e/ddp\fP directory relative to
+your firmware root (usually \fB/lib/firmware\fP or \fB/lib/firmware/updates\fP).
+For example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+/lib/firmware/intel/i40e/ddp
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Then use the ethtool \-f|\-\-flash flag with region 100:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-f <ethX> <profile name> 100
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+For example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-f eth0 gtp.pkgo 100
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+You can roll back to a previously loaded profile using \fB\-\fP instead of the
+profile name:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-f <ethX> \- 100
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+For example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-f eth0 \- 100
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+For every rollback request, one profile will be removed, from last to first
+(LIFO) order.
+.INDENT 0.0
+.IP \(bu 2
+DDP profiles are loaded only on the interface corresponding to first physical
+function of the device (PF0), but the configuration is applied to all ports of
+the adapter.
+.IP \(bu 2
+DDP profiles are not persistent. A system reboot will reset the device to its
+default configuration.
+.IP \(bu 2
+DDP profiles are NOT automatically unloaded when the driver in
+unbound/unloaded. Please note that subsequent driver reload may corrupt the
+profile configuration during its initialization and is NOT recommended.
+.IP \(bu 2
+DDP profiles should be manually rolled\-back before driver unload/unbind if
+the intention is to start with clean HW configuration.
+.IP \(bu 2
+Exercise caution while loading DDP profiles. Attempting to load files other
+than DDP profiles provided by Intel may cause system instability, system
+crashes, or system hangs.
+.UNINDENT
+.sp
+More details about Dynamic Device Personalization can be found on the Intel
+Developer Zone site:
+\fI\%https://software.intel.com/en\-us/articles/dynamic\-device\-personalization\-for\-intel\-ethernet\-700\-series\fP
+.SS SR\-IOV Hypervisor Management Interface
+.sp
+The sysfs file structure below supports the SR\-IOV hypervisor management
+interface:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+/sys/class/net/<ethX>/device/sriov (see 1 below)
++\-\- qos
+| +\-\- [TC, 0\-7]
+||  +\-\- priority
+||  +\-\- lsp
+||  +\-\- max_bw
+| +\-\- apply
++\-\- egress_mirror
++\-\- ingress_mirror
++\-\- tpid
++\-\- [VF\-id, 0 .. 255] (see 2 below)
+| +\-\- vlan_mirror
+| +\-\- trunk
+| +\-\- allow_untagged
+| +\-\- egress_mirror
+| +\-\- ingress_mirror
+| +\-\- loopback
+| +\-\- mac
+| +\-\- mac_list
+| +\-\- promisc
+| +\-\- vlan_strip
+| +\-\- enable
+| +\-\- link_state
+| +\-\- queue_type
+| +\-\- num_queues
+| +\-\- max_tx_rate
+| +\-\- stats
+||  +\-\- rx_bytes
+||  +\-\- rx_packets
+||  +\-\- rx_dropped
+||  +\-\- tx_bytes
+||  +\-\- tx_packets
+||  +\-\- tx_dropped
+||  +\-\- tx_errors
+| +\-\- reset_stats
+| +\-\- trust
+| +\-\- qos
+||  +\-\- [TC, 0\-7]
+||    +\-\- share
+||    +\-\- Max_TC_TX_Rate
+||  +\-\- share
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.INDENT 0.0
+.TP
+.B 1
+kobject started from \fBsriov\fP is not available from existing kernel
+sysfs, and it requires device driver to implement this interface.
+.TP
+.B 2
+maximum number of SR\-IOV instances is 256. The actual number of instances
+created depends on the value set for
+\fB/sys/bus/devices/<device pci address>/sriov_numvfs\fP
+.UNINDENT
+.sp
+Supported SR\-IOV hypervisor functions:
+.INDENT 0.0
+.TP
+.B priority
+Sets the list of priority code point (PCP) values to map to the traffic
+class.
+.sp
+Example 1: set priority 0 and 1 to traffic class 0:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo 0,1 > /sys/class/net/p1p1/device/sriov/qos/0/priority
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: display current setting for TC3:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cat /sys/class/net/p1p1/device/sriov/qos/3/priority
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B lsp
+Sets Link Strict Priority (LSP) for the traffic class.
+.sp
+Example 1: set LSP for traffic class 0:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo on > /sys/class/net/p1p1/device/sriov/qos/0/lsp
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: display current LSP setting for TC0:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cat /sys/class/net/p1p1/device/sriov/qos/0/lsp
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B max_bw
+Sets the maximum bandwidth in Mbps for the traffic class on the PF.
+.sp
+Example 1: set max bandwidth of 2Gbps for traffic class 2:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo 2000 > /sys/class/net/p1p1/device/sriov/qos/2/max_bw
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: display current setting for TC0:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cat /sys/class/net/p1p1/device/sriov/qos/0/max_bw
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B qos/apply
+Applies the VF bandwidth configuration for the port. See \fBqos/share\fP below
+for more information.
+.TP
+.B egress_mirror
+Mirrors egress traffic from the PF to the specified VF on the same PF.
+.sp
+Example 1: add egress traffic mirroring on PF p1p2 to VF 7:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo add 7 > /sys/class/net/p1p2/device/sriov/egress_mirror
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: remove egress traffic mirroring on PF p1p2 to VF 7:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo rem 7 > /sys/class/net/p1p2/device/sriov/egress_mirror
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B ingress_mirror
+Mirrors ingress traffic from the PF to the specified VF on the same PF.
+.sp
+Example 1: add ingress traffic mirroring on PF p1p2 to VF 7:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo add 7 > /sys/class/net/p1p2/device/sriov/ingress_mirror
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: remove ingress traffic mirroring on PF p1p2 to VF 7:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo rem 7 > /sys/class/net/p1p2/device/sriov/inress_mirror
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B tpid
+Specifies the TPID of the outer VLAN tag (S\-tag). Can be set to 0x88A8 or
+0x8100. This setting affects all VFs configured on the specified PF.
+.sp
+Changing the TPID on PF0 results in a device\-wide change and will restart
+all underlying VFs; you must manually reconfigure the TPID to the same value
+on all PFs associated with the NIC.
+.sp
+\fBNOTE:\fP
+.INDENT 7.0
+.INDENT 3.5
+This setting is not supported on Intel(R) Ethernet Network Connection
+X722 based devices.
+.UNINDENT
+.UNINDENT
+.sp
+Example 1: set TPID to 0x88A8:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo 0x88a8 > /sys/class/net/p1p0/device/sriov/tpid
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: show the configured value:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cat /sys/class/net/p1p0/device/sriov/tpid
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B vlan_mirror
+Supports both ingress and egress traffic mirroring. Supports two operations,
+add and rem:
+.INDENT 7.0
+.IP \(bu 2
+add: adds one or more VLAN IDs to a mirror list for a given VF.
+.IP \(bu 2
+rem: removes VLAN IDs from the mirror list for a given VF.
+.UNINDENT
+.sp
+Example 1: mirror traffic based upon VLANs 2,4,6,18\-22 to VF 3 of PF p1p1:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo add 2,4,6,18\-22 > /sys/class/net/p1p1/device/sriov/3/vlan_mirror
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: remove VLAN 4, 15\-17 from traffic mirroring at destination VF 3:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo rem 15\-17 > /sys/class/net/p1p1/device/sriov/3/vlan_mirror
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 3: remove all VLANs from mirroring at VF 3:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo rem 0 \- 4095> /sys/class/net/p1p1/device/sriov/3/vlan_mirror
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B trunk
+Lists the VLANs to filter on. Supports two operations, add and rem:
+.INDENT 7.0
+.IP \(bu 2
+add: adds one or more VLAN IDs into VF VLAN filtering.
+.IP \(bu 2
+rem: removes VLAN IDs from the VF VLAN filtering list.
+.UNINDENT
+.sp
+Example 1: add multiple VLAN tags, VLANs 2,4,5,10\-20, by PF, p1p2, on
+a selected VF, 1, for filtering, with the sysfs support:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo add 2,4,5,10\-20 > /sys/class/net/p1p2/device/sriov/1/trunk
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: remove VLANs 5, 11\-13 from PF p1p2 VF 1 with sysfs:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo rem 5,11\-13 > /sys/class/net/p1p2/device/sriov/1/trunk
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 7.0
+.INDENT 3.5
+For rem, if VLAN ID is not on the VLAN filtering list, the
+VLAN ID will be ignored.
+.UNINDENT
+.UNINDENT
+.TP
+.B allow_untagged
+Supports enabling and disabling the filtering of untagged frames to the
+specified VF.
+.sp
+Example 1: allow untagged packet to VF 1 on p1p2:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo on > /sys/class/net/p1p2/device/sriov/1/allow_untagged
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: disable untagged frames:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo off > /sys/class/net/p1p2/device/sriov/1/allow_untagged
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B egress_mirror
+Supports egress traffic mirroring from this VF to the specified VF.
+.sp
+Example 1: add egress traffic mirroring on PF p1p2 VF 1 to VF 7:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo add 7 > /sys/class/net/p1p2/device/sriov/1/egress_mirror
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: remove egress traffic mirroring on PF p1p2 VF 1 to VF 7:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo rem 7 > /sys/class/net/p1p2/device/sriov/1/egress_mirror
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B ingress_mirror
+Supports ingress traffic mirroring from this VF to the specified VF.
+.sp
+Example 1: mirror ingress traffic on PF p1p2 VF 1 to VF 7:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo add 7 > /sys/class/net/p1p2/device/sriov/1/ingress_mirror
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: show current ingress mirroring configuration for VF 1:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cat /sys/class/net/p1p2/device/sriov/1/ingress_mirror
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B loopback
+Supports Enable/Disable VEB/VEPA (Local loopback).
+.sp
+Example 1: allow traffic switching between VFs on the same PF:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo ON > /sys/class/net/p1p2/device/sriov/loopback
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: send Hairpin traffic to the switch to which the PF is connected:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo OFF > /sys/class/net/p1p2/device/sriov/loopback
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 3: show loopback configuration:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cat /sys/class/net/p1p2/device/sriov/loopback
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B mac
+Supports setting default MAC address. If MAC address is set by this
+command, the PF will not allow VF to change it using an MBOX request.
+.sp
+Example 1: set default MAC address to VF 1:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo \(dq00:11:22:33:44:55\(dq > /sys/class/net/p1p2/device/sriov/1/mac
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: show default MAC address:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cat /sys/class/net/p1p2/device/sriov/1/mac
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B mac_list
+Supports adding additional MACs to the VF. The default MAC is taken from
+\fBip link set p1p2 vf 1 mac 00:11:22:33:44:55\fP if configured. If not, a
+random address is assigned to the VF by the NIC. If the MAC is configured
+using the \fBip link\fP command, the VF cannot change it via MBOX/AdminQ requests.
+.sp
+Example 1: add mac 00:11:22:33:44:55 and 00:66:55:44:33:22 to PF p1p2 VF 1:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo add \(dq00:11:22:33:44:55,00:66:55:44:33:22\(dq > /sys/class/net/p1p2/device/sriov/1/mac_list
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: delete mac 00:11:22:33:44:55 from above VF device:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo rem 00:11:22:33:44:55 > /sys/class/net/p1p2/device/sriov/1/mac_list
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 3: display a VF MAC address list:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cat /sys/class/net/p1p2/device/sriov/1/mac_lis
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B promisc
+Supports setting/unsetting VF device unicast promiscuous mode and multicast
+promiscuous mode.
+.sp
+Example 1: set MCAST promiscuous on PF p1p2 VF 1:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo add mcast > /sys/class/net/p1p2/device/sriov/1/promisc
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: set UCAST promiscuous on PF p1p2 VF 1:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo add ucast > /sys/class/net/p1p2/device/sriov/1/promisc
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 3: unset MCAST promiscuous on PF p1p2 VF 1:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo rem mcast > /sys/class/net/p1p2/device/sriov/1/promisc
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 4: show current promiscuous mode configuration:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cat /sys/class/net/p1p2/device/sriov/1/promisc
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 7.0
+.INDENT 3.5
+VFs set to promiscuous via this sysfs interface may not receive
+packets addressed to another VF on the same port. For another VF to receive
+the packets, you must enable VF true promiscuous mode via ethtool. See
+\fI\%Trusted VFs and VF Promiscuous Mode\fP in this README for more information
+on enabling true promiscuous mode.
+.UNINDENT
+.UNINDENT
+.TP
+.B vlan_strip
+Supports enabling/disabling VF device outer VLAN stripping.
+.sp
+Example 1: enable VLAN strip on VF 3:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo ON > /sys/class/net/p1p1/device/sriov/3/vlan_strip
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: disable VLAN striping VF 3:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo OFF > /sys/class/net/p1p1/device/sriov/3/vlan_strip
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B enable
+Enables or disables the VF device.
+.INDENT 7.0
+.IP \(bu 2
+Enabling a VF will trigger a VF reset.
+.IP \(bu 2
+Enabling a VF does not start any queues in the hardware.
+.IP \(bu 2
+Disabling a VF will forcibly stop the queues and may lead to Tx timeouts
+on the VF or VM.
+.IP \(bu 2
+This feature is not designed to manage traffic flow. It\(aqs intended to
+help prevent or handle error conditions.
+.UNINDENT
+.sp
+Example 1: enable VF 3:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo on > /sys/class/net/p1p1/device/sriov/3/enable
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: disable VF 3:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo off > /sys/class/net/p1p1/device/sriov/3/enable
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 3: show VF 3 enable state:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cat /sys/class/net/p1p1/device/sriov/3/enable
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B link_state
+Sets/displays link status.
+.sp
+Example 1: display link status on link speed:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cat /sys/class/net/p1p2/device/sriov/1/link_state
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: set VF 1 to track status of PF link:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo auto > /sys/class/net/p1p2/device/sriov/1/link_state
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 3: disable VF 1:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo disable > /sys/class/net/p1p2/device/sriov/1/link_state
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B queue_type
+Sets the type of queues (0 RSS, 1 QoS).
+.sp
+Example 1: set queue type RSS for VF 3:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo 0 > /sys/class/net/p1p1/device/sriov/3/queue_type
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: set type QoS for VF 3:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo 1 > /sys/class/net/p1p1/device/sriov/3/queue_type
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 3: show queue type for VF 3:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cat /sys/class/net/p1p1/device/sriov/3/queue_type
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B num_queues
+Sets the number of queues allocated for the VF. To change the number of
+queues, queue_type must be RSS.
+.sp
+Note: Changing this value will trigger a VF reset, which may disrupt
+traffic. We recommend configuring this setting before traffic starts, not
+during runtime.
+.sp
+Example 1: set 8 queues for VF 5 if \fBqueue_type\fP is RSS:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo 8 > /sys/class/net/p1p1/device/sriov/5/num_queues
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: show VF 5 number of queues for VF 5 type:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cat /sys/class/net/p1p1/device/sriov/5/num_queues
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B max_tx_rate
+Sets the maximum transmit rate in Mbps for the VF.
+.sp
+Note: This is ignored if TC QoS is in use. The maximum transmit rate limit
+is cleared and cannot be set once you configure \fBMax_TC_TX_Rate\fP limits
+for any of the TCs on the VF.
+.sp
+Example 1: set 200Mbps limit for VF 3:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo 200 > /sys/class/net/p1p1/device/sriov/3/max_tx_rate
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: show max_tx_rate for VF 3:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cat /sys/class/net/p1p1/device/sriov/3/max_tx_rate
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B stats
+Supports getting VF statistics:
+.INDENT 7.0
+.IP \(bu 2
+rx_bytes
+.IP \(bu 2
+rx_packets
+.IP \(bu 2
+rx_dropped
+.IP \(bu 2
+tx_bytes
+.IP \(bu 2
+tx_packets
+.IP \(bu 2
+tx_dropped
+.IP \(bu 2
+tx_errors
+.UNINDENT
+.sp
+Example 1: display anti\-spoofing violations counter for VF 1:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cat /sys/class/net/p1p2/device/sriov/1/stats/tx_error
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B reset_stats
+Resets the VF\(aqs stats counters.
+.sp
+Example 1: reset stats for VF 1:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo 1 > /sys/class/net/p1p2/device/sriov/1/stats/reset_stats
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B Max_TC_TX_Rate
+Sets the maximum bandwidth in Mbps for the traffic class per VF.
+.sp
+Example 1: set max sending rate for VF 0 TC2 to 2000Mbps:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo 2000 > /sys/class/net/p1p2/device/sriov/0/qos/2/max_tc_tx_rate
+cat sys/class/net/p1p2/device/sriov/0/qos/2/max_tc_tx_rate
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.TP
+.B qos/share
+Sets the share of bandwidth for the specified VF(s).
+.sp
+\fBNOTE:\fP
+.INDENT 7.0
+.INDENT 3.5
+This feature is limited to TC0 only. You cannot revert the share
+back to 0 once it has been set. You need to apply a change to hardware
+using the related sysfs node \fBqos/apply\fP\&. The \fBqos/apply\fP PF attribute
+applies the traffic shares to all VFs and all applicable TCs at once.
+.UNINDENT
+.UNINDENT
+.sp
+Example 1: allocate 10% of bandwidth to VF 0, 20% to VF 1, and the remaining
+70% of bandwidth shared equally among the other VFs plus PF. Note: For all
+the unspecified VFs (or PFs), the default value for \fBshare\fP is 0:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo 10 > /sys/class/net/p1p1/device/sriov/0/qos/share
+echo 20 > /sys/class/net/p1p1/device/sriov/1/qos/share
+echo 1 > /sys/class/net/p1p1/device/sriov/qos/apply (kicks off a
+  recalculation based upon bandwidth distribution parameters specified
+  through qos/share sysfs)
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Example 2: display current bandwidth allocation for each VF:
+.INDENT 7.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+cat /sys/class/net/p1p1/device/sriov/0/qos/share (return 10)
+cat /sys/class/net/p1p1/device/sriov/1/qos/share (return 20)
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SS PHY Register Debug Dump
+.sp
+Intel(R) Ethernet 700 Series of Adapters devices support Phy register debug
+dump, which allows you to obtain runtime register values from the PHY and then
+write the results to a single dump file, for debugging connection and link
+issues.
+.sp
+This debug dump contains a snapshot of the PHY\(aqs existing configuration, such
+as the PCS Link Control Register, PCS Link Status registers, and other
+information.
+.sp
+To generate a PHY register debug dump file, use \fBethtool \-d\fP to dump the
+PHY registers. For example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-d <ethX> > dump.txt
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+Refer to the ethtool man page for more information.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+.INDENT 0.0
+.IP \(bu 2
+If a register does not exist or if the register cannot be read, the driver
+will return \(dq0xAABBCCDD \(dq for the register.
+.IP \(bu 2
+The contents of the debug dump are not human\-readable. You must work with
+Customer Support to decode the file.
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SH PERFORMANCE OPTIMIZATION
+.sp
+Driver defaults are meant to fit a wide variety of workloads, but if further
+optimization is required, we recommend experimenting with the following
+settings.
+.SS Small Frame Sizes
+.sp
+For better performance when processing small (64B) frame sizes:
+.INDENT 0.0
+.IP 1. 3
+Try enabling Hyper threading in the BIOS in order to increase the number of
+logical cores in the system.
+.IP 2. 3
+Increase the number of queues available to the adapter:
+.INDENT 3.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-L
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SS IRQ to Adapter Queue Alignment
+.sp
+Pin the adapter\(aqs IRQs to specific cores by disabling the \fBirqbalance\fP service
+and using the included \fBset_irq_affinity\fP script. Please see the script\(aqs help
+text for further options.
+.INDENT 0.0
+.IP \(bu 2
+The following settings will distribute the IRQs across all the cores
+evenly:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+scripts/set_irq_affinity \-x all <interface1> , [ <interface2>, ... ]
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.IP \(bu 2
+The following settings will distribute the IRQs across all the cores that
+are local to the adapter (same NUMA node):
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+scripts/set_irq_affinity \-x local <interface1> ,[ <interface2>, ... ]
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.IP \(bu 2
+For very CPU\-intensive workloads, we recommend pinning the IRQs to all
+cores.
+.UNINDENT
+.SS Rx Descriptor Ring Size
+.sp
+To reduce the number of Rx packet discards, increase the number of Rx
+descriptors for each Rx ring using ethtool.
+.INDENT 0.0
+.IP \(bu 2
+Check if the interface is dropping Rx packets due to buffers being full
+(\fBrx_dropped.nic\fP can mean that there is no PCIe bandwidth):
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-S <ethX> | grep \(dqrx_dropped\(dq
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.IP \(bu 2
+If the previous command shows drops on queues, it may help to increase
+the number of descriptors using \fBethtool \-G\fP, where \fB<N>\fP is the desired
+number of ring entries/descriptors:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-G <ethX> rx <N>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+This can provide temporary buffering for issues that create latency while
+the CPUs process descriptors.
+.UNINDENT
+.SS Interrupt Rate Limiting
+.sp
+This driver supports an adaptive interrupt throttle rate (ITR) mechanism that
+is tuned for general workloads. The user can customize the interrupt rate
+control for specific workloads, via ethtool, adjusting the number of
+microseconds between interrupts.
+.sp
+To set the interrupt rate manually, you must disable adaptive mode:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-C <ethX> adaptive\-rx off adaptive\-tx off
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+For IP forwarding:
+.INDENT 0.0
+.IP \(bu 2
+Disable adaptive ITR and lower Rx and Tx interrupts per queue using ethtool.
+.sp
+Setting \fBrx\-usecs\fP and \fBtx\-usecs\fP to 125 will limit interrupts to about
+8000 interrupts per second per queue:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-C <ethX> adaptive\-rx off adaptive\-tx off rx\-usecs 125 tx\-usecs 125
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+For lower CPU utilization:
+.INDENT 0.0
+.IP \(bu 2
+Disable adaptive ITR and lower Rx and Tx interrupts. The examples below
+affect every queue of the specified interface.
+.IP \(bu 2
+Setting \fBrx\-usecs\fP and \fBtx\-usecs\fP to 80 will limit interrupts to about
+12,500 interrupts per second per queue:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-C <ethX> adaptive\-rx off adaptive\-tx off rx\-usecs 80 tx\-usecs 80
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+For reduced latency:
+.INDENT 0.0
+.IP \(bu 2
+Disable adaptive ITR and ITR by setting \fBrx\-usecs\fP and \fBtx\-usecs\fP to 0:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-C <ethX> adaptive\-rx off adaptive\-tx off rx\-usecs 0 tx\-usecs 0
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+Per\-queue interrupt rate settings:
+.INDENT 0.0
+.IP \(bu 2
+The following examples are for queues 1 and 3, but you can adjust other
+queues.
+.IP \(bu 2
+To disable Rx adaptive ITR and set static Rx ITR to 10 microseconds or
+about 100,000 interrupts/second, for queues 1 and 3:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-\-per\-queue <ethX> queue_mask 0xa \-\-coalesce adaptive\-rx off rx\-usecs 10
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.IP \(bu 2
+To show the current coalesce settings for queues 1 and 3:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-\-per\-queue <ethX> queue_mask 0xa \-\-show\-coalesce
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+Bounding interrupt rates using \fBrx\-usecs\-high\fP:
+.INDENT 0.0
+.IP \(bu 2
+Valid Range: 0\-235 (0=no limit)
+.sp
+The range of 0\-235 microseconds provides an effective range of 4,310 to
+250,000 interrupts per second. The value of \fBrx\-usecs\-high\fP can be set
+independently of \fBrx\-usecs\fP and \fBtx\-usecs\fP in the same ethtool command,
+and is also independent of the adaptive interrupt moderation algorithm. The
+underlying hardware supports granularity in 4\-microsecond intervals, so
+adjacent values may result in the same interrupt rate.
+.IP \(bu 2
+The following command would disable adaptive interrupt moderation, and allow
+a maximum of 5 microseconds before indicating a receive or transmit was
+complete. However, instead of resulting in as many as 200,000 interrupts per
+second, it limits total interrupts per second to 50,000 via the
+\fBrx\-usecs\-high\fP parameter:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-C <ethX> adaptive\-rx off adaptive\-tx off rx\-usecs\-high 20
+  rx\-usecs 5 tx\-usecs 5
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SS Virtualized Environments
+.sp
+In addition to the other suggestions in this section, the following may be
+helpful to optimize performance in VMs.
+.INDENT 0.0
+.IP \(bu 2
+Disable XPS on both ends by using the included \fBvirt_perf_default\fP script
+or by running the following command as root:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+for file in \(gals /sys/class/net/<ethX>/queues/tx\-*/xps_cpus\(ga;
+do echo 0 > $file; done
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.IP \(bu 2
+Using the appropriate mechanism (vcpupin) in the VM, pin the CPUs to
+individual LCPUs, making sure to use a set of CPUs included in the
+device\(aqs local_cpulist: \fB/sys/class/net/<ethX>/device/local_cpulist\fP\&.
+.IP \(bu 2
+Configure as many Rx/Tx queues in the VM as available. (See the iavf driver
+documentation for the number of queues supported.) For example:
+.INDENT 2.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-L <virt_interface> rx <max> tx <max>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.SH KNOWN ISSUES/TROUBLESHOOTING
+.SS Receive Error counts may be higher than the actual packet error count
+.sp
+When a packet is received with more than one error, two bad packets may be
+reported. This affects all devices based on 10G, or faster, controllers.
+.SS Linux bonding failures with VFs
+.sp
+If you bind Virtual Functions (VFs) to an Intel(R) Ethernet 700 Series device,
+the VF targets may fail when they become the active target. If the MAC address
+of the VF is set by the PF (Physical Function) of the device, when you add a
+target, or change the active\-backup target, Linux bonding tries to sync the
+backup target\(aqs MAC address to the same MAC address as the active target. Linux
+bonding will fail at this point. This issue will not occur if the VF\(aqs MAC
+address is not set by the PF.
+.SS Bonding failover time longer than expected
+.sp
+This issue is limited to Intel(R) Ethernet Network Adapter XXV710 devices
+connected to a Juniper EX4550 switch. In such a configuration, bonding failover
+may take longer than expected. Disabling FW\-LLDP may resolve the issue:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-\-set\-priv\-flags <ethX> disable\-fw\-lldp on
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SS Failure to enable MAX VFs when MFP and SR\-IOV enabled
+.sp
+X710/XXV710 devices fail to enable Max VFs (64) when Multiple Functions per
+Port (MFP) and SR\-IOV are enabled. An error from i40e is logged that says \(dqadd
+vsi failed for VF N, aq_err 16\(dq. To work around the issue, enable less than 64
+virtual functions (VFs).
+.SS \fBip link show\fP command shows incorrect VF MAC if VF MAC was set from VF side
+.sp
+Executing the command \fBip link show\fP only shows MAC addresses if they are set
+by the PF. Otherwise, it shows all zeros.
+.sp
+This is expected behavior. The PF driver is passing zeroes to the VF driver
+that the VF driver can generate its own random MAC address and report it to the
+guest OS. Without this feature, some guest operating systems will incorrectly
+assign the VF a new interface name each time they reboot.
+.SS IPv6/UDP checksum offload does not work on some older kernels
+.sp
+Some distributions with older kernels do not properly enable IPv6/UDP checksum
+offload. To use IPv6 checksum offload, it may be necessary to upgrade to a
+newer kernel.
+.SS Driver Buffer Overflow Fix
+.sp
+The fix to resolve CVE\-2016\-8105, referenced in Intel SA\-00069
+<\fI\%https://www.intel.com/content/www/us/en/security\-center/advisory/intel\-sa\-00069.html\fP>,
+is included in this and future versions of the driver.
+.SS depmod warning messages about unknown symbol during installation
+.sp
+During driver installation, you may see depmod warning messages referring to
+unknown symbols \fBi40e_register_client\fP and \fBi40e_unregister_client\fP\&. These
+messages are informational only; no user action is required. The installation
+should complete successfully.
+.SS Error: \(dq<ethX> selects TX queue XX but real number of TX queues is YY\(dq
+.sp
+When configuring the number of queues under heavy traffic load, you may see an
+error message stating \fB<ethX> selects TX queue XX, but real number of TX queues
+is YY\fP\&. This message is informational only and does not affect functionality.
+.SS Fixing Performance Issues When Using IOMMU in Virtualized Environments
+.sp
+The IOMMU feature of the processor prevents I/O devices from accessing memory
+outside the boundaries set by the OS. It also allows devices to be directly
+assigned to a Virtual Machine. However, IOMMU may affect performance, both in
+latency (each DMA access by the device must be translated by the IOMMU) and in
+CPU utilization (each buffer assigned to every device must be mapped in the
+IOMMU).
+.sp
+If you experience significant performance issues with IOMMU, try using it in
+\(dqpassthrough\(dq mode by adding the following to the kernel boot command line:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+intel_iommu=on iommu=pt
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+This mode enables remapping for assigning devices to VMs, providing
+near\-native I/O performance, but does not provide the additional memory
+protection.
+.UNINDENT
+.UNINDENT
+.SS Transmit hangs leading to no traffic
+.sp
+Disabling flow control while the device is under stress may cause tx hangs and
+eventually lead to the device no longer passing traffic. You must reboot the
+system to resolve this issue.
+.SS Bad checksum counter incorrectly increments when using VXLAN
+.sp
+When passing non\-UDP traffic over a VXLAN interface, the \fBport.rx_csum_bad\fP
+counter increments for the packets.
+.SS Statistic counters reset when promiscuous mode is changed
+.sp
+Changing promiscuous mode triggers a reset of the physical function driver.
+This will reset the statistic counters.
+.SS MAC address of Virtual Function changes unexpectedly
+.sp
+If a Virtual Function\(aqs MAC address is not assigned in the host, then the VF
+(virtual function) driver will use a random MAC address. This random MAC
+address may change each time the VF driver is reloaded. You can assign a static
+MAC address in the host machine. This static MAC address will survive a VF
+driver reload.
+.SS Changing the number of Rx or Tx queues with \fBethtool \-L\fP may cause a kernel panic
+.sp
+Changing the number of Rx or Tx queues with \fBethtool \-L\fP while traffic is
+flowing and the interface is up may cause a kernel panic. Bring the interface
+down first to avoid the issue. For example:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ip link set <ethX> down
+ethtool \-L <ethX> combined 4
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.SS Intel Ethernet Flow Director Sideband Logic adds duplicate filter
+.sp
+The Intel Ethernet Flow Director Sideband Logic adds a duplicate filter in the
+software filter list if the location is not specified or the specified location
+differs from the previous location but has the same filter criteria. In this
+case, the second of the two filters that appear is the valid one in hardware
+and it decides the filter action.
+.SS Multiple Interfaces on Same Ethernet Broadcast Network
+.sp
+Due to the default ARP behavior on Linux, it is not possible to have one system
+on two IP networks in the same Ethernet broadcast domain (non\-partitioned
+switch) behave as expected. All Ethernet interfaces will respond to IP traffic
+for any IP address assigned to the system. This results in unbalanced receive
+traffic.
+.sp
+If you have multiple interfaces in a server, turn on ARP filtering by entering
+the following:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+echo 1 > /proc/sys/net/ipv4/conf/all/arp_filter
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+This only works if your kernel\(aqs version is higher than 2.4.5.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+This setting is not saved across reboots. The configuration change
+can be made permanent by adding the following line to the file
+\fB/etc/sysctl.conf\fP:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+net.ipv4.conf.all.arp_filter = 1
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.UNINDENT
+.sp
+Alternatively, you can install the interfaces in separate broadcast domains
+(either in different switches or in a switch partitioned to VLANs).
+.SS UDP Stress Test Dropped Packet Issue
+.sp
+Under small packet UDP stress with the i40e driver, the system may drop UDP
+packets due to socket buffers being full. Setting the driver Intel Ethernet
+Flow Control variables to the minimum may resolve the issue. You may also try
+increasing the kernel\(aqs default buffer sizes by changing the values in
+\fB/proc/sys/net/core/rmem_default\fP and \fBrmem_max\fP\&.
+.SS Unplugging Network Cable While \fBethtool \-p\fP Is Running
+.sp
+In kernel versions 2.6.32 and newer, unplugging the network cable while
+\fBethtool \-p\fP is running will cause the system to become unresponsive to
+keyboard commands, except for control\-alt\-delete. Restarting the system should
+resolve the issue.
+.SS Rx Page Allocation Errors
+.sp
+\(dqPage allocation failure. order:0\(dq errors may occur under stress with kernels
+2.6.25 and newer. This is caused by the way the Linux kernel reports this
+stressed condition.
+.SS Lower than expected performance
+.sp
+Some PCIe x8 slots are actually configured as x4 slots. These slots have
+insufficient bandwidth for full line rate with dual port and quad port devices.
+In addition, if you put a PCIe v4.0 or v3.0\-capable adapter into a PCIe v2.x
+slot, you cannot get full bandwidth. The driver detects this situation and
+writes one of the following messages in the system log:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+PCI\-Express bandwidth available for this card is not sufficient for optimal
+performance. For optimal performance a x8 PCI\-Express slot is required.
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+or:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+PCI\-Express bandwidth available for this device may be insufficient for
+optimal performance. Please move the device to a different PCI\-e link with
+more lanes and/or higher transfer rate.
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+If this error occurs, moving your adapter to a true PCIe v3.0 x8 slot will
+resolve the issue.
+.SS Fiber optics and auto\-negotiation
+.sp
+Modules based on 40GBASE\-SR4, 25GBASE\-SR, active optical cable (AOC), and
+active copper cable (ACC) do not support auto\-negotiation per the IEEE
+specification. To obtain link with these modules, you must turn off
+auto\-negotiation on the link partner\(aqs switch ports.
+.SS \fBethtool \-a\fP autonegotiate result may vary between drivers
+.sp
+For kernel versions 4.6 or higher, \fBethtool \-a\fP will show the advertised and
+negotiated autoneg settings. For the i40e driver and kernel versions below 4.6,
+ethtool will only report the negotiated link status.
+.sp
+The issue is cosmetic and does not affect functionality.
+.SS Running \fBethtool \-t <ethX>\fP command causes break between PF and test client
+.sp
+When there are active VFs, \fBethtool \-t\fP performs a full diagnostic. In the
+process, it resets itself and all attached VFs. The VF drivers encounter a
+disruption but are able to recover.
+.SS Unable to obtain DHCP lease on boot with Red Hat
+.sp
+In configurations where the auto\-negotiation process takes more than 5 seconds,
+the boot script may fail with the following message:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+<ethX>: failed. No link present. Check cable?
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+This error may occur even though the presence of link can be confirmed using
+\fBethtool <ethX>\fP\&. In this case, try setting \fBLINKDELAY=30\fP in
+\fB/etc/sysconfig/network\-scripts/ifdfg\-<ethX>\fP\&.
+.sp
+The same issue can occur during a network boot (via PXE) on Red Hat
+distributions that use the dracut script:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+Warning: No carrier detected on interface <ethX>
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+In this case add \fBrd.net.timeout.carrier=30\fP at the kernel command line.
+.sp
+\fBNOTE:\fP
+.INDENT 0.0
+.INDENT 3.5
+Link time can vary. Adjust \fBLINKDELAY\fP value accordingly.
+.UNINDENT
+.UNINDENT
+.sp
+Alternatively, you can use NetworkManager to configure the interfaces, which
+avoids the set timeout. For configuration instructions of NetworkManager, refer
+to the documentation provided by your distribution.
+.SS Loading i40e driver in 3.2.x and newer kernels displays kernel tainted message
+.sp
+Due to recent kernel changes, loading an out of tree driver causes the kernel
+to be tainted.
+.SS Unexpected Issues when the device driver and DPDK share a device
+.sp
+Unexpected issues may result when an i40e device is in multi driver mode and
+the kernel driver and DPDK driver are sharing the device. This is because
+access to the global NIC resources is not synchronized between multiple
+drivers. Any change to the global NIC configuration (writing to a global
+register, setting global configuration by AQ, or changing switch modes) will
+affect all ports and drivers on the device. Loading DPDK with the
+\fBmulti\-driver\fP module parameter may mitigate some of the issues.
+.SS RPM driver installation fails with dependency issues on upstream kernels
+.sp
+Building an RPM Package Manager (RPM) file when running a nonstock kernel on
+SUSE* Linux Enterprise Server (SLES) causes the ksyms definitions to not match
+the ones provided by the installed kernel RPM. This results in dependency
+conflicts that prevent the RPM from compiling and installing.
+.SS VLAN pruning doesn\(aqt work when traffic is sent from local system
+.sp
+VLAN tagged traffic sent from other VFs attached to a NIC can be seen on other
+VFs. This is due to an issue with NIC settings and offload settings of VFs.
+.sp
+To work around this issue, disable Tx VLAN offload on VFs:
+.INDENT 0.0
+.INDENT 3.5
+.sp
+.nf
+.ft C
+ethtool \-K <ethX> tx\-vlan\-offload off
+.ft P
+.fi
+.UNINDENT
+.UNINDENT
+.sp
+This does not affect egress traffic from the outside NIC.
+.SS SR\-IOV virtual functions have identical MAC addresses
+.sp
+When you create multiple SR\-IOV virtual functions, the VFs may have identical
+MAC addresses. Only one VF will pass traffic, and all traffic on other VFs with
+identical MAC addresses will fail. This is related to the
+\fBMACAddressPolicy=persistent\fP setting in
+\fB/usr/lib/systemd/network/99\-default.link\fP\&.
+.sp
+To resolve this issue, edit the \fB/usr/lib/systemd/network/99\-default.link\fP
+file and change the \fBMACAddressPolicy\fP line to \fBMACAddressPolicy=none\fP\&. For
+more information, see the systemd.link man page.
+.SS \(dqVF X failed opcode 24\(dq error message in dmesg on host
+.sp
+With a Microsoft Windows Server 2019 guest machine running on a Linux host, you
+may see \fBVF <vf_number> failed opcode 24\fP error messages in dmesg on the host.
+This error is benign and does not affect traffic. Installing the latest iavf
+driver in the guest will resolve the issue.
+.SS Windows guest OSs on a Linux host may not pass traffic across VLANs
+.sp
+The VF is not aware of the VLAN configuration if you use Load Balancing and
+Failover (LBFO) to configure VLANs in a Windows guest. VLANs configured using
+LBFO on a VF driver may result in failure to pass traffic.
 .SH SUPPORT
-.LP
-For additional information regarding building and installation, see the
-README
-included with the driver.
-For general information, go to the Intel support website at:
-.B http://www.intel.com/support/
-
-.LP
-If an issue is identified with the released source code on a supported kernel with a supported adapter, email the specific information related to the issue to e1000-devel@lists.sf.net.
-.LP
+.sp
+For general information, go to the Intel support website at
+\fI\%https://www.intel.com/support/\fP
+.sp
+or the Intel Ethernet Linux project hosted by GitHub at
+\fI\%https://github.com/intel/ethernet\-linux\-i40e\fP
+.sp
+If an issue is identified with the released source code on a supported kernel
+with a supported adapter, contact Intel Customer Support at
+\fI\%https://www.intel.com/content/www/us/en/support/products/36773/ethernet\-products.html\fP
+.SH LICENSE
+.sp
+This program is free software; you can redistribute it and/or modify it under
+the terms and conditions of the GNU General Public License, version 2, as
+published by the Free Software Foundation.
+.sp
+This program is distributed in the hope it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+.sp
+You should have received a copy of the GNU General Public License along with
+this program; if not, write to the Free Software Foundation, Inc., 51 Franklin
+St \- Fifth Floor, Boston, MA 02110\-1301 USA.
+.sp
+The full GNU General Public License is included in this distribution in the
+file called \(dqCOPYING\(dq.
+.SH TRADEMARKS
+.sp
+Intel is a trademark or registered trademark of Intel Corporation or its
+subsidiaries in the United States and/or other countries.
+.sp
+Other names and brands may be claimed as the property of others.
+.SH AUTHOR
+Intel
+.SH COPYRIGHT
+2014 - 2024, Intel Corporation
+.\" Generated by docutils manpage writer.
+.

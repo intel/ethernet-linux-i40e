@@ -222,7 +222,7 @@ static bool i40e_ddp_is_pkg_hdr_valid(struct net_device *netdev,
 		return false;
 	}
 	if (size < (sizeof(struct i40e_package_header) +
-		sizeof(struct i40e_metadata_segment) + sizeof(u32) * 2)) {
+		sizeof(struct i40e_metadata_segment) + sizeof(u32) * 3)) {
 		netdev_err(netdev, "Invalid DDP profile - size is too small.");
 		return false;
 	}
@@ -281,7 +281,7 @@ int i40e_ddp_load(struct net_device *netdev, const u8 *data, size_t size,
 		return -EINVAL;
 
 	if (size < (sizeof(struct i40e_package_header) +
-		    sizeof(struct i40e_metadata_segment) + sizeof(u32) * 2)) {
+		    sizeof(struct i40e_metadata_segment) + sizeof(u32) * 3)) {
 		netdev_err(netdev, "Invalid DDP recipe size.");
 		return -EINVAL;
 	}
@@ -387,8 +387,9 @@ int i40e_ddp_load(struct net_device *netdev, const u8 *data, size_t size,
  **/
 static int i40e_ddp_restore(struct i40e_pf *pf)
 {
+	struct i40e_vsi *vsi = i40e_pf_get_main_vsi(pf);
+	struct net_device *netdev = vsi->netdev;
 	struct i40e_ddp_old_profile_list *entry;
-	struct net_device *netdev = pf->vsi[pf->lan_vsi]->netdev;
 	int status = 0;
 
 	if (!list_empty(&pf->ddp_old_prof)) {

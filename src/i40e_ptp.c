@@ -1881,6 +1881,7 @@ void i40e_ptp_init(struct i40e_pf *pf)
  **/
 void i40e_ptp_stop(struct i40e_pf *pf)
 {
+	struct i40e_vsi *main_vsi = i40e_pf_get_main_vsi(pf);
 	struct i40e_hw *hw = &pf->hw;
 	u32 regval;
 
@@ -1900,7 +1901,7 @@ void i40e_ptp_stop(struct i40e_pf *pf)
 		ptp_clock_unregister(pf->ptp_clock);
 		pf->ptp_clock = NULL;
 		dev_info(&pf->pdev->dev, "removed PHC from %s.\n",
-			 pf->vsi[pf->lan_vsi]->netdev->name);
+			 main_vsi->netdev->name);
 	}
 
 	if (i40e_is_ptp_pin_dev(&pf->hw)) {

@@ -133,7 +133,6 @@
 #else /* >= 8.5 */
 #undef HAVE_NAPI_BUSY_LOOP
 #undef HAVE_XDP_RXQ_INFO_REG_3_PARAMS
-#undef NEED_XSK_BUFF_DMA_SYNC_FOR_CPU
 #define NO_XDP_QUERY_XSK_UMEM
 #undef NEED_XSK_BUFF_POOL_RENAME
 #define HAVE_NETDEV_BPF_XSK_POOL
@@ -153,12 +152,6 @@
 #else /* >= 9.0 */
 #define HAVE_XDP_BUFF_RXQ
 #endif /* 9.0 */
-
-/*****************************************************************************/
-#if (RHEL_RELEASE_CODE < RHEL_RELEASE_VERSION(9,1))
-#else /* >= 9.1 */
-#undef HAVE_PASID_SUPPORT
-#endif /* 9.1 */
 
 /*****************************************************************************/
 #endif /* _KCOMPAT_RHEL_DEFS_H_ */

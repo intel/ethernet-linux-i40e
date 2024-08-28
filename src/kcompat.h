@@ -6048,9 +6048,6 @@ int _kc_kstrtobool(const char *s, bool *res);
 #else /* >= 4.6.0 */
 #define HAVE_PAGE_COUNT_BULK_UPDATE
 #define HAVE_ETHTOOL_FLOW_UNION_IP6_SPEC
-#ifdef CONFIG_X86
-#define HAVE_PTP_CROSSTIMESTAMP
-#endif
 #define HAVE_TC_SETUP_CLSFLOWER
 #define HAVE_TC_SETUP_CLSU32
 #endif /* 4.6.0 */
@@ -6162,22 +6159,6 @@ static inline void bitmap_from_u64(unsigned long *dst, u64 mask)
 		dst[1] = mask >> 32;
 }
 #endif /* <RHEL7.4 */
-#if (!(RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,4)) && \
-     !(SLE_VERSION_CODE >= SLE_VERSION(12,3,0)) && \
-     !(UBUNTU_VERSION_CODE >= UBUNTU_VERSION(4,13,0,16)))
-static inline bool eth_type_vlan(__be16 ethertype)
-{
-	switch (ethertype) {
-	case htons(ETH_P_8021Q):
-#ifdef ETH_P_8021AD
-	case htons(ETH_P_8021AD):
-#endif
-		return true;
-	default:
-		return false;
-	}
-}
-#endif /* Linux < 4.9 || RHEL < 7.4 || SLES < 12.3 || Ubuntu < 4.3.0-16 */
 #else /* >=4.9 */
 #define HAVE_FLOW_DISSECTOR_KEY_VLAN_PRIO
 #define HAVE_ETHTOOL_NEW_1G_BITS
@@ -6215,58 +6196,13 @@ static inline bool _kc_napi_complete_done2(struct napi_struct *napi,
 #define HAVE_ETHTOOL_NEW_2500MB_BITS
 #define HAVE_ETHTOOL_5G_BITS
 #endif /* RHEL7.4+ */
-#if (SLE_VERSION_CODE && (SLE_VERSION_CODE == SLE_VERSION(12,3,0)))
-#define HAVE_STRUCT_DMA_ATTRS
-#endif /* (SLES == 12.3.0) */
 #if (SLE_VERSION_CODE && (SLE_VERSION_CODE >= SLE_VERSION(12,3,0)))
 #define HAVE_NETDEVICE_MIN_MAX_MTU
 #endif /* (SLES >= 12.3.0) */
 #if (RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,5)))
-#define HAVE_STRUCT_DMA_ATTRS
 #define HAVE_RHEL7_EXTENDED_MIN_MAX_MTU
 #define HAVE_NETDEVICE_MIN_MAX_MTU
 #endif
-#if (!(SLE_VERSION_CODE && (SLE_VERSION_CODE >= SLE_VERSION(12,3,0))) && \
-     !(RHEL_RELEASE_CODE && (RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,5))))
-#ifndef dma_map_page_attrs
-#define dma_map_page_attrs __kc_dma_map_page_attrs
-static inline dma_addr_t __kc_dma_map_page_attrs(struct device *dev,
-						 struct page *page,
-						 size_t offset, size_t size,
-						 enum dma_data_direction dir,
-						 unsigned long __always_unused attrs)
-{
-	return dma_map_page(dev, page, offset, size, dir);
-}
-#endif
-
-#ifndef dma_unmap_page_attrs
-#define dma_unmap_page_attrs __kc_dma_unmap_page_attrs
-static inline void __kc_dma_unmap_page_attrs(struct device *dev,
-					     dma_addr_t addr, size_t size,
-					     enum dma_data_direction dir,
-					     unsigned long __always_unused attrs)
-{
-	dma_unmap_page(dev, addr, size, dir);
-}
-#endif
-
-static inline void __page_frag_cache_drain(struct page *page,
-					   unsigned int count)
-{
-#ifdef HAVE_PAGE_COUNT_BULK_UPDATE
-	if (!page_ref_sub_and_test(page, count))
-		return;
-
-	init_page_count(page);
-#else
-	BUG_ON(count > 1);
-	if (!count)
-		return;
-#endif
-	__free_pages(page, compound_order(page));
-}
-#endif /* !SLE_VERSION(12,3,0) && !RHEL_VERSION(7,5) */
 #if ((SLE_VERSION_CODE && (SLE_VERSION_CODE > SLE_VERSION(12,3,0))) ||\
      (RHEL_RELEASE_CODE && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,5)))
 #define HAVE_SWIOTLB_SKIP_CPU_SYNC

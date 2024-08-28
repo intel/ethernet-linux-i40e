@@ -1213,7 +1213,7 @@ static int i40e_set_link_ksettings(struct net_device *netdev,
 		i40e_partition_setting_complaint(pf);
 		return -EOPNOTSUPP;
 	}
-	if (vsi != pf->vsi[pf->lan_vsi])
+	if (vsi->type != I40E_VSI_MAIN)
 		return -EOPNOTSUPP;
 	if (hw->phy.media_type != I40E_MEDIA_TYPE_BASET &&
 	    hw->phy.media_type != I40E_MEDIA_TYPE_FIBER &&
@@ -1947,7 +1947,7 @@ static int i40e_set_pauseparam(struct net_device *netdev,
 		return -EOPNOTSUPP;
 	}
 
-	if (vsi != pf->vsi[pf->lan_vsi])
+	if (vsi->type != I40E_VSI_MAIN)
 		return -EOPNOTSUPP;
 
 	is_an = hw_link_info->an_info & I40E_AQ_AN_COMPLETED;
@@ -2418,7 +2418,7 @@ static void i40e_get_ringparam(struct net_device *netdev,
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_pf *pf = np->vsi->back;
-	struct i40e_vsi *vsi = pf->vsi[pf->lan_vsi];
+	struct i40e_vsi *vsi = i40e_pf_get_main_vsi(pf);
 
 	ring->rx_max_pending = I40E_MAX_NUM_DESCRIPTORS;
 	ring->tx_max_pending = I40E_MAX_NUM_DESCRIPTORS;
@@ -2695,7 +2695,7 @@ static int i40e_get_stats_count(struct net_device *netdev)
 	struct i40e_pf *pf = vsi->back;
 	int stats_len;
 
-	if (vsi == pf->vsi[pf->lan_vsi] && pf->hw.partition_id == 1)
+	if (vsi->type == I40E_VSI_MAIN && pf->hw.partition_id == 1)
 		stats_len = I40E_PF_STATS_LEN;
 	else
 		stats_len = I40E_VSI_STATS_LEN;
@@ -2850,7 +2850,7 @@ static void i40e_get_ethtool_stats(struct net_device *netdev,
 	}
 	rcu_read_unlock();
 
-	if (vsi != pf->vsi[pf->lan_vsi] || pf->hw.partition_id != 1)
+	if (vsi->type != I40E_VSI_MAIN || pf->hw.partition_id != 1)
 		goto check_data_pointer;
 
 	veb_stats = ((pf->lan_veb != I40E_NO_VEB) &&
@@ -3009,7 +3009,7 @@ static void i40e_get_stat_strings(struct net_device *netdev, u8 *data)
 #endif
 	}
 
-	if (vsi != pf->vsi[pf->lan_vsi] || pf->hw.partition_id != 1)
+	if (vsi->type != I40E_VSI_MAIN || pf->hw.partition_id != 1)
 		goto check_data_pointer;
 
 	i40e_add_stat_strings(&data, i40e_gstrings_veb_stats);
@@ -3336,7 +3336,7 @@ static int i40e_set_wol(struct net_device *netdev, struct ethtool_wolinfo *wol)
 		return -EOPNOTSUPP;
 	}
 
-	if (vsi != pf->vsi[pf->lan_vsi])
+	if (vsi->type != I40E_VSI_MAIN)
 		return -EOPNOTSUPP;
 
 	/* NVM bit on means WoL not supported for the port */
@@ -4174,6 +4174,7 @@ static int i40e_get_ethtool_fdir_entry(struct i40e_pf *pf,
 	struct i40e_rx_flow_userdef userdef = {0};
 	struct i40e_fdir_filter *rule = NULL;
 	struct hlist_node *node2;
+	struct i40e_vsi *vsi;
 	u64 input_set;
 	u16 index;
 
@@ -4311,9 +4312,8 @@ no_input_set:
 		fsp->flow_type |= FLOW_EXT;
 	}
 
-	if (rule->dest_vsi != pf->vsi[pf->lan_vsi]->id) {
-		struct i40e_vsi *vsi;
-
+	vsi = i40e_pf_get_main_vsi(pf);
+	if (rule->dest_vsi != vsi->id) {
 		vsi = i40e_find_vsi_from_id(pf, rule->dest_vsi);
 		if (vsi && vsi->type == I40E_VSI_SRIOV) {
 			/* VFs are zero-indexed by the driver, but ethtool
@@ -7202,7 +7202,7 @@ static int i40e_get_module_eeprom(struct net_device *netdev,
 #endif /* ETHTOOL_GMODULEINFO */
 
 #ifdef ETHTOOL_GEEE
-static int i40e_get_keee(struct net_device *netdev, struct ethtool_keee *edata)
+static int i40e_get_keee(struct net_device *netdev, struct ethtool_keee *kedata)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_aq_get_phy_abilities_resp phy_cfg;
@@ -7210,6 +7210,7 @@ static int i40e_get_keee(struct net_device *netdev, struct ethtool_keee *edata)
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_pf *pf = vsi->back;
 	struct i40e_hw *hw = &pf->hw;
+	int i;
 
 	/* Get initial PHY capabilities */
 	status = i40e_aq_get_phy_capabilities(hw, false, true, &phy_cfg, NULL);
@@ -7222,19 +7223,35 @@ static int i40e_get_keee(struct net_device *netdev, struct ethtool_keee *edata)
 	if (phy_cfg.eee_capability == 0)
 		return -EOPNOTSUPP;
 
-	edata->supported_u32 = SUPPORTED_Autoneg;
-	edata->lp_advertised_u32 = edata->supported_u32;
+	linkmode_zero(kedata->supported);
+	for (i = 8; --i; ) {
+		const int eee_capability = le16_to_cpu(phy_cfg.eee_capability);
+		static const int lut[8] = { 0,
+			ETHTOOL_LINK_MODE_100baseT_Full_BIT,
+			ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
+			ETHTOOL_LINK_MODE_10000baseT_Full_BIT,
+			ETHTOOL_LINK_MODE_1000baseKX_Full_BIT,
+			ETHTOOL_LINK_MODE_10000baseKX4_Full_BIT,
+			ETHTOOL_LINK_MODE_10000baseKR_Full_BIT,
+			ETHTOOL_LINK_MODE_40000baseKR4_Full_BIT
+		};
+		if (eee_capability & (1 << i))
+			linkmode_set_bit(lut[i], kedata->supported);
+	}
+	linkmode_copy(kedata->lp_advertised, kedata->supported);
 
 	/* Get current configuration */
 	status = i40e_aq_get_phy_capabilities(hw, false, false, &phy_cfg, NULL);
 	if (status)
 		return -EAGAIN;
 
-	edata->advertised_u32 = phy_cfg.eee_capability ? SUPPORTED_Autoneg : 0U;
-	edata->eee_enabled = !!edata->advertised_u32;
-	edata->tx_lpi_enabled = pf->stats.tx_lpi_status;
+	linkmode_zero(kedata->advertised);
+	if (phy_cfg.eee_capability)
+		linkmode_copy(kedata->advertised, kedata->supported);
+	kedata->eee_enabled = !!phy_cfg.eee_capability;
+	kedata->tx_lpi_enabled = pf->stats.tx_lpi_status;
 
-	edata->eee_active = pf->stats.tx_lpi_status && pf->stats.rx_lpi_status;
+	kedata->eee_active = pf->stats.tx_lpi_status && pf->stats.rx_lpi_status;
 
 	return 0;
 }
@@ -7258,18 +7275,18 @@ static int i40e_get_eee(struct net_device *netdev, struct ethtool_eee *edata)
 // Currently is only called using the wrapper bellow
 // to accommodate both eee and keee interfaces
 static int i40e_is_keee_param_supported(struct net_device *netdev,
-					struct ethtool_keee *edata)
+					struct ethtool_keee *kedata)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_vsi *vsi = np->vsi;
 	struct i40e_pf *pf = vsi->back;
 	struct i40e_ethtool_not_used {
-		u32 value;
+		int value;
 		const char *name;
 	} param[] = {
-		{edata->advertised_u32 & ~SUPPORTED_Autoneg, "advertise"},
-		{edata->tx_lpi_timer, "tx-timer"},
-		{edata->tx_lpi_enabled != pf->stats.tx_lpi_status, "tx-lpi"}
+		{!!(kedata->advertised[0] & ~kedata->supported[0]), "advertise"},
+		{!!kedata->tx_lpi_timer, "tx-timer"},
+		{kedata->tx_lpi_enabled != pf->stats.tx_lpi_status, "tx-lpi"}
 	};
 	int i;
 
@@ -7285,24 +7302,7 @@ static int i40e_is_keee_param_supported(struct net_device *netdev,
 	return 0;
 }
 
-static int i40e_is_eee_param_supported(struct net_device *netdev,
-				       struct ethtool_keee *kedata)
-{
-#ifdef HAVE_ETHTOOL_KEEE
-	return i40e_is_keee_param_supported(netdev, kedata);
-#else
-	struct ethtool_eee edata;
-	int ret;
-
-	keee_to_eee(&edata, kedata);
-	ret = i40e_is_keee_param_supported(netdev, kedata);
-	eee_to_keee(kedata, &edata);
-
-	return ret;
-#endif /* HAVE_ETHTOOL_KEEE */
-}
-
-static int i40e_set_keee(struct net_device *netdev, struct ethtool_keee *edata)
+static int i40e_set_keee(struct net_device *netdev, struct ethtool_keee *kedata)
 {
 	struct i40e_netdev_priv *np = netdev_priv(netdev);
 	struct i40e_aq_get_phy_abilities_resp abilities;
@@ -7314,7 +7314,7 @@ static int i40e_set_keee(struct net_device *netdev, struct ethtool_keee *edata)
 	__le16 eee_capability;
 
 	/* Deny parameters we don't support */
-	if (i40e_is_eee_param_supported(netdev, edata))
+	if (i40e_is_keee_param_supported(netdev, kedata))
 		return -EOPNOTSUPP;
 
 	/* Get initial PHY capabilities */
@@ -7350,7 +7350,7 @@ static int i40e_set_keee(struct net_device *netdev, struct ethtool_keee *edata)
 			    I40E_AQ_PHY_FEC_CONFIG_MASK;
 
 	/* Set desired EEE state */
-	if (edata->eee_enabled) {
+	if (kedata->eee_enabled) {
 		config.eee_capability = eee_capability;
 		config.eeer |= cpu_to_le32(I40E_PRTPM_EEER_TX_LPI_EN_MASK);
 	} else {

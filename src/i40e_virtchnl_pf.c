@@ -1497,13 +1497,13 @@ static int i40e_set_source_pruning(struct i40e_vf *vf)
 static int i40e_alloc_vsi_res(struct i40e_vf *vf, u8 idx)
 {
 	struct i40e_mac_filter *f = NULL;
+	struct i40e_vsi *main_vsi, *vsi;
 	struct i40e_pf *pf = vf->pf;
-	struct i40e_vsi *vsi;
 	u64 max_tx_rate = 0;
 	int ret = 0;
 
-	vsi = i40e_vsi_setup(pf, I40E_VSI_SRIOV, pf->vsi[pf->lan_vsi]->seid,
-			     vf->vf_id);
+	main_vsi = i40e_pf_get_main_vsi(pf);
+	vsi = i40e_vsi_setup(pf, I40E_VSI_SRIOV, main_vsi->seid, vf->vf_id);
 
 	if (!vsi) {
 		dev_err(&pf->pdev->dev,
@@ -4184,9 +4184,8 @@ static int i40e_del_vf_mac_filters(struct i40e_vf *vf,
 	spin_lock_bh(&vsi->mac_filter_hash_lock);
 	/* delete addresses from the list */
 	for (i = 0; i < al->num_elements; i++) {
-		if (ether_addr_equal(al->list[i].addr,
-				     vf->default_lan_addr.addr) &&
-		    (vf->trusted || !vf->pf_set_mac)) {
+		if (ether_addr_equal(al->list[i].addr, vf->default_lan_addr.addr) &&
+		    !vf->pf_set_mac) {
 			was_unimac_deleted = true;
 			is_legacy_unimac =
 				i40e_is_vc_addr_legacy(&al->list[i]);
@@ -4330,7 +4329,7 @@ static int i40e_vc_add_vlan_msg(struct i40e_vf *vf, u8 *msg)
 	struct virtchnl_vlan_filter_list *vfl =
 	    (struct virtchnl_vlan_filter_list *)msg;
 	struct i40e_pf *pf = vf->pf;
-	struct i40e_vsi *vsi = NULL;
+	struct i40e_vsi *main_vsi = NULL;
 
 	if (!i40e_sync_vf_state(vf, I40E_VF_STATE_ACTIVE) ||
 	    !i40e_vc_isvalid_vsi_id(vf, vfl->vsi_id)) {
@@ -4338,8 +4337,8 @@ static int i40e_vc_add_vlan_msg(struct i40e_vf *vf, u8 *msg)
 		goto error_param;
 	}
 
-	vsi = pf->vsi[vf->lan_vsi_idx];
-	if (i40e_vc_add_vlans_legacy(vfl, vsi, vf))
+	main_vsi = i40e_pf_get_main_vsi(pf);
+	if (i40e_vc_add_vlans_legacy(vfl, main_vsi, vf))
 		v_ret = I40E_ERR_PARAM;
 
 error_param:

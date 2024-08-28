@@ -6,6 +6,9 @@
 
 #include <net/tcp.h>
 #include <net/udp.h>
+#ifdef HAVE_INCLUDE_BITFIELD
+#include <linux/bitfield.h>
+#endif /* HAVE_INCLUDE_BITFIELD */
 #include <linux/types.h>
 #include <linux/errno.h>
 #include <linux/module.h>
@@ -28,6 +31,9 @@
 #include <net/ip6_checksum.h>
 #include "kcompat.h"
 #include <linux/filter.h>
+#ifdef HAVE_LINKMODE
+#include <linux/linkmode.h>
+#endif /* HAVE_LINKMODE */
 #ifdef HAVE_XDP_SUPPORT
 #ifdef HAVE_XDP_BUFF_RXQ
 #include <net/xdp.h>
@@ -248,7 +254,7 @@ enum i40e_interrupt_policy {
 
 struct i40e_lump_tracking {
 	u16 num_entries;
-	u16 list[0];
+	u16 list[];
 #define I40E_PILE_VALID_BIT  0x8000
 #define I40E_IWARP_IRQ_PILE_ID  (I40E_PILE_VALID_BIT - 2)
 };
@@ -970,7 +976,6 @@ struct i40e_veb {
 	u16 stats_idx;		/* index of VEB parent */
 	u8  enabled_tc;
 	u16 bridge_mode;	/* Bridge Mode (VEB/VEPA) */
-	u16 flags;
 	u16 bw_limit;
 	u8  bw_max_quanta;
 	bool is_abs_credits;
@@ -1247,6 +1252,17 @@ static inline u64 i40e_read_fd_input_set(struct i40e_pf *pf, u16 addr)
 }
 
 /**
+ * i40e_pf_get_main_vsi - get pointer to main VSI
+ * @pf: pointer to a PF
+ *
+ * Return pointer to main VSI or NULL if it does not exist
+ **/
+static inline struct i40e_vsi *i40e_pf_get_main_vsi(struct i40e_pf *pf)
+{
+	return (pf->lan_vsi != I40E_NO_VSI) ? pf->vsi[pf->lan_vsi] : NULL;
+}
+
+/**
  * i40e_write_fd_input_set - writes value into flow director input set register
  * @pf: pointer to the PF struct
  * @addr: register addr
@@ -1352,7 +1368,7 @@ void i40e_unquiesce_vsi(struct i40e_vsi *vsi);
 void i40e_pf_quiesce_all_vsi(struct i40e_pf *pf);
 void i40e_pf_unquiesce_all_vsi(struct i40e_pf *pf);
 int i40e_reconfig_rss_queues(struct i40e_pf *pf, int queue_count);
-struct i40e_veb *i40e_veb_setup(struct i40e_pf *pf, u16 flags, u16 uplink_seid,
+struct i40e_veb *i40e_veb_setup(struct i40e_pf *pf, u16 uplink_seid,
 				u16 downlink_seid, u8 enabled_tc);
 void i40e_veb_release(struct i40e_veb *veb);
 int i40e_max_lump_qp(struct i40e_pf *pf);
@@ -1385,8 +1401,8 @@ static inline void i40e_dbg_exit(void) {}
 int i40e_lan_add_device(struct i40e_pf *pf);
 int i40e_lan_del_device(struct i40e_pf *pf);
 void i40e_client_subtask(struct i40e_pf *pf);
-void i40e_notify_client_of_l2_param_changes(struct i40e_vsi *vsi);
-void i40e_notify_client_of_netdev_close(struct i40e_vsi *vsi, bool reset);
+void i40e_notify_client_of_l2_param_changes(struct i40e_pf *pf);
+void i40e_notify_client_of_netdev_close(struct i40e_pf *pf, bool reset);
 void i40e_notify_client_of_vf_enable(struct i40e_pf *pf, u32 num_vfs);
 void i40e_notify_client_of_vf_reset(struct i40e_pf *pf, u32 vf_id);
 void i40e_client_update_msix_info(struct i40e_pf *pf);

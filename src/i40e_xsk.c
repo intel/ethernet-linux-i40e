@@ -811,9 +811,8 @@ static struct sk_buff *i40e_construct_skb_zc(struct i40e_ring *rx_ring,
 	struct sk_buff *skb;
 
 	/* allocate a skb to store the frags */
-	skb = __napi_alloc_skb(&rx_ring->q_vector->napi,
-			       xdp->data_end - xdp->data_hard_start,
-			       GFP_ATOMIC | __GFP_NOWARN);
+	skb = napi_alloc_skb(&rx_ring->q_vector->napi,
+			     xdp->data_end - xdp->data_hard_start);
 	if (unlikely(!skb))
 		return NULL;
 
@@ -959,7 +958,7 @@ int i40e_clean_rx_irq_zc(struct i40e_ring *rx_ring, int budget)
 #ifdef HAVE_MEM_TYPE_XSK_BUFF_POOL
 		bi = *i40e_rx_bi(rx_ring, next_to_clean);
 		bi->data_end = bi->data + size;
-		xsk_buff_dma_sync_for_cpu(bi, rx_ring->xsk_pool);
+		xsk_buff_dma_sync_for_cpu(bi);
 
 		xdp_res = i40e_run_xdp_zc(rx_ring, bi);
 #else

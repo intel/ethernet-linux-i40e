@@ -4,6 +4,29 @@
 #ifndef _KCOMPAT_IMPL_H_
 #define _KCOMPAT_IMPL_H_
 
+/* devlink support */
+#if IS_ENABLED(CONFIG_NET_DEVLINK)
+
+/*
+ * This change is adding buffer in enum value for ice_devlink_param_id.
+ *
+ * In upstream / OOT compiled from source it is safe to use
+ * DEVLINK_PARAM_GENERIC_ID_MAX as first value for ice_devlink_param_id
+ * enum.
+ *
+ * In case of binary release (for Secure Boot purpose) this caused issue
+ * with supporting multiple kernels because backport made by SLES changed
+ * value of DEVLINK_PARAM_GENERIC_ID_MAX. This caused -EINVAL to
+ * be returned by devlink_params_register() because
+ * ICE_DEVLINK_PARAM_ID_FW_MGMT_MINSREV (compiled on older kernel) was equal
+ * to DEVLINK_PARAM_GENERIC_ID_MAX (in newer kernel).
+ */
+#define DEVLINK_PARAM_GENERIC_ID_MAX __KC_DEVLINK_PARAM_GENERIC_ID_MAX
+#include <net/devlink.h>
+#undef DEVLINK_PARAM_GENERIC_ID_MAX
+#define DEVLINK_PARAM_GENERIC_ID_MAX (__KC_DEVLINK_PARAM_GENERIC_ID_MAX + 32)
+#endif /* CONFIG_DEVLINK */
+
 /* This file contains implementations of backports from various kernels. It
  * must rely only on NEED_<FLAG> and HAVE_<FLAG> checks. It must not make any
  * checks to determine the kernel version when deciding whether to include an
@@ -133,6 +156,120 @@ static inline void skb_frag_off_add(skb_frag_t *frag, int delta)
 #endif /* NEED_SKB_FRAG_OFF_ADD */
 
 /*
+ * NEED_DMA_ATTRS, NEED_DMA_ATTRS_PTR and related functions
+ *
+ * dma_map_page_attrs and dma_unmap_page_attrs were added in upstream commit
+ * 0495c3d36794 ("dma: add calls for dma_map_page_attrs and
+ * dma_unmap_page_attrs")
+ *
+ * Implementing these calls in this way makes RHEL7.4 compile (which doesn't
+ * have these) and all newer kernels compile fine, while using only the new
+ * calls with no ifdeffery.
+ *
+ * In kernel 4.10 the commit ("dma-mapping: use unsigned long for dma_attrs")
+ * switched the argument from struct dma_attrs * to unsigned long.
+ *
+ * __page_frag_cache_drain was implemented in 2017, but __page_frag_drain came
+ * with the above series for _attrs, and seems to have been backported at the
+ * same time.
+ *
+ * Please note SLES12.SP3 and RHEL7.5 and newer have all three of these
+ * already.
+ *
+ * If need be in the future for some reason, we could make a separate NEED_
+ * define for __page_frag_cache_drain, but not yet.
+ *
+ * For clarity: there are three states:
+ * 1) no attrs
+ * 2) attrs but with a pointer to a struct dma_attrs
+ * 3) attrs but with unsigned long type
+ */
+#ifdef NEED_DMA_ATTRS
+static inline
+dma_addr_t __kc_dma_map_page_attrs(struct device *dev, struct page *page,
+				   size_t offset, size_t size,
+				   enum dma_data_direction dir,
+				   unsigned long __always_unused attrs)
+{
+	return dma_map_page(dev, page, offset, size, dir);
+}
+#define dma_map_page_attrs __kc_dma_map_page_attrs
+
+static inline
+void __kc_dma_unmap_page_attrs(struct device *dev,
+			       dma_addr_t addr, size_t size,
+			       enum dma_data_direction dir,
+			       unsigned long __always_unused attrs)
+{
+	dma_unmap_page(dev, addr, size, dir);
+}
+#define dma_unmap_page_attrs __kc_dma_unmap_page_attrs
+
+static inline void __page_frag_cache_drain(struct page *page,
+					   unsigned int count)
+{
+#ifdef HAVE_PAGE_COUNT_BULK_UPDATE
+	if (!page_ref_sub_and_test(page, count))
+		return;
+
+	init_page_count(page);
+#else
+	WARN_ON(count > 1);
+	if (!count)
+		return;
+#endif
+	__free_pages(page, compound_order(page));
+}
+#elif defined(NEED_DMA_ATTRS_PTR)
+static inline
+dma_addr_t __kc_dma_map_page_attrs_long(struct device *dev, struct page *page,
+				   size_t offset, size_t size,
+				   enum dma_data_direction dir,
+				   unsigned long attrs)
+{
+	struct dma_attrs dmaattrs = {};
+
+	if (attrs & DMA_ATTR_SKIP_CPU_SYNC)
+		dma_set_attr(DMA_ATTR_SKIP_CPU_SYNC, &dmaattrs);
+
+	if (attrs & DMA_ATTR_WEAK_ORDERING)
+		dma_set_attr(DMA_ATTR_WEAK_ORDERING, &dmaattrs);
+
+	return dma_map_page_attrs(dev, page, offset, size, dir, &dmaattrs);
+}
+#define dma_map_page_attrs __kc_dma_map_page_attrs_long
+/* there is a nasty macro buried in dma-mapping.h which reroutes dma_map_page
+ * and dma_unmap_page to attribute versions, so take control of that macro and
+ * fix it here. */
+#ifdef dma_map_page
+#undef dma_map_page
+#define dma_map_page(a,b,c,d,r) dma_map_page_attrs(a,b,c,d,r,0)
+#endif
+
+static inline
+void __kc_dma_unmap_page_attrs_long(struct device *dev,
+			       dma_addr_t addr, size_t size,
+			       enum dma_data_direction dir,
+			       unsigned long attrs)
+{
+	struct dma_attrs dmaattrs = {};
+
+	if (attrs & DMA_ATTR_SKIP_CPU_SYNC)
+		dma_set_attr(DMA_ATTR_SKIP_CPU_SYNC, &dmaattrs);
+
+	if (attrs & DMA_ATTR_WEAK_ORDERING)
+		dma_set_attr(DMA_ATTR_WEAK_ORDERING, &dmaattrs);
+
+	dma_unmap_page_attrs(dev, addr, size, dir, &dmaattrs);
+}
+#define dma_unmap_page_attrs __kc_dma_unmap_page_attrs_long
+#ifdef dma_unmap_page
+#undef dma_unmap_page
+#define dma_unmap_page(a,b,c,r) dma_unmap_page_attrs(a,b,c,r,0)
+#endif
+#endif /* NEED_DMA_ATTRS_PTR */
+
+/*
  * NETIF_F_HW_L2FW_DOFFLOAD related functions
  *
  * Support for NETIF_F_HW_L2FW_DOFFLOAD was first introduced upstream by
@@ -219,8 +356,6 @@ static inline bool macvlan_supports_dest_filter(struct net_device *dev)
 
 /* devlink support */
 #if IS_ENABLED(CONFIG_NET_DEVLINK)
-
-#include <net/devlink.h>
 
 #ifdef HAVE_DEVLINK_REGIONS
 /* NEED_DEVLINK_REGION_CREATE_OPS
@@ -1099,21 +1234,6 @@ static inline u32 _xsk_umem_get_rx_frame_size(struct xdp_umem *umem)
 #endif /* HAVE_AF_XDP_ZC_SUPPORT */
 #endif
 
-#ifdef NEED_XSK_BUFF_DMA_SYNC_FOR_CPU
-#ifdef HAVE_MEM_TYPE_XSK_BUFF_POOL
-#include <net/xdp_sock_drv.h>
-static inline void
-_kc_xsk_buff_dma_sync_for_cpu(struct xdp_buff *xdp,
-			      void __always_unused *pool)
-{
-	xsk_buff_dma_sync_for_cpu(xdp);
-}
-
-#define xsk_buff_dma_sync_for_cpu(xdp, pool) \
-	_kc_xsk_buff_dma_sync_for_cpu(xdp, pool)
-#endif /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
-#endif /* NEED_XSK_BUFF_DMA_SYNC_FOR_CPU */
-
 #ifdef NEED_XSK_BUFF_POOL_RENAME
 #define XDP_SETUP_XSK_POOL XDP_SETUP_XSK_UMEM
 #define xsk_get_pool_from_qid xdp_get_umem_from_qid
@@ -1156,9 +1276,19 @@ static inline void linkmode_zero(unsigned long *dst)
 {
 	bitmap_zero(dst, __ETHTOOL_LINK_MODE_MASK_NBITS);
 }
+
+static inline void linkmode_copy(unsigned long *dst, const unsigned long *src)
+{
+	bitmap_copy(dst, src, __ETHTOOL_LINK_MODE_MASK_NBITS);
+}
+
+static inline bool linkmode_empty(const unsigned long *src)
+{
+	return bitmap_empty(src, __ETHTOOL_LINK_MODE_MASK_NBITS);
+}
 #endif /* !HAVE_LINKMODE */
 
-#ifndef ETHTOOL_GLINKSETTINGS
+#ifdef NEED_ETHTOOL_LINK_MODE_BIT_INDICES
 /* Link mode bit indices */
 enum ethtool_link_mode_bit_indices {
 	ETHTOOL_LINK_MODE_10baseT_Half_BIT      = 0,
@@ -1192,6 +1322,33 @@ enum ethtool_link_mode_bit_indices {
 	ETHTOOL_LINK_MODE_56000baseCR4_Full_BIT = 28,
 	ETHTOOL_LINK_MODE_56000baseSR4_Full_BIT = 29,
 	ETHTOOL_LINK_MODE_56000baseLR4_Full_BIT = 30,
+#ifdef ETHTOOL_GLINKSETTINGS
+	ETHTOOL_LINK_MODE_25000baseCR_Full_BIT	= 31,
+	ETHTOOL_LINK_MODE_25000baseKR_Full_BIT	= 32,
+	ETHTOOL_LINK_MODE_25000baseSR_Full_BIT	= 33,
+	ETHTOOL_LINK_MODE_50000baseCR2_Full_BIT	= 34,
+	ETHTOOL_LINK_MODE_50000baseKR2_Full_BIT	= 35,
+	ETHTOOL_LINK_MODE_100000baseKR4_Full_BIT	= 36,
+	ETHTOOL_LINK_MODE_100000baseSR4_Full_BIT	= 37,
+	ETHTOOL_LINK_MODE_100000baseCR4_Full_BIT	= 38,
+	ETHTOOL_LINK_MODE_100000baseLR4_ER4_Full_BIT	= 39,
+	ETHTOOL_LINK_MODE_50000baseSR2_Full_BIT		= 40,
+	ETHTOOL_LINK_MODE_1000baseX_Full_BIT	= 41,
+	ETHTOOL_LINK_MODE_10000baseCR_Full_BIT	= 42,
+	ETHTOOL_LINK_MODE_10000baseSR_Full_BIT	= 43,
+	ETHTOOL_LINK_MODE_10000baseLR_Full_BIT	= 44,
+	ETHTOOL_LINK_MODE_10000baseLRM_Full_BIT	= 45,
+	ETHTOOL_LINK_MODE_10000baseER_Full_BIT	= 46,
+	ETHTOOL_LINK_MODE_2500baseT_Full_BIT	= 47,
+	ETHTOOL_LINK_MODE_5000baseT_Full_BIT	= 48,
+
+	ETHTOOL_LINK_MODE_FEC_NONE_BIT	= 49,
+	ETHTOOL_LINK_MODE_FEC_RS_BIT	= 50,
+	ETHTOOL_LINK_MODE_FEC_BASER_BIT	= 51,
+
+	__ETHTOOL_LINK_MODE_LAST
+	  = ETHTOOL_LINK_MODE_FEC_BASER_BIT,
+#else
 
 	/* Last allowed bit for __ETHTOOL_LINK_MODE_LEGACY_MASK is bit
 	 * 31. Please do NOT define any SUPPORTED_* or ADVERTISED_*
@@ -1201,8 +1358,9 @@ enum ethtool_link_mode_bit_indices {
 
 	__ETHTOOL_LINK_MODE_LAST
 	  = ETHTOOL_LINK_MODE_56000baseLR4_Full_BIT,
-};
 #endif /* !ETHTOOL_GLINKSETTINGS */
+};
+#endif /* NEED_ETHTOOL_LINK_MODE_BIT_INDICES */
 
 #if defined(NEED_FLOW_MATCH) && defined(HAVE_TC_SETUP_CLSFLOWER)
 /* NEED_FLOW_MATCH
@@ -1708,6 +1866,80 @@ __printf(2, 3) void ethtool_sprintf(u8 **data, const char *fmt, ...);
 #endif /* NEED_ETHTOOL_SPRINTF */
 
 /*
+ * NEED_SYSFS_MATCH_STRING
+ *
+ * Upstream commit e1fe7b6a7b37 ("lib/string: add sysfs_match_string helper")
+ * introduced a helper for looking up strings in an array - it's pure algo stuff
+ * that is easy to backport if needed.
+ * Instead of covering sysfs_streq() by yet another flag just copy it.
+ */
+#ifdef NEED_SYSFS_MATCH_STRING
+/*
+ * sysfs_streq - return true if strings are equal, modulo trailing newline
+ * @s1: one string
+ * @s2: another string
+ *
+ * This routine returns true iff two strings are equal, treating both
+ * NUL and newline-then-NUL as equivalent string terminations.  It's
+ * geared for use with sysfs input strings, which generally terminate
+ * with newlines but are compared against values without newlines.
+ */
+static inline bool _kc_sysfs_streq(const char *s1, const char *s2)
+{
+	while (*s1 && *s1 == *s2) {
+		s1++;
+		s2++;
+	}
+
+	if (*s1 == *s2)
+		return true;
+	if (!*s1 && *s2 == '\n' && !s2[1])
+		return true;
+	if (*s1 == '\n' && !s1[1] && !*s2)
+		return true;
+	return false;
+}
+
+/*
+ * __sysfs_match_string - matches given string in an array
+ * @array: array of strings
+ * @n: number of strings in the array or -1 for NULL terminated arrays
+ * @str: string to match with
+ *
+ * Returns index of @str in the @array or -EINVAL, just like match_string().
+ * Uses sysfs_streq instead of strcmp for matching.
+ *
+ * This routine will look for a string in an array of strings up to the
+ * n-th element in the array or until the first NULL element.
+ *
+ * Historically the value of -1 for @n, was used to search in arrays that
+ * are NULL terminated. However, the function does not make a distinction
+ * when finishing the search: either @n elements have been compared OR
+ * the first NULL element was found.
+ */
+static inline int _kc___sysfs_match_string(const char * const *array, size_t n,
+					   const char *str)
+{
+	const char *item;
+	int index;
+
+	for (index = 0; index < n; index++) {
+		item = array[index];
+		if (!item)
+			break;
+		if (sysfs_streq(item, str))
+			return index;
+	}
+
+	return -EINVAL;
+}
+
+#define sysfs_match_string(_a, _s) \
+	_kc___sysfs_match_string(_a, ARRAY_SIZE(_a), _s)
+
+#endif /* NEED_SYSFS_MATCH_STRING */
+
+/*
  * NEED_SYSFS_EMIT
  *
  * Upstream introduced following function in
@@ -2019,6 +2251,16 @@ static inline bool dev_page_is_reusable(struct page *page)
 }
 #endif /* NEED_DEV_PAGE_IS_REUSABLE */
 
+#ifdef NEED_NAPI_ALLOC_SKB
+static inline
+struct sk_buff *kc_napi_alloc_skb(struct napi_struct *napi, unsigned int len)
+{
+	return __napi_alloc_skb(napi, len, GFP_ATOMIC | __GFP_NOWARN);
+}
+
+#define napi_alloc_skb(napi, len) kc_napi_alloc_skb(napi, len)
+#endif /* NEED_NAPI_ALLOC_SKB */
+
 /* NEED_NAPI_BUILD_SKB
  *
  * napi_build_skb was introduced by
@@ -2074,6 +2316,22 @@ debugfs_lookup_and_remove(const char *name, struct dentry *parent)
 	dput(dentry);
 }
 #endif /* NEED_DEBUGFS_LOOKUP_AND_REMOVE */
+
+/* NEED_FS_FILE_DENTRY
+ *
+ * this is simple impl of file_dentry() (introduced in v4.6, backported to
+ * stable mainline 4.5 and 4.6 kernels)
+ *
+ * prior to file_dentry() existence logic of this function was open-coded,
+ * and if given kernel has had not backported it, then "oversimplification bugs"
+ * are present there anyway.
+ */
+#ifdef NEED_FS_FILE_DENTRY
+static inline struct dentry *file_dentry(const struct file *file)
+{
+	return file->f_path.dentry;
+}
+#endif /* NEED_FS_FILE_DENTRY */
 
 /* NEED_CLASS_CREATE_WITH_MODULE_PARAM
  *
@@ -2306,19 +2564,195 @@ static inline size_t list_count_nodes(struct list_head *head)
 	return count;
 }
 #endif /* NEED_LIST_COUNT_NODES */
+#ifdef NEED_STATIC_ASSERT
+/*
+ * NEED_STATIC_ASSERT Introduced with upstream commit 6bab69c6501
+ * ("build_bug.h: add wrapper for _Static_assert")
+ *  * Available for kernels >= 5.1
+ *
+ *  Macro for _Static_assert GCC keyword (C11)
+ */
+#define static_assert(expr, ...) __static_assert(expr, ##__VA_ARGS__, #expr)
+#define __static_assert(expr, msg, ...) _Static_assert(expr, msg)
+#endif /* NEED_STATIC_ASSERT */
 
-#ifdef HAVE_NO_STRSCPY
-#define strscpy strlcpy
-#endif /* HAVE_NO_STRSCPY */
+#ifdef NEED_ETH_TYPE_VLAN
+#include <linux/if_vlan.h>
+/**
+ * eth_type_vlan was added in commit fe19c4f971a5 ("lan: Check for vlan ethernet
+ * types for 8021.q or 802.1ad").
+ *
+ * eth_type_vlan - check for valid vlan ether type.
+ * @ethertype: ether type to check
+ *
+ * Returns true if the ether type is a vlan ether type.
+ */
+static inline bool eth_type_vlan(__be16 ethertype)
+{
+	switch (ethertype) {
+	case htons(ETH_P_8021Q):
+	case htons(ETH_P_8021AD):
+		return true;
+	default:
+		return false;
+	}
+}
+#endif /* NEED_ETH_TYPE_VLAN */
+
+#ifdef NEED___STRUCT_GROUP
+/**
+ * __struct_group() - Create a mirrored named and anonyomous struct
+ *
+ * @TAG: The tag name for the named sub-struct (usually empty)
+ * @NAME: The identifier name of the mirrored sub-struct
+ * @ATTRS: Any struct attributes (usually empty)
+ * @MEMBERS: The member declarations for the mirrored structs
+ *
+ * Used to create an anonymous union of two structs with identical layout
+ * and size: one anonymous and one named. The former's members can be used
+ * normally without sub-struct naming, and the latter can be used to
+ * reason about the start, end, and size of the group of struct members.
+ * The named struct can also be explicitly tagged for layer reuse, as well
+ * as both having struct attributes appended.
+ */
+#define __struct_group(TAG, NAME, ATTRS, MEMBERS...) \
+	union { \
+		struct { MEMBERS } ATTRS; \
+		struct TAG { MEMBERS } ATTRS NAME; \
+	}
+#endif /* NEED___STRUCT_GROUP */
+
+#ifdef NEED_STRUCT_GROUP
+/**
+ * struct_group() - Wrap a set of declarations in a mirrored struct
+ *
+ * @NAME: The identifier name of the mirrored sub-struct
+ * @MEMBERS: The member declarations for the mirrored structs
+ *
+ * Used to create an anonymous union of two structs with identical
+ * layout and size: one anonymous and one named. The former can be
+ * used normally without sub-struct naming, and the latter can be
+ * used to reason about the start, end, and size of the group of
+ * struct members.
+ */
+#define struct_group(NAME, MEMBERS...)  \
+	__struct_group(/* no tag */, NAME, /* no attrs */, MEMBERS)
+
+/**
+ * struct_group_tagged() - Create a struct_group with a reusable tag
+ *
+ * @TAG: The tag name for the named sub-struct
+ * @NAME: The identifier name of the mirrored sub-struct
+ * @MEMBERS: The member declarations for the mirrored structs
+ *
+ * Used to create an anonymous union of two structs with identical
+ * layout and size: one anonymous and one named. The former can be
+ * used normally without sub-struct naming, and the latter can be
+ * used to reason about the start, end, and size of the group of
+ * struct members. Includes struct tag argument for the named copy,
+ * so the specified layout can be reused later.
+ */
+#define struct_group_tagged(TAG, NAME, MEMBERS...) \
+	__struct_group(TAG, NAME, /* no attrs */, MEMBERS)
+#endif /* NEED_STRUCT_GROUP */
+
+#ifdef NEED_READ_POLL_TIMEOUT
+/*
+ * 5f5323a14cad ("iopoll: introduce read_poll_timeout macro")
+ * Added in kernel 5.8
+ */
+#define read_poll_timeout(op, val, cond, sleep_us, timeout_us, \
+				sleep_before_read, args...) \
+({ \
+	u64 __timeout_us = (timeout_us); \
+	unsigned long __sleep_us = (sleep_us); \
+	ktime_t __timeout = ktime_add_us(ktime_get(), __timeout_us); \
+	might_sleep_if((__sleep_us) != 0); \
+	if (sleep_before_read && __sleep_us) \
+		usleep_range((__sleep_us >> 2) + 1, __sleep_us); \
+	for (;;) { \
+		(val) = op(args); \
+		if (cond) \
+			break; \
+		if (__timeout_us && \
+		    ktime_compare(ktime_get(), __timeout) > 0) { \
+			(val) = op(args); \
+			break; \
+		} \
+		if (__sleep_us) \
+			usleep_range((__sleep_us >> 2) + 1, __sleep_us); \
+		cpu_relax(); \
+	} \
+	(cond) ? 0 : -ETIMEDOUT; \
+})
+#else
+#include <linux/iopoll.h>
+#endif /* NEED_READ_POLL_TIMEOUT */
+
+#ifndef HAVE_DPLL_LOCK_STATUS_ERROR
+/* Copied from include/uapi/linux/dpll.h to have common dpll status enums
+ * between sysfs and dpll subsystem based solutions.
+ * cf4f0f1e1c465 ("dpll: extend uapi by lock status error attribute")
+ * Added in kernel 6.9
+ */
+enum dpll_lock_status_error {
+	DPLL_LOCK_STATUS_ERROR_NONE = 1,
+	DPLL_LOCK_STATUS_ERROR_UNDEFINED,
+	DPLL_LOCK_STATUS_ERROR_MEDIA_DOWN,
+	DPLL_LOCK_STATUS_ERROR_FRACTIONAL_FREQUENCY_OFFSET_TOO_HIGH,
+
+	/* private: */
+	__DPLL_LOCK_STATUS_ERROR_MAX,
+	DPLL_LOCK_STATUS_ERROR_MAX = (__DPLL_LOCK_STATUS_ERROR_MAX - 1)
+};
+
+#endif /* HAVE_DPLL_LOCK_STATUS_ERROR */
+
+#ifdef NEED_DPLL_NETDEV_PIN_SET
+#define dpll_netdev_pin_set netdev_dpll_pin_set
+#define dpll_netdev_pin_clear netdev_dpll_pin_clear
+#endif /* NEED_DPLL_NETDEV_PIN_SET */
+
+#ifdef NEED_RADIX_TREE_EMPTY
+static inline bool radix_tree_empty(struct radix_tree_root *root)
+{
+	return !root->rnode;
+}
+#endif /* NEED_RADIX_TREE_EMPTY */
+
+#ifdef NEED_SET_SCHED_FIFO
+/*
+ * 7318d4cc14c8 ("sched: Provide sched_set_fifo()")
+ * Added in kernel 5.9,
+ * converted to a macro for kcompat
+ */
+#include <linux/sched.h>
+
+#ifdef NEED_SCHED_PARAM
+#include <uapi/linux/sched/types.h>
+#endif /* NEED_SCHED_PARAM */
+#ifdef NEED_RT_H
+#include <linux/sched/rt.h>
+#else/* NEED_RT_H */
+#include <linux/sched/prio.h>
+#endif /* NEED_RT_H */
+#define sched_set_fifo(p)						   \
+({									   \
+	struct sched_param sp = { .sched_priority = MAX_RT_PRIO / 2 };	   \
+									   \
+	WARN_ON_ONCE(sched_setscheduler_nocheck((p), SCHED_FIFO,&sp) != 0);\
+})
+#endif /* NEED_SET_SCHED_FIFO */
 
 #ifndef HAVE_ETHTOOL_KEEE
+#ifndef __ETHTOOL_DECLARE_LINK_MODE_MASK
+#define __ETHTOOL_DECLARE_LINK_MODE_MASK(name)		\
+	DECLARE_BITMAP(name, __ETHTOOL_LINK_MODE_MASK_NBITS)
+#endif /* __ETHTOOL_DECLARE_LINK_MODE_MASK */
 struct ethtool_keee {
 	__ETHTOOL_DECLARE_LINK_MODE_MASK(supported);
 	__ETHTOOL_DECLARE_LINK_MODE_MASK(advertised);
 	__ETHTOOL_DECLARE_LINK_MODE_MASK(lp_advertised);
-	u32	supported_u32;
-	u32	advertised_u32;
-	u32	lp_advertised_u32;
 	u32	tx_lpi_timer;
 	bool	tx_lpi_enabled;
 	bool	eee_active;
@@ -2328,10 +2762,34 @@ struct ethtool_keee {
 void eee_to_keee(struct ethtool_keee *keee,
 		 const struct ethtool_eee *eee);
 
+void ethtool_convert_legacy_u32_to_link_mode(unsigned long *dst,
+					     u32 legacy_u32);
+bool ethtool_convert_link_mode_to_legacy_u32(u32 *legacy_u32,
+					     const unsigned long *src);
 bool ethtool_eee_use_linkmodes(const struct ethtool_keee *eee);
 
 void keee_to_eee(struct ethtool_eee *eee,
 		 const struct ethtool_keee *keee);
 #endif /* !HAVE_ETHTOOL_KEEE */
+
+#ifdef HAVE_ASSIGN_STR_2_PARAMS
+#define _kc__assign_str(dst, src) __assign_str(dst, src)
+#else
+#define _kc__assign_str(dst, src) __assign_str(dst)
+#endif
+
+#ifdef NEED_XSK_BUFF_DMA_SYNC_FOR_CPU_NO_POOL
+#include <net/xdp_sock_drv.h>
+static inline void
+_kc_xsk_buff_dma_sync_for_cpu(struct xdp_buff *xdp)
+{
+	struct xdp_buff_xsk *xskb = container_of(xdp, struct xdp_buff_xsk, xdp);
+
+	xsk_buff_dma_sync_for_cpu(xdp, xskb->pool);
+}
+
+#define xsk_buff_dma_sync_for_cpu(xdp) \
+	_kc_xsk_buff_dma_sync_for_cpu(xdp)
+#endif /* NEED_XSK_BUFF_DMA_SYNC_FOR_CPU_NO_POOL */
 
 #endif /* _KCOMPAT_IMPL_H_ */
