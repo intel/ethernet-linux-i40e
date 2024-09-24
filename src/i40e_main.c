@@ -18743,7 +18743,7 @@ debug_mode:
  * i40e_suspend - PM callback for moving to D3
  * @dev: generic device information structure
  **/
-static int i40e_suspend(struct device *dev)
+static int __maybe_unused i40e_suspend(struct device *dev)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct i40e_pf *pf = pci_get_drvdata(pdev);
@@ -18799,7 +18799,7 @@ static int i40e_suspend(struct device *dev)
  * i40e_resume - PM callback for waking up from D3
  * @dev: generic device information structure
  **/
-static int i40e_resume(struct device *dev)
+static int __maybe_unused i40e_resume(struct device *dev)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
 	struct i40e_pf *pf = pci_get_drvdata(pdev);
