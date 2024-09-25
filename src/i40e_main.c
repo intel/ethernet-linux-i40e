@@ -14849,11 +14849,12 @@ static int i40e_xdp_setup(struct i40e_vsi *vsi, struct bpf_prog *prog,
 
 	if (old_prog)
 		bpf_prog_put(old_prog);
-#ifdef HAVE_AF_XDP_ZC_SUPPORT
+
 	/* Kick start the NAPI context if there is an AF_XDP socket open
 	 * on that queue id. This so that receiving will start.
 	 */
 	if (need_reset && prog) {
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
 		for (i = 0; i < vsi->num_queue_pairs; i++)
 #ifdef HAVE_NETDEV_BPF_XSK_POOL
 			if (vsi->xdp_rings[i]->xsk_pool)
@@ -14866,9 +14867,9 @@ static int i40e_xdp_setup(struct i40e_vsi *vsi, struct bpf_prog *prog,
 #else
 				(void)i40e_xsk_async_xmit(vsi->netdev, i);
 #endif /* HAVE_NDO_XSK_WAKEUP */
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
 		xdp_features_set_redirect_target(vsi->netdev, false);
 	}
-#endif /* HAVE_AF_XDP_ZC_SUPPORT */
 
 	return 0;
 }
