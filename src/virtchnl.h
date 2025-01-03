@@ -180,6 +180,11 @@ enum virtchnl_ops {
 	VIRTCHNL_OP_FLOW_SUBSCRIBE = 114,
 	VIRTCHNL_OP_FLOW_UNSUBSCRIBE = 115,
 	/* opcode 116 through 130 are reserved */
+	VIRTCHNL_OP_HQOS_TREE_READ = 131,
+	VIRTCHNL_OP_HQOS_ELEMS_ADD = 132,
+	VIRTCHNL_OP_HQOS_ELEMS_DEL = 133,
+	VIRTCHNL_OP_HQOS_ELEMS_MOVE = 134,
+	VIRTCHNL_OP_HQOS_ELEMS_CONF = 135,
 	VIRTCHNL_OP_MAX,
 };
 
@@ -288,6 +293,16 @@ static inline const char *virtchnl_op_str(enum virtchnl_ops v_opcode)
 		return "VIRTCHNL_OP_FLOW_SUBSCRIBE";
 	case VIRTCHNL_OP_FLOW_UNSUBSCRIBE:
 		return "VIRTCHNL_OP_FLOW_UNSUBSCRIBE";
+	case VIRTCHNL_OP_HQOS_TREE_READ:
+		return "VIRTCHNL_OP_HQOS_TREE_READ";
+	case VIRTCHNL_OP_HQOS_ELEMS_ADD:
+		return "VIRTCHNL_OP_HQOS_ELEMS_ADD";
+	case VIRTCHNL_OP_HQOS_ELEMS_DEL:
+		return "VIRTCHNL_OP_HQOS_ELEMS_DEL";
+	case VIRTCHNL_OP_HQOS_ELEMS_MOVE:
+		return "VIRTCHNL_OP_HQOS_ELEMS_MOVE";
+	case VIRTCHNL_OP_HQOS_ELEMS_CONF:
+		return "VIRTCHNL_OP_HQOS_ELEMS_CONF";
 	case VIRTCHNL_OP_MAX:
 		return "VIRTCHNL_OP_MAX";
 	default:
@@ -2161,6 +2176,9 @@ enum virtchnl_vector_limits {
 	VIRTCHNL_OP_ADD_DEL_VLAN_V2_MAX		=
 		((u16)(~0) - sizeof(struct virtchnl_vlan_filter_list_v2)) /
 		sizeof(struct virtchnl_vlan_filter),
+	VIRTCHNL_OP_HQOS_ELEMS_MAX		=
+		((u16)(~0) - sizeof(struct virtchnl_hqos_cfg_list)) /
+		sizeof(struct virtchnl_hqos_cfg),
 };
 
 /**
@@ -2479,6 +2497,25 @@ virtchnl_vc_validate_vf_msg(struct virtchnl_version_info *ver, u32 v_opcode,
 			valid_len += (v_qp->num_qv_maps - 1) *
 				      sizeof(struct virtchnl_queue_vector);
 		}
+		break;
+	case VIRTCHNL_OP_HQOS_ELEMS_ADD:
+	case VIRTCHNL_OP_HQOS_ELEMS_DEL:
+	case VIRTCHNL_OP_HQOS_ELEMS_MOVE:
+	case VIRTCHNL_OP_HQOS_ELEMS_CONF:
+		valid_len = sizeof(struct virtchnl_hqos_cfg_list);
+		if (msglen >= valid_len) {
+			struct virtchnl_hqos_cfg_list *v_hcl =
+				(struct virtchnl_hqos_cfg_list *)msg;
+			if (v_hcl->num_elem == 0 ||
+			    v_hcl->num_elem > VIRTCHNL_OP_HQOS_ELEMS_MAX) {
+				err_msg_format = true;
+				break;
+			}
+			valid_len += (v_hcl->num_elem - 1) *
+				     sizeof(struct virtchnl_hqos_cfg);
+		}
+		break;
+	case VIRTCHNL_OP_HQOS_TREE_READ:
 		break;
 	/* These are always errors coming from the VF. */
 	case VIRTCHNL_OP_EVENT:

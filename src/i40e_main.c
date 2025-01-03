@@ -42,8 +42,8 @@ static const char i40e_driver_string[] =
 #define DRV_VERSION_DESC ""
 
 #define DRV_VERSION_MAJOR 2
-#define DRV_VERSION_MINOR 26
-#define DRV_VERSION_BUILD 11
+#define DRV_VERSION_MINOR 27
+#define DRV_VERSION_BUILD 8
 #define DRV_VERSION_SUBBUILD 0
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
@@ -160,6 +160,86 @@ static struct workqueue_struct *i40e_wq;
 bool i40e_is_l4mode_enabled(void)
 {
 	return l4mode > L4_MODE_DISABLED;
+}
+
+/**
+ * i40e_allocate_dma_mem - OS specific memory alloc for shared code
+ * @hw:   pointer to the HW structure
+ * @mem:  ptr to mem struct to fill out
+ * @mtype: memory type identifier (unused)
+ * @size: size of memory requested
+ * @alignment: what to align the allocation to
+ **/
+i40e_status i40e_allocate_dma_mem(struct i40e_hw *hw,
+					    struct i40e_dma_mem *mem,
+					    __always_unused enum i40e_memory_type mtype,
+					    u64 size, u32 alignment)
+{
+	struct i40e_pf *nf = (struct i40e_pf *)hw->back;
+
+	mem->size = ALIGN(size, alignment);
+#ifdef HAVE_DMA_ALLOC_COHERENT_ZEROES_MEM
+	mem->va = dma_alloc_coherent(&nf->pdev->dev, mem->size,
+				     &mem->pa, GFP_KERNEL);
+#else
+	mem->va = dma_zalloc_coherent(&nf->pdev->dev, mem->size,
+				      &mem->pa, GFP_KERNEL);
+#endif
+	if (!mem->va)
+		return I40E_ERR_NO_MEMORY;
+
+	return I40E_SUCCESS;
+}
+
+/**
+ * i40e_free_dma_mem - OS specific memory free for shared code
+ * @hw:   pointer to the HW structure
+ * @mem:  ptr to mem struct to free
+ **/
+i40e_status i40e_free_dma_mem(struct i40e_hw *hw, struct i40e_dma_mem *mem)
+{
+	struct i40e_pf *nf = (struct i40e_pf *)hw->back;
+
+	dma_free_coherent(&nf->pdev->dev, mem->size, mem->va, mem->pa);
+	mem->va = NULL;
+	mem->pa = 0;
+	mem->size = 0;
+
+	return I40E_SUCCESS;
+}
+
+/**
+ * i40e_allocate_virt_mem - OS specific memory alloc for shared code
+ * @hw:   pointer to the HW structure
+ * @mem:  ptr to mem struct to fill out
+ * @size: size of memory requested
+ **/
+i40e_status i40e_allocate_virt_mem(struct i40e_hw *hw,
+					     struct i40e_virt_mem *mem,
+					     u32 size)
+{
+	mem->size = size;
+	mem->va = kzalloc(size, GFP_KERNEL);
+
+	if (!mem->va)
+		return I40E_ERR_NO_MEMORY;
+
+	return I40E_SUCCESS;
+}
+
+/**
+ * i40e_free_virt_mem - OS specific memory free for shared code
+ * @hw:   pointer to the HW structure
+ * @mem:  ptr to mem struct to free
+ **/
+i40e_status i40e_free_virt_mem(struct i40e_hw *hw, struct i40e_virt_mem *mem)
+{
+	/* it's ok to kfree a NULL pointer */
+	kfree(mem->va);
+	mem->va = NULL;
+	mem->size = 0;
+
+	return I40E_SUCCESS;
 }
 
 /**
@@ -1337,6 +1417,7 @@ int i40e_count_filters(struct i40e_vsi *vsi)
 
 	hash_for_each_safe(vsi->mac_filter_hash, bkt, h, f, hlist) {
 		if (f->state == I40E_FILTER_NEW ||
+		    f->state == I40E_FILTER_NEW_SYNC ||
 		    f->state == I40E_FILTER_ACTIVE)
 			++cnt;
 	}
@@ -1539,6 +1620,8 @@ static int i40e_correct_mac_vlan_filters(struct i40e_vsi *vsi,
 
 			new_mac->f = add_head;
 			new_mac->state = add_head->state;
+			if (add_head->state == I40E_FILTER_NEW)
+				add_head->state = I40E_FILTER_NEW_SYNC;
 
 			/* Add the new filter to the tmp list */
 			hlist_add_head(&new_mac->hlist, tmp_add_list);
@@ -1652,8 +1735,11 @@ static int i40e_correct_vf_mac_vlan_filters(struct i40e_vsi *vsi,
 				kzalloc(sizeof(*new_mac), GFP_ATOMIC);
 			if (!new_mac)
 				return -ENOMEM;
+
 			new_mac->f = add_head;
 			new_mac->state = add_head->state;
+			if (add_head->state == I40E_FILTER_NEW)
+				add_head->state = I40E_FILTER_NEW_SYNC;
 
 			/* Add the new filter to the tmp list */
 			hlist_add_head(&new_mac->hlist, tmp_add_list);
@@ -1669,7 +1755,8 @@ static int i40e_correct_vf_mac_vlan_filters(struct i40e_vsi *vsi,
 		new_state = f->state;
 		if (!allow_untagged &&
 		    (f->state == I40E_FILTER_ACTIVE ||
-		     f->state == I40E_FILTER_NEW) &&
+		     f->state == I40E_FILTER_NEW ||
+		     f->state == I40E_FILTER_NEW_SYNC) &&
 		    f->vlan == 0)
 			new_state = I40E_FILTER_INACTIVE;
 		if (allow_untagged && f->state == I40E_FILTER_INACTIVE &&
@@ -1695,15 +1782,16 @@ static int i40e_correct_vf_mac_vlan_filters(struct i40e_vsi *vsi,
 				add_head = i40e_add_filter(vsi, f->macaddr, 0);
 				if (!add_head)
 					return -ENOMEM;
-				/* As this filter exists already, driver must
-				 * update it's state to new
-				 */
-				add_head->state = I40E_FILTER_NEW;
-				/* Create a temporary i40e_new_mac_filter */
 				new_mac = (struct i40e_new_mac_filter *)
 					kzalloc(sizeof(*new_mac), GFP_ATOMIC);
 				if (!new_mac)
 					return -ENOMEM;
+				/* As this filter exists already, driver must
+				 * update it's state to new
+				 */
+				if (add_head->state == I40E_FILTER_NEW)
+					add_head->state = I40E_FILTER_NEW_SYNC;
+				/* Create a temporary i40e_new_mac_filter */
 				new_mac->f = add_head;
 				new_mac->state = I40E_FILTER_NEW;
 				/* Add the new filter to the tmp add list,
@@ -1851,6 +1939,7 @@ struct i40e_mac_filter *i40e_add_mac_filter(struct i40e_vsi *vsi,
 	struct hlist_node *h;
 	int bkt;
 
+	lockdep_assert_held(&vsi->mac_filter_hash_lock);
 	if (i40e_is_vid(&vsi->info)) {
 		__le16 vid = i40e_is_double_vlan(&vsi->back->hw) ?
 			      vsi->info.outer_vlan :
@@ -1896,6 +1985,7 @@ int i40e_del_mac_filter(struct i40e_vsi *vsi, const u8 *macaddr)
 	bool found = false;
 	int bkt;
 
+	lockdep_assert_held(&vsi->mac_filter_hash_lock);
 	hash_for_each_safe(vsi->mac_filter_hash, bkt, h, f, hlist) {
 		if (ether_addr_equal(macaddr, f->macaddr)) {
 			__i40e_del_filter(vsi, f);
@@ -2472,7 +2562,8 @@ i40e_update_filter_state(int count,
 		}
 		do {
 			add_head = i40e_next_filter(add_head);
-		} while (add_head && add_head->f->state != I40E_FILTER_NEW);
+		} while (add_head && add_head->f->state != I40E_FILTER_NEW &&
+			 add_head->f->state != I40E_FILTER_NEW_SYNC);
 		if (!add_head)
 			break;
 	}
@@ -2580,7 +2671,8 @@ static i40e_status
 i40e_aqc_broadcast_filter(struct i40e_vsi *vsi, const char *vsi_name,
 			  struct i40e_mac_filter *f)
 {
-	bool enable = f->state == I40E_FILTER_NEW;
+	bool enable = (f->state == I40E_FILTER_NEW ||
+		       f->state == I40E_FILTER_NEW_SYNC);
 	struct i40e_hw *hw = &vsi->back->hw;
 	i40e_status aq_ret;
 	const char *msg;
@@ -2809,6 +2901,7 @@ int i40e_sync_vsi_filters(struct i40e_vsi *vsi)
 
 				/* Add it to the hash list */
 				hlist_add_head(&new_mac->hlist, &tmp_add_list);
+				f->state = I40E_FILTER_NEW_SYNC;
 			}
 
 			/* Count the number of active (current and new) VLAN
@@ -2960,11 +3053,11 @@ int i40e_sync_vsi_filters(struct i40e_vsi *vsi)
 		 */
 		spin_lock_bh(&vsi->mac_filter_hash_lock);
 		hlist_for_each_entry_safe(new_mac, h, &tmp_add_list, hlist) {
-			/* Only update the state if we're still NEW or
-			 * INACTIVE
-			 */
+			/* Only update the state if we're still NEW */
 			if (new_mac->f->state == I40E_FILTER_NEW ||
-			    new_mac->state == I40E_FILTER_INACTIVE)
+			/* .. or INACTIVE                           */
+			    new_mac->state == I40E_FILTER_INACTIVE ||
+			    new_mac->f->state == I40E_FILTER_NEW_SYNC)
 				new_mac->f->state = new_mac->state;
 			hlist_del(&new_mac->hlist);
 			kfree(new_mac);

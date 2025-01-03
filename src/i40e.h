@@ -941,6 +941,7 @@ enum i40e_filter_state {
 	I40E_FILTER_FAILED,		/* Rejected by FW */
 	I40E_FILTER_REMOVE,		/* To be removed */
 	I40E_FILTER_INACTIVE,		/* Removed from FW, only for vlan 0 */
+	I40E_FILTER_NEW_SYNC = 6,	/* New, not sent, in sync task */
 /* There is no 'removed' state; the filter struct is freed */
 };
 struct i40e_mac_filter {

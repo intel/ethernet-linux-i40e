@@ -3079,8 +3079,14 @@ static void i40e_get_strings(struct net_device *netdev, u32 stringset,
 }
 
 #ifdef HAVE_ETHTOOL_GET_TS_INFO
+
+#ifdef HAVE_ETHTOOL_KERNEL_TS_INFO
+static int i40e_get_ts_info(struct net_device *dev,
+			    struct kernel_ethtool_ts_info *info)
+#else
 static int i40e_get_ts_info(struct net_device *dev,
 			    struct ethtool_ts_info *info)
+#endif /* HAVE_ETHTOOL_KERNEL_TS_INFO */
 {
 #ifdef HAVE_PTP_1588_CLOCK
 	struct i40e_pf *pf = i40e_netdev_to_pf(dev);

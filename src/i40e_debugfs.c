@@ -101,6 +101,7 @@ static const char *i40e_filter_state_string[] = {
 	"FAILED",
 	"REMOVE",
 	"INACTIVE",
+	"NEW_SYNC",
 };
 
 /**

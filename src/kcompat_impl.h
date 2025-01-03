@@ -1118,6 +1118,31 @@ static inline void eth_hw_addr_set(struct net_device *dev, const u8 *addr)
 }
 #endif /* NEED_ETH_HW_ADDR_SET */
 
+/* NEED_ETH_GET_HEADLEN_NET_DEVICE_ARG
+ *
+ *
+ * eth_get_headlen was modified by upstream commit
+ * 59753ce8b196 ("ethernet: constify eth_get_headlen()'s data argument")
+ * c43f1255b866 ("net: pass net_device argument to the eth_get_headlen")
+ *
+ * This allows core driver code to simply call eth_get_headlen with all
+ * 3 parameters, and have kcompat automatically drop it depending on what
+ * the kernel supports.
+
+ * For kernels older than 3.18, eth_get_headlen didn't exist.
+ */
+
+#ifdef NEED_ETH_GET_HEADLEN_NET_DEVICE_ARG
+static inline u32
+__kc_eth_get_headlen(const struct net_device __always_unused *dev,
+		void *data, unsigned int len)
+{
+	return eth_get_headlen(data, len);
+}
+
+#define eth_get_headlen(dev, data, len) __kc_eth_get_headlen(dev, data, len)
+#endif /* NEED_ETH_GET_HEADLEN_NET_DEVICE_ARG */
+
 #ifdef NEED_JIFFIES_64_TIME_IS_MACROS
 /* NEED_JIFFIES_64_TIME_IS_MACROS
  *
@@ -2685,9 +2710,44 @@ static inline bool eth_type_vlan(__be16 ethertype)
 	} \
 	(cond) ? 0 : -ETIMEDOUT; \
 })
-#else
-#include <linux/iopoll.h>
+
 #endif /* NEED_READ_POLL_TIMEOUT */
+#ifdef NEED_READ_POLL_TIMEOUT_ATOMIC
+#define read_poll_timeout_atomic(op, val, cond, delay_us, timeout_us, \
+					delay_before_read, args...) \
+({ \
+	u64 __timeout_us = (timeout_us); \
+	s64 __left_ns = __timeout_us * NSEC_PER_USEC; \
+	unsigned long __delay_us = (delay_us); \
+	u64 __delay_ns = __delay_us * NSEC_PER_USEC; \
+	if (delay_before_read && __delay_us) { \
+		udelay(__delay_us); \
+		if (__timeout_us) \
+			__left_ns -= __delay_ns; \
+	} \
+	for (;;) { \
+		(val) = op(args); \
+		if (cond) \
+			break; \
+		if (__timeout_us && __left_ns < 0) { \
+			(val) = op(args); \
+			break; \
+		} \
+		if (__delay_us) { \
+			udelay(__delay_us); \
+			if (__timeout_us) \
+				__left_ns -= __delay_ns; \
+		} \
+		cpu_relax(); \
+		if (__timeout_us) \
+			__left_ns--; \
+	} \
+	(cond) ? 0 : -ETIMEDOUT; \
+})
+#endif /* NEED_READ_POLL_TIMEOUT_ATOMIC */
+#if !defined(NEED_READ_POLL_TIMEOUT) || !defined(NEED_READ_POLL_TIMEOUT_ATOMIC)
+#include <linux/iopoll.h>
+#endif /* !NEED_READ_POLL_TIMEOUT || !NEED_READ_POLL_TIMEOUT_ATOMIC */
 
 #ifndef HAVE_DPLL_LOCK_STATUS_ERROR
 /* Copied from include/uapi/linux/dpll.h to have common dpll status enums
@@ -2791,5 +2851,9 @@ _kc_xsk_buff_dma_sync_for_cpu(struct xdp_buff *xdp)
 #define xsk_buff_dma_sync_for_cpu(xdp) \
 	_kc_xsk_buff_dma_sync_for_cpu(xdp)
 #endif /* NEED_XSK_BUFF_DMA_SYNC_FOR_CPU_NO_POOL */
+
+#ifdef NEED_XDP_CONVERT_BUFF_TO_FRAME
+#define xdp_convert_buff_to_frame convert_to_xdp_frame
+#endif
 
 #endif /* _KCOMPAT_IMPL_H_ */

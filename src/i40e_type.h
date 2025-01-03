@@ -1642,12 +1642,12 @@ struct i40e_profile_segment {
 	struct i40e_ddp_version version;
 	char name[I40E_DDP_NAME_SIZE];
 	u32 device_table_count;
-	struct i40e_device_id_entry device_table[];
+	struct i40e_device_id_entry device_table[1];
 };
 
 struct i40e_section_table {
 	u32 section_count;
-	u32 section_offset[];
+	u32 section_offset[1];
 };
 
 struct i40e_profile_section_header {

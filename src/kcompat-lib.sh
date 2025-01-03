@@ -144,13 +144,15 @@ function find-macro-implementation-decl() {
 	find-decl "$what" "$end" "$@"
 }
 
-# yield first line of $1 typedef definition (simple typedefs only)
-# this probably won't handle typedef struct { \n int foo;\n};
+# yield first line of $1 typedef definition
+# This only handles typedefs where the name is on first line
 function find-typedef-decl() {
 	test $# -ge 2
 	local what end
-	what="/^typedef .* $1"';$/'
-	end=1
+	# Assumes type name is followed by other ')', '(', or ';', or
+	# whitespace
+	what="/^typedef$WB.*$1"'[\(\); \t\n]/'
+	end='/;$/'
 	shift
 	find-decl "$what" "$end" "$@"
 }

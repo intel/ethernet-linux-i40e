@@ -119,6 +119,7 @@
 		8086 000d  Ethernet 25G 2P XXV710 OCP
 		8086 4001  Ethernet Network Adapter XXV710-2
 	15ff  Ethernet Controller X710 for 10GBASE-T
+		108e 0000  Oracle Quad Port 10GBase-T Adapter - CP
 		108e 7b1f  Oracle Quad Port 10GBase-T Adapter - CP
 		1137 02c1  Ethernet Network Adapter X710-T2L
 		8086 0000  Ethernet Network Adapter X710-TL
