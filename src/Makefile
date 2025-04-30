@@ -1,5 +1,5 @@
-# SPDX-License-Identifier: GPL-2.0-only
-# Copyright (C) 2013-2024 Intel Corporation
+ # SPDX-License-Identifier: GPL-2.0-only
+# Copyright (C) 2013-2025 Intel Corporation
 
 ifneq ($(KERNELRELEASE),)
 # kbuild part of makefile
@@ -11,7 +11,6 @@ ccflags-y += -I$(src)
 subdir-ccflags-y += -I$(src)
 
 obj-m += i40e.o
-
 i40e-y := i40e_main.o \
 	i40e_ethtool.o \
 	i40e_xsk.o \
@@ -28,33 +27,27 @@ i40e-y := i40e_main.o \
 	i40e_ddp.o \
 	i40e_client.o \
 	i40e_virtchnl_pf.o
-
 i40e-$(CONFIG_DCB) += i40e_dcb.o i40e_dcb_nl.o
 i40e-y += kcompat.o
 i40e-y += kcompat_vfd.o
-
 ifeq (${NEED_AUX_BUS},2)
 intel_auxiliary-objs := auxiliary.o
 obj-m += intel_auxiliary.o
 $(warning ${NEED_AUX_BUS})
 endif
-
 else	# ifneq($(KERNELRELEASE),)
 # normal makefile
 
 DRIVER := i40e
-
 # If the user just wants to print the help output, don't include common.mk or
 # perform any other checks. This ensures that running "make help" will always
 # work even if kernel-devel is not installed, or if the common.mk fails under
 # any other error condition.
 ifneq ($(MAKECMDGOALS),help)
 include common.mk
-
 # i40e does not support building on kernels older than 2.6.32
 $(call minimum_kver_check,2,6,32)
 endif
-
 # Command to update initramfs or display a warning message
 ifeq (${cmd_initrd},)
 define cmd_initramfs
@@ -66,7 +59,6 @@ define cmd_initramfs
 -@$(call cmd_initrd)
 endef
 endif
-
 ###############
 # Build rules #
 ###############
@@ -98,12 +90,10 @@ ccc: clean
 # Build manfiles
 manfile:
 	@gzip -c ../${DRIVER}.${MANSECTION} > ${DRIVER}.${MANSECTION}.gz
-
 # Clean the module subdirectories
 clean:
 	@+$(call kernelbuild,clean)
 	@-rm -rf *.${MANSECTION}.gz *.ko
-
 sign:
 	@echo "Signing driver..."
 	@$(call info_signed_modules)
@@ -112,14 +102,12 @@ sign:
 mandocs_install: manfile
 	@echo "Copying manpages..."
 	@install -D -m 644 ${DRIVER}.${MANSECTION}.gz ${INSTALL_MOD_PATH}${MANDIR}/man${MANSECTION}/${DRIVER}.${MANSECTION}.gz
-
 # Install kernel module files. It is not expected to modify files outside of
 # the build root. Thus, it must not update initramfs, or run depmod.
 modules_install: default
 	@echo "Installing modules..."
 	@+$(call kernelbuild,modules_install)
 	$(MAKE) auxiliary_install
-
 # Install kernel module files without auxiliary. This target is called by the
 # RPM specfile when  generating binary RPMs, and is not expected to modify
 # files outside of the build root. Thus, it must not update initramfs, or run depmod.
@@ -135,11 +123,9 @@ install: modules_install
 	$(call cmd_depmod)
 	$(call cmd_initramfs)
 	$(MAKE) mandocs_install
-
 # Target used by rpmbuild spec file
 rpm: modules_install
 	$(MAKE) mandocs_install
-
 mandocs_uninstall:
 	if [ -e ${INSTALL_MOD_PATH}${MANDIR}/man${MANSECTION}/${DRIVER}.${MANSECTION}.gz ] ; then \
 		rm -f ${INSTALL_MOD_PATH}${MANDIR}/man${MANSECTION}/${DRIVER}.${MANSECTION}.gz ; \
@@ -151,7 +137,6 @@ mandocs_uninstall:
 modules_uninstall:
 	rm -f ${INSTALL_MOD_PATH}/lib/modules/${KVER}/${INSTALL_MOD_DIR}/${DRIVER}.ko;
 	$(MAKE) auxiliary_uninstall
-
 # After uninstalling all the files, perform necessary work to restore the
 # system back to using the default kernel modules. This includes running depmod
 # to update module dependencies and updating the initramfs image.
@@ -161,14 +146,12 @@ uninstall: modules_uninstall mandocs_uninstall
 
 auxiliary_info:
 	@../scripts/check_aux_bus --verbose --ksrc="${KSRC}" --build-kernel="${BUILD_KERNEL}"
-
 auxiliary_install:
 	@echo "Installing auxiliary..."
 	${auxiliary_post_install}
 
 auxiliary_uninstall:
 	${auxiliary_post_uninstall}
-
 
 ifeq (${NEED_AUX_BUS},1)
 default: auxiliary_info
@@ -212,7 +195,5 @@ help:
 	@echo '  KSRC                - Specifies the full path to the kernel tree to build against'
 	@echo ' Other variables may be available for tuning make process, see'
 	@echo ' Kernel Kbuild documentation for more information'
-
 .PHONY: default noisy clean manfile silent sparse ccc install uninstall help auxiliary_info
-
 endif	# ifneq($(KERNELRELEASE),)

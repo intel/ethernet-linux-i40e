@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2024 Intel Corporation */
+ /* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2025 Intel Corporation */
 
 #include "i40e_diag.h"
 #include "i40e_prototype.h"

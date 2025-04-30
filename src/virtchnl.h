@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2024 Intel Corporation */
+ /* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2025 Intel Corporation */
 
 #ifndef _VIRTCHNL_H_
 #define _VIRTCHNL_H_
@@ -171,7 +171,7 @@ enum virtchnl_ops {
 	/* opcodes 60 through 65 are reserved */
 	VIRTCHNL_OP_GET_QOS_CAPS = 66,
 	VIRTCHNL_OP_CONFIG_QUEUE_TC_MAP = 67,
-	/* opcode 68 through 70 are reserved */
+	/* opcode 68 through 72 are reserved */
 	VIRTCHNL_OP_ENABLE_QUEUES_V2 = 107,
 	VIRTCHNL_OP_DISABLE_QUEUES_V2 = 108,
 	VIRTCHNL_OP_MAP_QUEUE_VECTOR = 111,
@@ -980,10 +980,11 @@ struct virtchnl_vlan_filter_list_v2 {
 	u16 vport_id;
 	u16 num_elements;
 	u8 pad[4];
-	struct virtchnl_vlan_filter filters[1];
+	struct virtchnl_vlan_filter filters[];
 };
 
-VIRTCHNL_CHECK_STRUCT_LEN(40, virtchnl_vlan_filter_list_v2);
+VIRTCHNL_CHECK_STRUCT_LEN(8, virtchnl_vlan_filter_list_v2);
+#define virtchnl_vlan_filter_list_v2_LEGACY_SIZEOF     40
 
 /* VIRTCHNL_OP_ENABLE_VLAN_STRIPPING_V2
  * VIRTCHNL_OP_DISABLE_VLAN_STRIPPING_V2
@@ -1307,10 +1308,11 @@ VIRTCHNL_CHECK_STRUCT_LEN(16, virtchnl_channel_info);
 struct virtchnl_tc_info {
 	u32	num_tc;
 	u32	pad;
-	struct	virtchnl_channel_info list[1];
+	struct	virtchnl_channel_info list[];
 };
 
-VIRTCHNL_CHECK_STRUCT_LEN(24, virtchnl_tc_info);
+VIRTCHNL_CHECK_STRUCT_LEN(8, virtchnl_tc_info);
+#define virtchnl_tc_info_LEGACY_SIZEOF 24
 
 /* VIRTCHNL_ADD_CLOUD_FILTER
  * VIRTCHNL_DEL_CLOUD_FILTER
@@ -1458,10 +1460,11 @@ VIRTCHNL_CHECK_STRUCT_LEN(12, virtchnl_rdma_qv_info);
 #define virtchnl_iwarp_qvlist_info virtchnl_rdma_qvlist_info
 struct virtchnl_rdma_qvlist_info {
 	u32 num_vectors;
-	struct virtchnl_rdma_qv_info qv_info[1];
+	struct virtchnl_rdma_qv_info qv_info[];
 };
 
-VIRTCHNL_CHECK_STRUCT_LEN(16, virtchnl_rdma_qvlist_info);
+VIRTCHNL_CHECK_STRUCT_LEN(4, virtchnl_rdma_qvlist_info);
+#define virtchnl_rdma_qvlist_info_LEGACY_SIZEOF        16
 
 /* VF reset states - these are written into the RSTAT register:
  * VFGEN_RSTAT on the VF
@@ -1700,7 +1703,7 @@ struct virtchnl_proto_hdrs {
 	 * 2 - from the second inner layer
 	 * ....
 	 */
-	int count;
+	u32 count;
 	/**
 	 * count must <=
 	 * VIRTCHNL_MAX_NUM_PROTO_HDRS + VIRTCHNL_MAX_NUM_PROTO_HDRS_W_MSK
@@ -1762,7 +1765,7 @@ VIRTCHNL_CHECK_STRUCT_LEN(36, virtchnl_filter_action);
 
 struct virtchnl_filter_action_set {
 	/* action number must be less then VIRTCHNL_MAX_NUM_ACTIONS */
-	int count;
+	u32 count;
 	struct virtchnl_filter_action actions[VIRTCHNL_MAX_NUM_ACTIONS];
 };
 
@@ -1869,6 +1872,18 @@ VIRTCHNL_CHECK_STRUCT_LEN(12, virtchnl_fdir_del);
 
 #define virtchnl_ss_vlan_filter_list(p, m, c)			      \
 	__vss_full(p, m, c, virtchnl_vlan_filter_list_LEGACY_SIZEOF)
+
+#define __vss_byelem(p, member, count, old)			      \
+	(struct_size(p, member, count - 1) + (old - struct_size(p, member, 0)))
+
+#define virtchnl_ss_vlan_filter_list_v2(p, m, c)		      \
+	__vss_byelem(p, m, c, virtchnl_vlan_filter_list_v2_LEGACY_SIZEOF)
+
+#define virtchnl_ss_tc_info(p, m, c)				      \
+	__vss_byelem(p, m, c, virtchnl_tc_info_LEGACY_SIZEOF)
+
+#define virtchnl_ss_rdma_qvlist_info(p, m, c)			      \
+	__vss_byelem(p, m, c, virtchnl_rdma_qvlist_info_LEGACY_SIZEOF)
 
 #define __vss_byone(p, member, count, old)				      \
 	(struct_size(p, member, count) + (old - 1 - struct_size(p, member, 0)))
@@ -2144,35 +2159,27 @@ enum virtchnl_vector_limits {
 	VIRTCHNL_OP_CONFIG_VSI_QUEUES_MAX	=
 		((u16)(~0) - sizeof(struct virtchnl_vsi_queue_config_info)) /
 		sizeof(struct virtchnl_queue_pair_info),
-
 	VIRTCHNL_OP_CONFIG_IRQ_MAP_MAX		=
 		((u16)(~0) - sizeof(struct virtchnl_irq_map_info)) /
 		sizeof(struct virtchnl_vector_map),
-
 	VIRTCHNL_OP_ADD_DEL_ETH_ADDR_MAX	=
 		((u16)(~0) - sizeof(struct virtchnl_ether_addr_list)) /
 		sizeof(struct virtchnl_ether_addr),
-
 	VIRTCHNL_OP_ADD_DEL_VLAN_MAX		=
 		((u16)(~0) - sizeof(struct virtchnl_vlan_filter_list)) /
 		sizeof(u16),
-
 	VIRTCHNL_OP_CONFIG_RDMA_IRQ_MAP_MAX	=
 		((u16)(~0) - sizeof(struct virtchnl_rdma_qvlist_info)) /
 		sizeof(struct virtchnl_rdma_qv_info),
-
 	VIRTCHNL_OP_ENABLE_CHANNELS_MAX		=
 		((u16)(~0) - sizeof(struct virtchnl_tc_info)) /
 		sizeof(struct virtchnl_channel_info),
-
 	VIRTCHNL_OP_ENABLE_DISABLE_DEL_QUEUES_V2_MAX	=
 		((u16)(~0) - sizeof(struct virtchnl_del_ena_dis_queues)) /
 		sizeof(struct virtchnl_queue_chunk),
-
 	VIRTCHNL_OP_MAP_UNMAP_QUEUE_VECTOR_MAX	=
 		((u16)(~0) - sizeof(struct virtchnl_queue_vector_maps)) /
 		sizeof(struct virtchnl_queue_vector),
-
 	VIRTCHNL_OP_ADD_DEL_VLAN_V2_MAX		=
 		((u16)(~0) - sizeof(struct virtchnl_vlan_filter_list_v2)) /
 		sizeof(struct virtchnl_vlan_filter),
@@ -2305,7 +2312,7 @@ virtchnl_vc_validate_vf_msg(struct virtchnl_version_info *ver, u32 v_opcode,
 	case VIRTCHNL_OP_RELEASE_RDMA_IRQ_MAP:
 		break;
 	case VIRTCHNL_OP_CONFIG_RDMA_IRQ_MAP:
-		valid_len = sizeof(struct virtchnl_rdma_qvlist_info);
+		valid_len = virtchnl_rdma_qvlist_info_LEGACY_SIZEOF;
 		if (msglen >= valid_len) {
 			struct virtchnl_rdma_qvlist_info *qv =
 				(struct virtchnl_rdma_qvlist_info *)msg;
@@ -2316,8 +2323,8 @@ virtchnl_vc_validate_vf_msg(struct virtchnl_version_info *ver, u32 v_opcode,
 				break;
 			}
 
-			valid_len += ((qv->num_vectors - 1) *
-				sizeof(struct virtchnl_rdma_qv_info));
+			valid_len = virtchnl_ss_rdma_qvlist_info(qv, qv_info,
+								 qv->num_vectors);
 		}
 		break;
 	case VIRTCHNL_OP_CONFIG_RSS_KEY:
@@ -2365,7 +2372,7 @@ virtchnl_vc_validate_vf_msg(struct virtchnl_version_info *ver, u32 v_opcode,
 		valid_len = sizeof(struct virtchnl_vf_res_request);
 		break;
 	case VIRTCHNL_OP_ENABLE_CHANNELS:
-		valid_len = sizeof(struct virtchnl_tc_info);
+		valid_len = virtchnl_tc_info_LEGACY_SIZEOF;
 		if (msglen >= valid_len) {
 			struct virtchnl_tc_info *vti =
 				(struct virtchnl_tc_info *)msg;
@@ -2376,8 +2383,8 @@ virtchnl_vc_validate_vf_msg(struct virtchnl_version_info *ver, u32 v_opcode,
 				break;
 			}
 
-			valid_len += (vti->num_tc - 1) *
-				     sizeof(struct virtchnl_channel_info);
+			valid_len = virtchnl_ss_tc_info(vti, list,
+							vti->num_tc);
 		}
 		break;
 	case VIRTCHNL_OP_DISABLE_CHANNELS:
@@ -2446,7 +2453,7 @@ virtchnl_vc_validate_vf_msg(struct virtchnl_version_info *ver, u32 v_opcode,
 		break;
 	case VIRTCHNL_OP_ADD_VLAN_V2:
 	case VIRTCHNL_OP_DEL_VLAN_V2:
-		valid_len = sizeof(struct virtchnl_vlan_filter_list_v2);
+		valid_len = virtchnl_vlan_filter_list_v2_LEGACY_SIZEOF;
 		if (msglen >= valid_len) {
 			struct virtchnl_vlan_filter_list_v2 *vfl =
 			    (struct virtchnl_vlan_filter_list_v2 *)msg;
@@ -2457,8 +2464,8 @@ virtchnl_vc_validate_vf_msg(struct virtchnl_version_info *ver, u32 v_opcode,
 				break;
 			}
 
-			valid_len += (vfl->num_elements - 1) *
-				sizeof(struct virtchnl_vlan_filter);
+			valid_len = virtchnl_ss_vlan_filter_list_v2(vfl, filters,
+								    vfl->num_elements);
 		}
 		break;
 	case VIRTCHNL_OP_ENABLE_VLAN_STRIPPING_V2:

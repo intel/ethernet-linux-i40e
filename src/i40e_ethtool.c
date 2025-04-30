@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2024 Intel Corporation */
+ /* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2025 Intel Corporation */
 
 /* ethtool support for i40e */
 
@@ -2791,7 +2791,6 @@ i40e_get_pfc_stats(struct i40e_pf *pf, unsigned int i)
 {
 #define I40E_GET_PFC_STAT(stat, priority) \
 	.stat = pf->stats.stat[priority]
-
 	struct i40e_pfc_stats pfc = {
 		I40E_GET_PFC_STAT(priority_xon_rx, i),
 		I40E_GET_PFC_STAT(priority_xoff_rx, i),

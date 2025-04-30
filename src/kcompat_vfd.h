@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2024 Intel Corporation */
+ /* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2025 Intel Corporation */
 
 #ifndef _KCOMPAT_VFD_H_
 #define _KCOMPAT_VFD_H_
@@ -68,7 +68,6 @@ struct vfd_macaddr {
 #define VFD_LINK_SPEED_20GB_SHIFT		0x5
 #define VFD_LINK_SPEED_25GB_SHIFT		0x6
 #define VFD_LINK_SPEED_5GB_SHIFT		0x7
-
 
 enum vfd_link_speed {
 	VFD_LINK_SPEED_UNKNOWN	= 0,

@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2024 Intel Corporation */
+ /* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2025 Intel Corporation */
 
 #include <linux/prefetch.h>
 #include "i40e.h"
@@ -1160,7 +1160,6 @@ static void i40e_enable_wb_on_itr(struct i40e_vsi *vsi,
 	q_vector->arm_wb_state = true;
 }
 
-
 /**
  * i40e_force_wb - Issue SW Interrupt so HW does a wb
  * @vsi: the VSI we care about
@@ -1737,7 +1736,6 @@ skip_free:
 	rx_ring->next_to_clean = 0;
 	rx_ring->next_to_use = 0;
 }
-
 
 /**
  * i40e_free_rx_resources - Free Rx resources
@@ -3710,7 +3708,6 @@ static int i40e_tso(struct i40e_tx_buffer *first, u8 *hdr_len,
 	/* compute length of segmentation header */
 	*hdr_len = (l4.tcp->doff * 4) + l4_offset;
 #endif
-
 
 	/* pull values out of skb_shinfo */
 	gso_size = skb_shinfo(skb)->gso_size;

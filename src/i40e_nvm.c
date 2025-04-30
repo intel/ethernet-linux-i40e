@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2024 Intel Corporation */
+ /* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2025 Intel Corporation */
 
 #include "i40e_prototype.h"
 
@@ -72,9 +72,8 @@ i40e_status i40e_acquire_nvm(struct i40e_hw *hw,
 
 	if (ret_code)
 		i40e_debug(hw, I40E_DEBUG_NVM,
-			   "NVM acquire type %d failed time_left=%llu ret=%d aq_err=%d\n",
-			   access, (unsigned long long)time_left, ret_code,
-			   hw->aq.asq_last_status);
+			   "NVM acquire type %d failed time_left=%u ret=%d aq_err=%d\n",
+			   access, time_left, ret_code, hw->aq.asq_last_status);
 
 	if (ret_code && time_left) {
 		/* Poll until the current NVM owner timeouts */
@@ -95,16 +94,14 @@ i40e_status i40e_acquire_nvm(struct i40e_hw *hw,
 		if (ret_code != I40E_SUCCESS) {
 			hw->nvm.hw_semaphore_timeout = 0;
 			i40e_debug(hw, I40E_DEBUG_NVM,
-				   "NVM acquire timed out, wait %llu ms before trying again. status=%d aq_err=%d\n",
-				   (unsigned long long)time_left, ret_code,
-				   hw->aq.asq_last_status);
+				   "NVM acquire timed out, wait %u ms before trying again. status=%d aq_err=%d\n",
+				   time_left, ret_code, hw->aq.asq_last_status);
 		}
 	}
 
 i40e_i40e_acquire_nvm_exit:
 	return ret_code;
 }
-
 
 /**
  * i40e_acquire_nvm_ex - Specific request only for
@@ -138,9 +135,8 @@ i40e_status i40e_acquire_nvm_ex(struct i40e_hw *hw,
 
 	if (ret_code)
 		i40e_debug(hw, I40E_DEBUG_NVM,
-			   "NVM acquire type %d failed time_left=%llu ret=%d aq_err=%d\n",
-			   access, (unsigned long long)time_left, ret_code,
-			   hw->aq.asq_last_status);
+			   "NVM acquire type %d failed time_left=%u ret=%d aq_err=%d\n",
+			   access, time_left, ret_code, hw->aq.asq_last_status);
 
 	if (ret_code && time_left) {
 		/* Poll until the current NVM owner timeouts */
@@ -161,16 +157,14 @@ i40e_status i40e_acquire_nvm_ex(struct i40e_hw *hw,
 		if (ret_code != I40E_SUCCESS) {
 			hw->nvm.hw_semaphore_timeout = 0;
 			i40e_debug(hw, I40E_DEBUG_NVM,
-				   "NVM acquire timed out, wait %llu ms before trying again. status=%d aq_err=%d\n",
-				   (unsigned long long)time_left, ret_code,
-				   hw->aq.asq_last_status);
+				   "NVM acquire timed out, wait %u ms before trying again. status=%d aq_err=%d\n",
+				   time_left, ret_code, hw->aq.asq_last_status);
 		}
 	}
 
 i40e_i40e_acquire_nvm_exit:
 	return ret_code;
 }
-
 
 /**
  * i40e_release_nvm - Generic request for releasing the NVM ownership

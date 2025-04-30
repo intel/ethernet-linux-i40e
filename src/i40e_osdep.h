@@ -1,5 +1,5 @@
-/* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2024 Intel Corporation */
+ /* SPDX-License-Identifier: GPL-2.0-only */
+/* Copyright (C) 2013-2025 Intel Corporation */
 
 #ifndef _I40E_OSDEP_H_
 #define _I40E_OSDEP_H_
@@ -46,7 +46,6 @@ static inline void writeq(__u64 val, volatile void __iomem *addr)
 			(h)->bus.func, ##__VA_ARGS__);		\
 } while (0)
 
-
 #define wr32(a, reg, value)	writel((value), ((a)->hw_addr + (reg)))
 #define rd32(a, reg)		readl((a)->hw_addr + (reg))
 
@@ -76,7 +75,6 @@ do {								\
 /* these things are all directly replaced with sed during the kernel build */
 #define INLINE inline
 
-
 #define CPU_TO_LE16(o) cpu_to_le16(o)
 #define CPU_TO_LE32(s) cpu_to_le32(s)
 #define CPU_TO_LE64(h) cpu_to_le64(h)
@@ -103,7 +101,6 @@ static inline void i40e_no_action(struct i40e_spinlock *sp)
 #define i40e_acquire_spinlock(_sp) i40e_acquire_spinlock_d(_sp)
 #define i40e_release_spinlock(_sp) i40e_release_spinlock_d(_sp)
 #define i40e_destroy_spinlock(_sp) i40e_no_action(_sp)
-
 
 #define i40e_memset(a, b, c, d)  memset((a), (b), (c))
 #define i40e_memcpy(a, b, c, d)  memcpy((a), (b), (c))
