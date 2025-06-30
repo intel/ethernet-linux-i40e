@@ -4708,6 +4708,32 @@ netdev_tx_t i40e_lan_xmit_frame(struct sk_buff *skb, struct net_device *netdev)
 
 #ifdef HAVE_XDP_SUPPORT
 /**
+ * i40e_xdp_queue_index - Get optimal queue index for XDP transmit
+ * @vsi: VSI structure
+ *
+ * Returns a valid queue index that maps current CPU to available queue pairs.
+ * Uses modulo operation to ensure index never exceeds num_queue_pairs.
+ **/
+static inline unsigned int i40e_xdp_queue_index(struct i40e_vsi *vsi)
+{
+	unsigned int cpu_id = smp_processor_id();
+	unsigned int queue_index = cpu_id % vsi->num_queue_pairs;
+	
+	/* Warn once if CPU count exceeds queue count - suboptimal configuration */
+	if (unlikely(cpu_id >= vsi->num_queue_pairs)) {
+		static bool warned = false;
+		if (!warned) {
+			netdev_warn(vsi->netdev, 
+				    "XDP performance notice: CPU count (%u) exceeds queue count (%u). Consider using ethtool -L %s combined %u for optimal performance\n",
+				    num_online_cpus(), vsi->num_queue_pairs, vsi->netdev->name, num_online_cpus());
+			warned = true;
+		}
+	}
+	
+	return queue_index;
+}
+
+/**
  * i40e_xdp_xmit - Implements ndo_xdp_xmit
  * @dev: netdev
  * @n: amount of frames
@@ -4728,8 +4754,8 @@ int i40e_xdp_xmit(struct net_device *dev, struct xdp_buff *xdp)
 #endif
 {
 	struct i40e_netdev_priv *np = netdev_priv(dev);
-	unsigned int queue_index = smp_processor_id();
 	struct i40e_vsi *vsi = np->vsi;
+	unsigned int queue_index = i40e_xdp_queue_index(vsi);
 	struct i40e_pf *pf = vsi->back;
 #ifdef HAVE_XDP_FRAME_STRUCT
 	struct i40e_ring *xdp_ring;
@@ -4741,8 +4767,17 @@ int i40e_xdp_xmit(struct net_device *dev, struct xdp_buff *xdp)
 	if (test_bit(__I40E_VSI_DOWN, vsi->state))
 		return -ENETDOWN;
 
-	if (!i40e_enabled_xdp_vsi(vsi) || queue_index >= vsi->num_queue_pairs ||
-	    test_bit(__I40E_CONFIG_BUSY, pf->state))
+	if (!i40e_enabled_xdp_vsi(vsi))
+		return -ENXIO;
+	
+	if (unlikely(queue_index >= vsi->num_queue_pairs)) {
+		/* This should never happen with fixed queue mapping, but keep as safety check */
+		netdev_err(dev, "BUG: XDP queue_index %u >= num_queue_pairs %u (CPU %u) - driver bug!\n",
+			   queue_index, vsi->num_queue_pairs, smp_processor_id());
+		return -ENXIO;
+	}
+	
+	if (test_bit(__I40E_CONFIG_BUSY, pf->state))
 		return -ENXIO;
 #ifdef HAVE_XDP_FRAME_STRUCT
 	if (unlikely(flags & ~XDP_XMIT_FLAGS_MASK))
