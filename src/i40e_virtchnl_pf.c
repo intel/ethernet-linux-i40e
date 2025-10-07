@@ -1,4 +1,4 @@
- /* SPDX-License-Identifier: GPL-2.0-only */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* Copyright (C) 2013-2025 Intel Corporation */
 
 #include "i40e.h"
@@ -1024,8 +1024,8 @@ static int i40e_add_ingress_egress_mirror(struct i40e_vsi *src_vsi,
 				     cnt, mr_list, NULL,
 				     rule_id, &rules_used,
 				     &rules_free);
-	kfree(mr_list);
 err_out:
+	kfree(mr_list);
 	return ret;
 }
 
@@ -8521,19 +8521,23 @@ static int i40e_set_pf_qos_apply(struct pci_dev *pdev)
 			total_mib_bw[i] = 0;
 		}
 
+#ifdef CONFIG_PCI_IOV
 		/* quiesce VFs */
 		vf = pf->vf;
 		for (i = 0; i < pf->num_alloc_vfs; i++, vf++)
 			i40e_enable_vf_queues(pf->vsi[vf->lan_vsi_idx], false);
+#endif /* CONFIG_PCI_IOV */
 		/* Configure port to ETS */
 		i40e_update_ets(pf);
 		pf->dcb_user_reconfig = false;
+#ifdef CONFIG_PCI_IOV
 		vf = pf->vf;
 		/* unquiesce VFs */
 		for (i = 0; i < pf->num_alloc_vfs; i++, vf++)
 			if (!vf->is_disabled_from_host)
 				i40e_enable_vf_queues(pf->vsi[vf->lan_vsi_idx],
 						      true);
+#endif /* CONFIG_PCI_IOV */
 	}
 
 	/* Reconfig VF VSI for TC */
@@ -8607,11 +8611,13 @@ static int i40e_set_pf_qos_apply(struct pci_dev *pdev)
 
 	if (reconfig_vf_vsi) {
 		for (i = 0, vf = pf->vf; i < pf->num_alloc_vfs; i++, vf++) {
+#ifdef CONFIG_PCI_IOV
 			if (vf->tc_info.applied)
 				ret = i40e_apply_vsi_tc_bw
 					(vf, vf->tc_info.requested_tc_share);
 			if (ret)
 				continue;
+#endif /* CONFIG_PCI_IOV */
 			for (j = 0; j < I40E_MAX_TRAFFIC_CLASS; j++)
 				vf->tc_info.applied_tc_share[j] =
 					vf->tc_info.requested_tc_share[j];

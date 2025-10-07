@@ -1,7 +1,7 @@
 i40e Linux* Base Driver for the Intel(R) Ethernet 700 Series
 ************************************************************
 
-August 18, 2025
+October 07, 2025
 
 
 Contents
@@ -55,8 +55,7 @@ documentation supplied with your Intel adapter. All hardware
 requirements listed apply to use with Linux.
 
 This driver supports XDP (Express Data Path) on kernel 4.14 and later
-and AF_XDP zero-copy on kernel 4.18 and later. Note that XDP is
-blocked for frame sizes larger than 3KB.
+Note that XDP is blocked for frame sizes larger than 3KB.
 
 Note:
 

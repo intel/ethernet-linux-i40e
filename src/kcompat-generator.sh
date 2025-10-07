@@ -1,4 +1,4 @@
- #!/bin/bash
+#!/bin/bash
 # SPDX-License-Identifier: GPL-2.0-only
 # Copyright (C) 2013-2025 Intel Corporation
 
