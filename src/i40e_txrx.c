@@ -1,4 +1,4 @@
- /* SPDX-License-Identifier: GPL-2.0-only */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* Copyright (C) 2013-2025 Intel Corporation */
 
 #include <linux/prefetch.h>
@@ -2672,7 +2672,7 @@ static struct sk_buff *i40e_build_skb(struct i40e_ring *rx_ring,
 	prefetch(xdp->data + L1_CACHE_BYTES);
 #endif
 	/* build an skb around the page buffer */
-	skb = build_skb(xdp->data_hard_start, truesize);
+	skb = napi_build_skb(xdp->data_hard_start, truesize);
 	if (unlikely(!skb))
 		return NULL;
 

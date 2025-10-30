@@ -1,4 +1,4 @@
- /* SPDX-License-Identifier: GPL-2.0-only */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* Copyright (C) 2013-2025 Intel Corporation */
 
 #ifdef HAVE_XDP_SUPPORT
@@ -45,7 +45,7 @@ static const char i40e_driver_string[] =
 
 #define DRV_VERSION_MAJOR 2
 #define DRV_VERSION_MINOR 28
-#define DRV_VERSION_BUILD 10
+#define DRV_VERSION_BUILD 13
 #define DRV_VERSION_SUBBUILD 0
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
@@ -7501,9 +7501,11 @@ int i40e_pf_dcb_cfg(struct i40e_pf *pf, struct i40e_dcbx_config *new_cfg)
 {
 	struct i40e_dcbx_config *curr_cfg;
 	struct i40e_hw *hw = &pf->hw;
-	struct i40e_vf *vf = pf->vf;
 	int ret = I40E_DCB_NO_HW_CHG;
+#ifdef CONFIG_PCI_IOV
+	struct i40e_vf *vf;
 	int i;
+#endif /* CONFIG_PCI_IOV */
 
 	if (test_bit(__I40E_IN_REMOVE, pf->state))
 		goto err;
@@ -7515,15 +7517,19 @@ int i40e_pf_dcb_cfg(struct i40e_pf *pf, struct i40e_dcbx_config *new_cfg)
 
 	mutex_lock(&pf->tc_mutex);
 
+#ifdef CONFIG_PCI_IOV
 	vf = pf->vf;
 	for (i = 0; i < pf->num_alloc_vfs; i++, vf++)
 		i40e_enable_vf_queues(pf->vsi[vf->lan_vsi_idx], false);
+#endif /* CONFIG_PCI_IOV */
 
 	ret = i40e_hw_dcb_config(pf, new_cfg);
 
+#ifdef CONFIG_PCI_IOV
 	vf = pf->vf;
 	for (i = 0; i < pf->num_alloc_vfs; i++, vf++)
 		i40e_enable_vf_queues(pf->vsi[vf->lan_vsi_idx], true);
+#endif /* CONFIG_PCI_IOV */
 
 	mutex_unlock(&pf->tc_mutex);
 
@@ -13183,6 +13189,7 @@ static int i40e_init_interrupt_scheme(struct i40e_pf *pf)
 
 			/* rework the queue expectations without MSIX */
 			i40e_determine_queue_usage(pf);
+			vectors = 1;  /* one MSI or Legacy vector */
 		}
 	}
 

@@ -1,4 +1,4 @@
- /* SPDX-License-Identifier: GPL-2.0-only */
+/* SPDX-License-Identifier: GPL-2.0-only */
 /* Copyright (C) 2013-2025 Intel Corporation */
 
 #ifndef _I40E_H_
@@ -462,7 +462,7 @@ struct i40e_ddp_profile_list {
 struct i40e_ddp_old_profile_list {
 	struct list_head list;
 	size_t old_ddp_size;
-	u8 old_ddp_buf[0];
+	u8 old_ddp_buf[];
 };
 
 /* macros related to FLX_PIT */
