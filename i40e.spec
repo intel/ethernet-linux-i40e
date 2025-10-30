@@ -115,15 +115,15 @@ rm -rf %{buildroot}
 %doc pci.updates
 
 %post
-if [ -d /usr/local/share/%{name} ]; then
-	rm -rf /usr/local/share/%{name}
+if [ -d %{_prefix}/local/share/%{name} ]; then
+	rm -rf %{_prefix}/local/share/%{name}
 fi
-mkdir /usr/local/share/%{name}
-cp --parents %{pciids} /usr/local/share/%{name}/
-echo "original pci.ids saved in /usr/local/share/%{name}";
+mkdir %{_prefix}/local/share/%{name}
+cp --parents %{pciids} %{_prefix}/local/share/%{name}/
+echo "original pci.ids saved in %{_prefix}/local/share/%{name}";
 if [ "%{pcitable}" != "/dev/null" ]; then
-	cp --parents %{pcitable} /usr/local/share/%{name}/
-	echo "original pcitable saved in /usr/local/share/%{name}";
+	cp --parents %{pcitable} %{_prefix}/local/share/%{name}/
+	echo "original pcitable saved in %{_prefix}/local/share/%{name}";
 fi
 
 LD="%{_docdir}/%{name}";
@@ -431,7 +431,7 @@ fi
 # save tmp list of installed kernel modules for weak-modules
 cat $LD/file.list | grep '\.ko$' | xargs realpath > /var/run/rpm-%{name}-modules.list
 
-rm -rf /usr/local/share/%{name}
+rm -rf %{_prefix}/local/share/%{name}
 
 %postun
 uname -r | grep BOOT || /sbin/depmod -a > /dev/null 2>&1 || true
