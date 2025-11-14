@@ -27,7 +27,7 @@ level margin: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .\" new: \\n[rst2man-indent\\n[rst2man-indent-level]]
 .in \\n[rst2man-indent\\n[rst2man-indent-level]]u
 ..
-.TH "I40E" "7" "October 07, 2025" "" "Linux i40e README"
+.TH "I40E" "7" "November 14, 2025" "" "Linux i40e README"
 .SH NAME
 i40e \- i40e Linux* Base Driver for the Intel(R) Ethernet 700 Series
 .SS Contents
@@ -110,7 +110,7 @@ Auto\-media detect
 .sp
 See the \(dqIntel(R) Ethernet Adapters and Devices User Guide\(dq for additional
 information on features. It is available on the Intel website at
-\fI\%https://cdrdv2.intel.com/v1/dl/getContent/705831\fP\&.
+\X'tty: link https://cdrdv2.intel.com/v1/dl/getContent/705831'\fI\%https://cdrdv2.intel.com/v1/dl/getContent/705831\fP\X'tty: link'\&.
 .SH IDENTIFYING YOUR ADAPTER
 .sp
 This driver is compatible with devices based on the following:
@@ -134,11 +134,11 @@ device and that you are using the newest drivers.
 .sp
 For information on how to identify your adapter, and for the latest NVM/FW
 images and Intel network drivers, refer to the Intel Support website at
-\fI\%https://www.intel.com/support\fP\&.
+\X'tty: link https://www.intel.com/support'\fI\%https://www.intel.com/support\fP\X'tty: link'\&.
 .SS SFP+ and QSFP+ Devices
 .sp
 For information about supported media, refer to this document:
-\fI\%http://www.intel.com/content/dam/www/public/us/en/documents/release\-notes/xl710\-ethernet\-controller\-feature\-matrix.pdf\fP
+\X'tty: link http://www.intel.com/content/dam/www/public/us/en/documents/release-notes/xl710-ethernet-controller-feature-matrix.pdf'\fI\%http://www.intel.com/content/dam/www/public/us/en/documents/release\-notes/xl710\-ethernet\-controller\-feature\-matrix.pdf\fP\X'tty: link'
 .sp
 \fBNOTE:\fP
 .INDENT 0.0
@@ -684,7 +684,7 @@ ip link set eth0 vf 0 vlan 200      // set a new vlan 200 for VF 0
 The driver utilizes the ethtool interface for driver configuration and
 diagnostics, as well as displaying statistical information. The latest ethtool
 version is required for this functionality. Download it at:
-\fI\%https://kernel.org/pub/software/network/ethtool/\fP
+\X'tty: link https://kernel.org/pub/software/network/ethtool/'\fI\%https://kernel.org/pub/software/network/ethtool/\fP\X'tty: link'
 .SS Viewing Link Messages
 .sp
 Link messages will not be displayed to the console if the distribution is
@@ -2543,7 +2543,7 @@ For more details, please refer to the ethtool man page.
 .SS NAPI
 .sp
 This driver supports NAPI (Rx polling mode). For more information on NAPI, see
-\fI\%https://docs.kernel.org/networking/napi.html\fP\&.
+\X'tty: link https://docs.kernel.org/networking/napi.html'\fI\%https://docs.kernel.org/networking/napi.html\fP\X'tty: link'\&.
 .SS IEEE 802.1ad (QinQ) Support
 .sp
 The IEEE 802.1ad standard, informally known as QinQ, allows for multiple VLAN
@@ -2713,7 +2713,7 @@ In software\-based DCBX mode, you can configure DCB parameters using
 software LLDP/DCBX agents that interface with the Linux kernel\(aqs DCB
 Netlink API. We recommend using OpenLLDP as the DCBX agent when running
 in software mode. For more information, see the OpenLLDP man pages and
-\fI\%https://github.com/intel/openlldp\fP\&.
+\X'tty: link https://github.com/intel/openlldp'\fI\%https://github.com/intel/openlldp\fP\X'tty: link'\&.
 .IP \(bu 2
 The driver implements the DCB netlink interface layer to allow the user
 space to communicate with the driver and query DCB configuration for the
@@ -2922,7 +2922,7 @@ crashes, or system hangs.
 .sp
 More details about Dynamic Device Personalization can be found on the Intel
 Developer Zone site:
-\fI\%https://software.intel.com/en\-us/articles/dynamic\-device\-personalization\-for\-intel\-ethernet\-700\-series\fP
+\X'tty: link https://software.intel.com/en-us/articles/dynamic-device-personalization-for-intel-ethernet-700-series'\fI\%https://software.intel.com/en\-us/articles/dynamic\-device\-personalization\-for\-intel\-ethernet\-700\-series\fP\X'tty: link'
 .SS SR\-IOV Hypervisor Management Interface
 .sp
 The sysfs file structure below supports the SR\-IOV hypervisor management
@@ -4199,7 +4199,7 @@ newer kernel.
 .SS Driver Buffer Overflow Fix
 .sp
 The fix to resolve CVE\-2016\-8105, referenced in Intel SA\-00069
-<\fI\%https://www.intel.com/content/www/us/en/security\-center/advisory/intel\-sa\-00069.html\fP>,
+<\X'tty: link https://www.intel.com/content/www/us/en/security-center/advisory/intel-sa-00069.html'\fI\%https://www.intel.com/content/www/us/en/security\-center/advisory/intel\-sa\-00069.html\fP\X'tty: link'>,
 is included in this and future versions of the driver.
 .SS depmod warning messages about unknown symbol during installation
 .sp
@@ -4506,14 +4506,14 @@ LBFO on a VF driver may result in failure to pass traffic.
 .SH SUPPORT
 .sp
 For general information, go to the Intel support website at
-\fI\%https://www.intel.com/support/\fP
+\X'tty: link https://www.intel.com/support/'\fI\%https://www.intel.com/support/\fP\X'tty: link'
 .sp
 or the Intel Ethernet Linux project hosted by GitHub at
-\fI\%https://github.com/intel/ethernet\-linux\-i40e\fP
+\X'tty: link https://github.com/intel/ethernet-linux-i40e'\fI\%https://github.com/intel/ethernet\-linux\-i40e\fP\X'tty: link'
 .sp
 If an issue is identified with the released source code on a supported kernel
 with a supported adapter, contact Intel Customer Support at
-\fI\%https://www.intel.com/content/www/us/en/support/products/36773/ethernet\-products.html\fP
+\X'tty: link https://www.intel.com/content/www/us/en/support/products/36773/ethernet-products.html'\fI\%https://www.intel.com/content/www/us/en/support/products/36773/ethernet\-products.html\fP\X'tty: link'
 .SH LICENSE
 .sp
 This program is free software; you can redistribute it and/or modify it under
