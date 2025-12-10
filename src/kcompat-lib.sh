@@ -60,6 +60,7 @@ function filter-out-bad-files() {
 
 # "Whitespace only"
 WB='[ \t\n]'
+
 # Helpers below print the thing that is looked for, for further grep'ping/etc.
 # That simplifies process of excluding comments or spares us state machine impl.
 #
@@ -109,6 +110,16 @@ function find-enum-decl() {
 	find-decl "$what" "$end" "$@"
 }
 
+# yield anonymous enum declaration (type/body)
+function find-anon-enum-decl() {
+	test $# -ge 2
+	local what end
+	what="/^$WB*enum$WB+"'\{$/'
+	end='/\};$/'
+	shift
+	find-decl "$what" "$end" "$@"
+}
+
 # yield $1 struct declaration (type/body)
 function find-struct-decl() {
 	test $# -ge 2
@@ -143,6 +154,19 @@ function find-macro-implementation-decl() {
 	find-decl "$what" "$end" "$@"
 }
 
+# yield all first lines of $1 macro invocations,
+# heuristic for DEFINE_GUARD()-like macros
+function find-macro-invocation-decl() {
+	test $# -ge 2
+	local what end
+	# only unindented defines, only whole-word match, with opening brace
+	# on the first line
+	what="/^${1}$WB*\(/"
+	end=1 # only first line
+	shift
+	find-decl "$what" "$end" "$@"
+}
+
 # yield first line of $1 typedef definition
 # This only handles typedefs where the name is on first line
 function find-typedef-decl() {
@@ -152,6 +176,16 @@ function find-typedef-decl() {
 	# whitespace
 	what="/^typedef$WB.*$1"'[\(\); \t\n]/'
 	end='/;$/'
+	shift
+	find-decl "$what" "$end" "$@"
+}
+
+# yield symbol line from Module.symvers
+function find-symbol-decl() {
+	test $# -ge 2
+	local what end
+	what="/^0x[0-9a-f]+\t$1\t/"
+	end=1 # only one line
 	shift
 	find-decl "$what" "$end" "$@"
 }
@@ -183,10 +217,20 @@ function find-typedef-decl() {
 #         gen HAVE_FOO_12 if string "${FUNC1:+1}${FUNC2:+1}" equals "11"
 #
 #   KIND specifies what kind of declaration/definition we are looking for,
-#      could be: fun, enum, struct, method, macro, typedef,
-#      'implementation of macro'
+#      could be: fun, enum, struct, method, macro, typedef, symbol,
+#      'anonymous enum', or 'implementation of macro'
 #   for KIND=method, we are looking for function ptr named METHOD in struct
 #     named NAME (two optional args are then necessary (METHOD & of));
+#
+#   for KIND=symbol, we are looking for a symbol definition in the format of
+#     Module.symvers. To verify that the symbol is exported by a particular
+#     module, the matches syntax can be used.
+#
+#   for KIND='anonymous enum' we are looking for all anonymous enum
+#   definitions (i.e. an enum without a name). This is usually combined with
+#   "matches" or "lacks" to check for a specific value in any anonymous enum
+#   within the files. Unlike other KINDs, 'anonymous enum' syntax does not
+#   include NAME.
 #
 #   for KIND='implementation of macro' we are looking for the full
 #     implementation of the macro, not just its first line. This is usually
@@ -228,11 +272,14 @@ function gen() {
 	case "$kind" in
 	string)
 		local actual_str expect_str equals_kw missing_fmt found_fmt
+
 		test $# -ge 3 || die 22 "$src_line: too few arguments, $orig_args_cnt given, at least 6 needed"
+
 		actual_str="$1"
 		equals_kw="$2"
 		expect_str="$3"
 		shift 3
+
 		if [ -z ${UNIFDEF_MODE:+1} ]; then
 			found_fmt="#define %s 1\n"
 			missing_fmt=""
@@ -240,14 +287,25 @@ function gen() {
 			found_fmt="-D%s\n"
 			missing_fmt="-U%s\n"
 		fi
+
 		if [ "${actual_str}" = "${expect_str}" ]; then
 			printf -- "$found_fmt" "$define"
 		else
 			printf -- "$missing_fmt" "$define"
 		fi
+
 		return
 	;;
-	fun|enum|struct|macro|typedef)
+	anonymous)
+		test $# -ge 3 || die 22 "$src_line: too few arguments, $orig_args_cnt given, at least 6 needed"
+		anon_kind="$1"
+		name=""
+		shift
+		# Other anonymous matches may be added in the future.
+		[ "$anon_kind" != enum ] && die 31 "$src_line: anonymous checks do not work with '$anon_kind'"
+		kind="anon-$anon_kind"
+	;;
+	fun|enum|struct|macro|typedef|symbol)
 		test $# -ge 3 || die 22 "$src_line: too few arguments, $orig_args_cnt given, at least 6 needed"
 		name="$1"
 		shift
@@ -270,13 +328,35 @@ function gen() {
 		[ "$kind" != macro ] && die 30 "$src_line: implementation only supports 'macro', '$kind' given"
 		kind=macro-implementation
 	;;
+	invocation)
+		test $# -ge 5 || die 32 "$src_line: too few arguments, $orig_args_cnt given, at least 8 needed"
+		of_kw="$1"
+		kind="$2"
+		name="$3"
+		shift 3
+		[ "$of_kw" != of ] && die 33 "$src_line: 'of' keyword expected, '$of_kw' given"
+		[ "$kind" != macro ] && die 34 "$src_line: invocation only supports 'macro', '$kind' given"
+		kind=macro-invocation
+	;;
 	*) die 24 "$src_line: unknown KIND ($kind) to look for" ;;
 	esac
 	operator="$1"
 	case "$operator" in
 	absent)
-		pattern='.'
-		in_kw="$2"
+		local next_kw next_op
+		next_kw="$2"
+		in_kw="$next_kw"
+		next_op="$3"
+		if [[ "$next_kw" = or && "$next_op" = lacks ]]; then
+			# intentionally keeping $operator as 'absent'...
+			# but setting 'pattern' to something (not just '.')
+			shift 3
+			test $# -ge 3 || die 39 "$src_line: too few parameters following 'absent or lacks' operator composition, pattern, 'in' keyword and filename needed"
+			pattern="$1"
+			in_kw="$2"
+		else
+			pattern='.'
+		fi
 		shift 2
 	;;
 	matches|lacks)
@@ -294,6 +374,7 @@ function gen() {
 	esac
 	[ "$in_kw" != in ] && die 26 "$src_line: 'in' keyword expected, '$in_kw' given"
 	test $# -ge 1 || die 27 "$src_line: too few arguments, at least one filename expected"
+
 	local first_decl=
 	if [ "$kind" = method ]; then
 		first_decl="$(find-struct-decl "$name" "$@")" || exit 40
@@ -305,6 +386,7 @@ function gen() {
 		# avoid losing stdin provided to gen() due to redirection (<<<)
 		first_decl="$(cat -)"
 	fi
+
 	local unifdef
 	unifdef=${UNIFDEF_MODE:+1}
 
@@ -318,9 +400,11 @@ function gen() {
 			#
 			# eg: "foo" -> "\bfoo\b"
 			#     "struct foo *" -> "\bstruct foo *"
+
 			# Note that mawk does not support "\b", so we have our
 			# own approximation, NI
 			NI = "[^A-Za-z0-9_]" # "Not an Indentifier"
+
 			if (!match(pattern, NI "$"))
 				pattern = pattern "(" NI "|$)"
 			pattern = "(^|" NI ")" pattern
@@ -351,6 +435,7 @@ function gen() {
 function check() {
 	# Always run check in unifdef mode
 	local UNIFDEF_MODE=1
+
 	[[ "$(gen CHECK if "$@")" = "-DCHECK" ]]
 }
 
@@ -372,7 +457,7 @@ function config_has() {
 	grep -qE "^(#define )?$1((_MODULE)? 1|=m|=y)$" "$CONFIG_FILE"
 }
 
-# try to locate a suitable config file from KSRC
+# try to locate a suitable config file from KOBJ
 #
 # On success, the CONFIG_FILE variable will be updated to reflect the full
 # path to a configuration file.
@@ -382,15 +467,18 @@ function find_config_file() {
 	local -a CSP
 	local file
 	local diagmsgs=/dev/stderr
+
 	[ -n "${QUIET_COMPAT-}" ] && diagmsgs=/dev/null
+
 	if ! [ -d "${KSRC-}" ]; then
 		return
 	fi
+
 	CSP=(
-		"$KSRC/include/generated/autoconf.h"
-		"$KSRC/include/linux/autoconf.h"
-		"$KSRC/.config")
-	
+		"$KOBJ/include/generated/autoconf.h"
+		"$KOBJ/include/linux/autoconf.h"
+		"$KOBJ/.config")
+
 	for file in "${CSP[@]}"; do
 		if [ -f $file ]; then
 			echo >&"$diagmsgs" "using CONFIG_FILE=$file"

@@ -10,11 +10,92 @@
 #define KERNEL_VERSION(a,b,c) (((a) << 16) + ((b) << 8) + (c))
 #endif
 
+#ifdef __LINUX_COMPILER_H
+#error "kcompat.h must be included prior to kernel headers"
+#endif
+
+#ifndef GCC_VERSION
+#define GCC_VERSION (__GNUC__ * 10000           \
+		     + __GNUC_MINOR__ * 100     \
+		     + __GNUC_PATCHLEVEL__)
+#endif /* GCC_VERSION */
+
+/* as GCC_VERSION yields 40201 for any modern clang (checked on clang 7 & 13)
+ * we want other means to add workarounds for "old GCC" */
+#ifdef __clang__
+#define GCC_IS_BELOW(x) 0
+#else
+#define GCC_IS_BELOW(x) (GCC_VERSION < (x))
+#endif
+
+/*
+ * upstream commit 4eb6bd55cfb2 ("compiler.h: drop fallback overflow checkers")
+ * removed bunch of code for builitin overflow fallback implementations, that
+ * we need for gcc prior to 5.1
+ */
+#if !GCC_IS_BELOW(50100)
+#ifndef COMPILER_HAS_GENERIC_BUILTIN_OVERFLOW
+#define COMPILER_HAS_GENERIC_BUILTIN_OVERFLOW   1
+#endif
+#endif /* GCC_VERSION >= 50100 */
+
+/* Headers that must be before the rest, as they build like-current kerrnel
+ * infra for all other COMPAT and CORE code.
+ */
+#include "kcompat_generated_defs.h"
+#include "kcompat_overflow.h"
 #include "kcompat_gcc.h"
+/* end of must-be-really-first headers */
+
+#include "kcompat_cleanup.h"
 
 #ifndef HAVE_XARRAY_API
 #include "kcompat_xarray.h"
 #endif /* !HAVE_XARRAY_API */
+
+#include <linux/module.h>
+
+/* any of the features that need to alter module_init */
+#if !defined(HAVE_XARRAY_API)
+
+static int __init kc_module_init_impl(void)
+{
+#ifdef HAVE_XARRAY_API
+#else
+	kc_xarray_global_init()
+#endif
+;
+	return 0;
+}
+
+/*
+ * ___ADDRESSABLE was introduced in kernel 5.0 with a 2-arg signature.
+ * For older kernels, we provide a compatible implementation that forces
+ * the compiler to emit the symbol and prevent it from being optimized away.
+ */
+#ifdef NEED____ADDRESSABLE
+#define ___ADDRESSABLE(sym, __attrs)					\
+	static void * __used __attrs					\
+	__PASTE(__addressable_, sym) = (void *)(uintptr_t)&sym;
+#endif
+
+#undef module_init
+#define orig_module_init(initfn)	\
+	static inline initcall_t __maybe_unused __inittest(void)\
+	{ return initfn; }					\
+	int init_module(void) __copy(initfn)			\
+		__attribute__((alias(#initfn)));		\
+	___ADDRESSABLE(init_module, __initdata);
+
+#define module_init(driver_init_fn)			\
+static int __init kc_module_init_fn(void)		\
+{							\
+	kc_module_init_impl();				\
+	return driver_init_fn();			\
+}							\
+orig_module_init(kc_module_init_fn)
+
+#endif /* module_init alteration */
 
 #include <linux/io.h>
 #include <linux/delay.h>
@@ -24,13 +105,11 @@
 #include <linux/if_vlan.h>
 #include <linux/in.h>
 #include <linux/if_link.h>
-#include <linux/init.h>
 #include <linux/ioport.h>
 #include <linux/ip.h>
 #include <linux/ipv6.h>
 #include <linux/list.h>
 #include <linux/mii.h>
-#include <linux/module.h>
 #include <linux/netdevice.h>
 #include <linux/pci.h>
 #include <linux/sched.h>
@@ -758,6 +837,16 @@ struct _kc_ethtool_pauseparam {
 
 #ifndef ETHTOOL_BUSINFO_LEN
 #define ETHTOOL_BUSINFO_LEN	32
+#endif
+
+#if defined(HAVE_ETHTOOL_SUPPORTED_RING_PARAMS) && !defined(NEED_ETHTOOL_RING_USE_TCP_DATA_SPLIT)
+/**
+ * enum _kc_ethtool_supported_ring_param - indicator caps for setting ring params
+ * @ETHTOOL_RING_USE_TCP_DATA_SPLIT: capture for setting tcp_data_split
+ */
+enum _kc_ethtool_supported_ring_param {
+	ETHTOOL_RING_USE_TCP_DATA_SPLIT	= BIT(5),
+};
 #endif
 
 #ifndef WAKE_FILTER
@@ -4615,6 +4704,7 @@ int __kc_pcie_capability_clear_word(struct pci_dev *dev, int pos,
 
 #define DECLARE_HASHTABLE(name, bits)                                   	\
 	struct hlist_head name[1 << (bits)]
+
 #define HASH_SIZE(name) (ARRAY_SIZE(name))
 #define HASH_BITS(name) ilog2(HASH_SIZE(name))
 
@@ -5101,11 +5191,6 @@ static inline struct pci_dev *pci_upstream_bridge(struct pci_dev *dev)
 	list_entry((pos)->member.prev, typeof(*(pos)), member)
 #endif
 
-#if ( LINUX_VERSION_CODE > KERNEL_VERSION(2,6,20) )
-#define devm_kcalloc(dev, cnt, size, flags) \
-	devm_kzalloc(dev, (cnt) * (size), flags)
-#endif /* > 2.6.20 */
-
 #if (!(RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(7,2)))
 #define list_last_entry(ptr, type, member) list_entry((ptr)->prev, type, member)
 #endif
@@ -5285,9 +5370,6 @@ static inline __u32 skb_get_hash_raw(const struct sk_buff *skb)
 #define u64_stats_fetch_retry_irq u64_stats_fetch_retry_bh
 #endif
 
-char *_kc_devm_kstrdup(struct device *dev, const char *s, gfp_t gfp);
-#define devm_kstrdup(dev, s, gfp) _kc_devm_kstrdup(dev, s, gfp)
-
 #else /* >= 3.15.0 */
 #define HAVE_NET_GET_RANDOM_ONCE
 #define HAVE_PTP_1588_CLOCK_PINS
@@ -5392,10 +5474,6 @@ static inline void __kc_dev_mc_unsync(struct net_device __maybe_unused *dev,
 #define NETIF_F_GSO_UDP_TUNNEL_CSUM 0
 #define SKB_GSO_UDP_TUNNEL_CSUM 0
 #endif
-void *__kc_devm_kmemdup(struct device *dev, const void *src, size_t len,
-			gfp_t gfp);
-#define devm_kmemdup __kc_devm_kmemdup
-
 #else
 #if ( ( LINUX_VERSION_CODE < KERNEL_VERSION(4,13,0) ) && \
       ! ( SLE_VERSION_CODE && ( SLE_VERSION_CODE >= SLE_VERSION(12,4,0)) ) )

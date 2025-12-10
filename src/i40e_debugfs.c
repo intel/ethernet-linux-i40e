@@ -3,10 +3,10 @@
 
 #ifdef CONFIG_DEBUG_FS
 
+#include "i40e.h"
+
 #include <linux/fs.h>
 #include <linux/debugfs.h>
-
-#include "i40e.h"
 
 static struct dentry *i40e_dbg_root;
 

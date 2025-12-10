@@ -1,13 +1,13 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* Copyright (C) 2013-2025 Intel Corporation */
 
+#include "kcompat_generated_defs.h"
+#include "i40e.h"
+
 #ifdef HAVE_XDP_SUPPORT
 #include <linux/bpf.h>
 #endif
-/* Local includes */
-#include "kcompat_sigil.h"
-#include "kcompat_generated_defs.h"
-#include "i40e.h"
+
 #include "i40e_helper.h"
 #include "i40e_diag.h"
 #ifdef HAVE_VXLAN_RX_OFFLOAD
@@ -45,7 +45,7 @@ static const char i40e_driver_string[] =
 
 #define DRV_VERSION_MAJOR 2
 #define DRV_VERSION_MINOR 28
-#define DRV_VERSION_BUILD 15
+#define DRV_VERSION_BUILD 16
 #define DRV_VERSION_SUBBUILD 0
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
@@ -150,6 +150,7 @@ MODULE_PARM_DESC(debug, "Debug level (0=none,...,16=all)");
 static int l4mode = L4_MODE_DISABLED;
 module_param(l4mode, int, 0000);
 MODULE_PARM_DESC(l4mode, "L4 cloud filter mode: 0=UDP,1=TCP,2=Both,-1=Disabled(default)");
+
 
 MODULE_AUTHOR("Intel Corporation, <e1000-devel@lists.sourceforge.net>");
 MODULE_DESCRIPTION("Intel(R) 40-10 Gigabit Ethernet Connection Network Driver");
@@ -307,6 +308,7 @@ static int i40e_get_lump(struct i40e_pf *pf, struct i40e_lump_tracking *pile,
 
 	return ret;
 }
+
 
 /**
  * i40e_put_lump - return a lump of generic resource
@@ -1492,6 +1494,7 @@ struct i40e_mac_filter *i40e_find_mac(struct i40e_vsi *vsi, const u8 *macaddr)
 	}
 	return NULL;
 }
+
 
 /**
  * i40e_is_vid - Check if VSI is tagging/stripping VLAN
@@ -4378,6 +4381,7 @@ static int i40e_configure_rx_ring(struct i40e_ring *ring)
 #else
 	ring->rx_buf_len = vsi->rx_buf_len;
 #endif /* HAVE_AF_XDP_ZC_SUPPORT */
+
 
 	rx_ctx.dbuff = DIV_ROUND_UP(ring->rx_buf_len,
 				    BIT_ULL(I40E_RXQ_CTX_DBUFF_SHIFT));
@@ -7759,6 +7763,7 @@ void i40e_print_link_message(struct i40e_vsi *vsi, bool isup)
 
 	switch (pf->hw.phy.link_info.link_speed) {
 	case I40E_LINK_SPEED_40GB:
+
 		speed = "40 G";
 		break;
 	case I40E_LINK_SPEED_20GB:
@@ -10187,6 +10192,7 @@ void i40e_do_reset(struct i40e_pf *pf, u32 reset_flags, bool lock_acquired)
 
 	WARN_ON(in_interrupt());
 
+
 	/* do the biggest reset indicated */
 	if (reset_flags & BIT_ULL(__I40E_GLOBAL_RESET_REQUESTED)) {
 
@@ -11913,7 +11919,7 @@ static void i40e_rebuild(struct i40e_pf *pf, bool reinit, bool lock_acquired)
 #ifdef __TC_MQPRIO_MODE_MAX
 	if (vsi->mqprio_qopt.max_rate[0]) {
 		u64 max_tx_rate = i40e_bw_bytes_to_mbits(vsi, vsi->mqprio_qopt.max_rate[0]);
-		
+
 		ret = i40e_set_bw_limit(vsi, vsi->seid, max_tx_rate);
 		if (!ret)
 			dev_dbg(&vsi->back->pdev->dev,
@@ -12465,7 +12471,7 @@ static void i40e_service_task(struct work_struct *work)
  **/
 static void i40e_service_timer(struct timer_list *t)
 {
-	struct i40e_pf *pf = from_timer(pf, t, service_timer);
+	struct i40e_pf *pf = timer_container_of(pf, t, service_timer);
 
 	mod_timer(&pf->service_timer,
 		  round_jiffies(jiffies + pf->service_timer_period));
@@ -13091,6 +13097,7 @@ static int i40e_init_msix(struct i40e_pf *pf)
 	return v_actual;
 }
 #endif /* !defined(I40E_LEGACY_INTERRUPT) && !defined(I40E_MSI_INTERRUPT) */
+
 
 /**
  * i40e_vsi_alloc_q_vector - Allocate memory for a single interrupt vector
@@ -13812,6 +13819,7 @@ i40e_status i40e_commit_partition_bw_setting(struct i40e_pf *pf)
 			 i40e_stat_str(&pf->hw, ret),
 			 i40e_aq_str(&pf->hw, last_aq_status));
 bw_commit_out:
+
 	return ret;
 }
 
@@ -14540,10 +14548,17 @@ static int i40e_get_phys_port_id(struct net_device *netdev,
 static int
 i40e_ndo_fdb_add(struct ndmsg *ndm, struct nlattr *tb[],
 		 struct net_device *dev, const unsigned char *addr,
-		 KC_(HAVE_NDO_FDB_ADD_VID, u16 vid)
+#ifdef HAVE_NDO_FDB_ADD_VID
+		 u16 vid,
+#endif
 		 u16 flags
-		 _KC(HAVE_NDO_FDB_ADD_NOTIFIED, bool *notified)
-		 _KC(HAVE_NDO_FDB_ADD_EXTACK, struct netlink_ext_ack __always_unused *extack))
+#ifdef HAVE_NDO_FDB_ADD_NOTIFIED
+		 , bool *notified
+#endif
+#ifdef HAVE_NDO_FDB_ADD_EXTACK
+		 , struct netlink_ext_ack __always_unused *extack
+#endif
+)
 {
 	struct i40e_netdev_priv *np = netdev_priv(dev);
 	struct i40e_pf *pf = np->vsi->back;
@@ -17566,7 +17581,7 @@ static int i40e_init_recovery_mode(struct i40e_pf *pf, struct i40e_hw *hw)
 
 err_switch_setup:
 	i40e_reset_interrupt_capability(pf);
-	del_timer_sync(&pf->service_timer);
+	timer_delete_sync(&pf->service_timer);
 	dev_warn(&pf->pdev->dev, "previous errors forcing module to load in debug mode\n");
 	i40e_dbg_pf_init(pf);
 	set_bit(__I40E_DEBUG_MODE, pf->state);
@@ -17622,7 +17637,10 @@ static inline void i40e_set_udp_tunnel_callbacks(struct i40e_pf *pf)
 {
 	pf->udp_tunnel_nic.set_port = i40e_udp_tunnel_set_port;
 	pf->udp_tunnel_nic.unset_port = i40e_udp_tunnel_unset_port;
-	pf->udp_tunnel_nic.flags = UDP_TUNNEL_NIC_INFO_MAY_SLEEP;
+#ifdef HAVE_UDP_TUNNEL_NIC_INFO_MAY_SLEEP
+	pf->udp_tunnel_nic.flags = UDP_TUNNEL_NIC_INFO_MAY_SLEEP
+#endif
+;
 	pf->udp_tunnel_nic.shared = &pf->udp_tunnel_shared;
 	pf->udp_tunnel_nic.tables[0].n_entries = I40E_MAX_PF_UDP_OFFLOAD_PORTS;
 	pf->udp_tunnel_nic.tables[0].tunnel_types = UDP_TUNNEL_TYPE_VXLAN |
@@ -18298,7 +18316,7 @@ err_vsis:
 	kfree(pf->vsi);
 err_switch_setup:
 	i40e_reset_interrupt_capability(pf);
-	del_timer_sync(&pf->service_timer);
+	timer_delete_sync(&pf->service_timer);
 err_mac_addr:
 err_configure_lan_hmc:
 	(void)i40e_shutdown_lan_hmc(hw);
@@ -18371,7 +18389,7 @@ static void i40e_remove(struct pci_dev *pdev)
 	set_bit(__I40E_SUSPENDED, pf->state);
 	set_bit(__I40E_DOWN, pf->state);
 	if (pf->service_timer.function)
-		del_timer_sync(&pf->service_timer);
+		timer_delete_sync(&pf->service_timer);
 	if (pf->service_task.func)
 		cancel_work_sync(&pf->service_task);
 	/* Client close must be called explicitly here because the timer
@@ -18394,6 +18412,7 @@ static void i40e_remove(struct pci_dev *pdev)
 		goto unmap;
 	}
 	kfree(pf->mac_list);
+
 
 	i40e_fdir_teardown(pf);
 
@@ -18723,7 +18742,7 @@ static void i40e_shutdown(struct pci_dev *pdev)
 	if (test_bit(__I40E_DEBUG_MODE, pf->state))
 		goto debug_mode;
 
-	del_timer_sync(&pf->service_timer);
+	timer_delete_sync(&pf->service_timer);
 	cancel_work_sync(&pf->service_task);
 	i40e_cloud_filter_exit(pf);
 	i40e_fdir_teardown(pf);
@@ -18769,6 +18788,7 @@ static void i40e_shutdown(struct pci_dev *pdev)
 	rtnl_unlock();
 
 debug_mode:
+
 	if (system_state == SYSTEM_POWER_OFF || updated) {
 		if (updated) {
 			pci_wake_from_d3(pdev, false);
@@ -18798,7 +18818,7 @@ static int i40e_suspend(struct device *dev)
 	set_bit(__I40E_DOWN, pf->state);
 
 	/* Ensure service task will not be running */
-	del_timer_sync(&pf->service_timer);
+	timer_delete_sync(&pf->service_timer);
 	cancel_work_sync(&pf->service_task);
 
 	/* Client close must be called explicitly here because the timer

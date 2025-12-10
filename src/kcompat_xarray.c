@@ -31,6 +31,23 @@ struct kmem_cache;
 struct rcu_head;
 
 struct kmem_cache *radix_tree_node_cachep;
+
+static void radix_tree_node_ctor(void *arg)
+{
+        struct radix_tree_node *node = arg;
+
+        memset(node, 0, sizeof(*node));
+        INIT_LIST_HEAD(&node->private_list);
+}
+
+void kc_xarray_global_init(void)
+{
+	radix_tree_node_cachep = kmem_cache_create("kc_radix_tree_node",
+                        sizeof(struct radix_tree_node), 0,
+                        SLAB_PANIC | SLAB_RECLAIM_ACCOUNT,
+                        radix_tree_node_ctor);
+}
+
 static void radix_tree_node_rcu_free(struct rcu_head *head)
 {
 	struct radix_tree_node *node =
@@ -47,6 +64,7 @@ static void radix_tree_node_rcu_free(struct rcu_head *head)
 
 	kmem_cache_free(radix_tree_node_cachep, node);
 }
+
 
 /*
  * Coding conventions in this file:
