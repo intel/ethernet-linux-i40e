@@ -1,6 +1,6 @@
 Name: i40e
 Summary: Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
-Version: 2.28.13
+Version: 2.28.15
 Release: 1
 Source: %{name}-%{version}.tar.gz
 Vendor: Intel Corporation
@@ -64,25 +64,27 @@ make -C src
 %install
 make -C src INSTALL_MOD_PATH=%{buildroot} MANDIR=%{_mandir} modules_install_no_aux mandocs_install
 # Remove modules files that we do not want to include
-find %{buildroot}/lib/modules/ -name 'modules.*' -exec rm -f {} \;
+if [ -d %{buildroot}/lib/modules ]; then
+	find %{buildroot}/lib/modules/ -name 'modules.*' -exec rm -f {} \;
+fi
 cd %{buildroot}
-find lib -name "i40e.ko" -printf "/%p\n" \
+find . -name "i40e.ko" -printf "/%p\n" \
 	>%{_builddir}/%{name}-%{version}/file.list
 %if (%need_aux_rpm == 2)
 make -C %{_builddir}/%{name}-%{version}/src INSTALL_MOD_PATH=%{buildroot} auxiliary_install
 
-find lib -path "*extern-symvers/intel_auxiliary.symvers" -printf "/%p\n" \
+find . -path "*extern-symvers/intel_auxiliary.symvers" -printf "/%p\n" \
 	>%{_builddir}/%{name}-%{version}/aux.list
-find * -name "auxiliary_bus.h" -printf "/%p\n" \
+find . -name "auxiliary_bus.h" -printf "/%p\n" \
 	>>%{_builddir}/%{name}-%{version}/aux.list
-find * -name "auxiliary_compat.h" -printf "/%p\n" \
+find . -name "auxiliary_compat.h" -printf "/%p\n" \
 	>>%{_builddir}/%{name}-%{version}/aux.list
-find * -name "kcompat_generated_defs.h" -printf "/%p\n" \
+find . -name "kcompat_generated_defs.h" -printf "/%p\n" \
 	>>%{_builddir}/%{name}-%{version}/aux.list
-find lib -name "intel_auxiliary.ko" -printf "/%p\n" \
+find . -name "intel_auxiliary.ko" -printf "/%p\n" \
 	>>%{_builddir}/%{name}-%{version}/aux.list
 %else
-find lib -name "intel_auxiliary.ko" -type f -delete
+find . -name "intel_auxiliary.ko" -type f -delete
 %endif
 
 export _ksrc=%{_usrsrc}/kernels/%{kernel_ver}
