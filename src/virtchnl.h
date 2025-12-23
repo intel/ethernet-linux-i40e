@@ -2159,27 +2159,35 @@ enum virtchnl_vector_limits {
 	VIRTCHNL_OP_CONFIG_VSI_QUEUES_MAX	=
 		((u16)(~0) - sizeof(struct virtchnl_vsi_queue_config_info)) /
 		sizeof(struct virtchnl_queue_pair_info),
+
 	VIRTCHNL_OP_CONFIG_IRQ_MAP_MAX		=
 		((u16)(~0) - sizeof(struct virtchnl_irq_map_info)) /
 		sizeof(struct virtchnl_vector_map),
+
 	VIRTCHNL_OP_ADD_DEL_ETH_ADDR_MAX	=
 		((u16)(~0) - sizeof(struct virtchnl_ether_addr_list)) /
 		sizeof(struct virtchnl_ether_addr),
+
 	VIRTCHNL_OP_ADD_DEL_VLAN_MAX		=
 		((u16)(~0) - sizeof(struct virtchnl_vlan_filter_list)) /
 		sizeof(u16),
+
 	VIRTCHNL_OP_CONFIG_RDMA_IRQ_MAP_MAX	=
 		((u16)(~0) - sizeof(struct virtchnl_rdma_qvlist_info)) /
 		sizeof(struct virtchnl_rdma_qv_info),
+
 	VIRTCHNL_OP_ENABLE_CHANNELS_MAX		=
 		((u16)(~0) - sizeof(struct virtchnl_tc_info)) /
 		sizeof(struct virtchnl_channel_info),
+
 	VIRTCHNL_OP_ENABLE_DISABLE_DEL_QUEUES_V2_MAX	=
 		((u16)(~0) - sizeof(struct virtchnl_del_ena_dis_queues)) /
 		sizeof(struct virtchnl_queue_chunk),
+
 	VIRTCHNL_OP_MAP_UNMAP_QUEUE_VECTOR_MAX	=
 		((u16)(~0) - sizeof(struct virtchnl_queue_vector_maps)) /
 		sizeof(struct virtchnl_queue_vector),
+
 	VIRTCHNL_OP_ADD_DEL_VLAN_V2_MAX		=
 		((u16)(~0) - sizeof(struct virtchnl_vlan_filter_list_v2)) /
 		sizeof(struct virtchnl_vlan_filter),

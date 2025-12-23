@@ -6312,6 +6312,7 @@ error_pvid:
 	return ret;
 }
 
+
 /**
  * i40e_ndo_set_vf_bw
  * @netdev: network interface device structure
@@ -9598,6 +9599,7 @@ const struct vfd_ops i40e_vfd_ops = {
 	.get_vf_max_tc_tx_rate	= i40e_get_vf_max_tc_tx_rate,
 	.set_vf_qos_tc_share	= i40e_set_vf_qos_tc_share,
 	.get_vf_qos_tc_share	= i40e_get_vf_qos_tc_share,
+
 };
 #endif /* HAVE_NDO_SET_VF_LINK_STATE */
 

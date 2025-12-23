@@ -4,6 +4,9 @@
 #ifndef _I40E_H_
 #define _I40E_H_
 
+/* must be the very first include */
+#include "kcompat.h"
+
 #include <net/tcp.h>
 #include <net/udp.h>
 #ifdef HAVE_INCLUDE_BITFIELD
@@ -29,7 +32,6 @@
 #include <net/checksum.h>
 #include <net/ipv6.h>
 #include <net/ip6_checksum.h>
-#include "kcompat.h"
 #include <linux/filter.h>
 #ifdef HAVE_LINKMODE
 #include <linux/linkmode.h>

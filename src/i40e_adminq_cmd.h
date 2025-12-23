@@ -115,23 +115,30 @@ enum i40e_admin_queue_opc {
 	i40e_aqc_opc_driver_version	= 0x0002,
 	i40e_aqc_opc_queue_shutdown	= 0x0003,
 	i40e_aqc_opc_set_pf_context	= 0x0004,
+
 	/* resource ownership */
 	i40e_aqc_opc_request_resource	= 0x0008,
 	i40e_aqc_opc_release_resource	= 0x0009,
+
 	i40e_aqc_opc_list_func_capabilities	= 0x000A,
 	i40e_aqc_opc_list_dev_capabilities	= 0x000B,
+
 	/* Proxy commands */
 	i40e_aqc_opc_set_proxy_config		= 0x0104,
 	i40e_aqc_opc_set_ns_proxy_table_entry	= 0x0105,
+
 	/* LAA */
 	i40e_aqc_opc_mac_address_read	= 0x0107,
 	i40e_aqc_opc_mac_address_write	= 0x0108,
+
 	/* PXE */
 	i40e_aqc_opc_clear_pxe_mode	= 0x0110,
+
 	/* WoL commands */
 	i40e_aqc_opc_set_wol_filter	= 0x0120,
 	i40e_aqc_opc_get_wake_reason	= 0x0121,
 	i40e_aqc_opc_clear_all_wol_filters = 0x025E,
+
 	/* internal switch commands */
 	i40e_aqc_opc_get_switch_config		= 0x0200,
 	i40e_aqc_opc_add_statistics		= 0x0201,
@@ -141,16 +148,21 @@ enum i40e_admin_queue_opc {
 	i40e_aqc_opc_set_switch_config		= 0x0205,
 	i40e_aqc_opc_rx_ctl_reg_read		= 0x0206,
 	i40e_aqc_opc_rx_ctl_reg_write		= 0x0207,
+
 	i40e_aqc_opc_add_vsi			= 0x0210,
 	i40e_aqc_opc_update_vsi_parameters	= 0x0211,
 	i40e_aqc_opc_get_vsi_parameters		= 0x0212,
+
 	i40e_aqc_opc_add_pv			= 0x0220,
 	i40e_aqc_opc_update_pv_parameters	= 0x0221,
 	i40e_aqc_opc_get_pv_parameters		= 0x0222,
+
 	i40e_aqc_opc_add_veb			= 0x0230,
 	i40e_aqc_opc_update_veb_parameters	= 0x0231,
 	i40e_aqc_opc_get_veb_parameters		= 0x0232,
+
 	i40e_aqc_opc_delete_element		= 0x0243,
+
 	i40e_aqc_opc_add_macvlan		= 0x0250,
 	i40e_aqc_opc_remove_macvlan		= 0x0251,
 	i40e_aqc_opc_add_vlan			= 0x0252,
@@ -167,15 +179,19 @@ enum i40e_admin_queue_opc {
 	i40e_aqc_opc_remove_cloud_filters	= 0x025D,
 	i40e_aqc_opc_clear_wol_switch_filters	= 0x025E,
 	i40e_aqc_opc_replace_cloud_filters	= 0x025F,
+
 	i40e_aqc_opc_add_mirror_rule	= 0x0260,
 	i40e_aqc_opc_delete_mirror_rule	= 0x0261,
+
 	/* Dynamic Device Personalization */
 	i40e_aqc_opc_write_personalization_profile	= 0x0270,
 	i40e_aqc_opc_get_personalization_profile_list	= 0x0271,
+
 	/* DCB commands */
 	i40e_aqc_opc_dcb_ignore_pfc	= 0x0301,
 	i40e_aqc_opc_dcb_updated	= 0x0302,
 	i40e_aqc_opc_set_dcb_parameters = 0x0303,
+
 	/* TX scheduler */
 	i40e_aqc_opc_configure_vsi_bw_limit		= 0x0400,
 	i40e_aqc_opc_configure_vsi_ets_sla_bw_limit	= 0x0406,
@@ -183,6 +199,7 @@ enum i40e_admin_queue_opc {
 	i40e_aqc_opc_query_vsi_bw_config		= 0x0408,
 	i40e_aqc_opc_query_vsi_ets_sla_config		= 0x040A,
 	i40e_aqc_opc_configure_switching_comp_bw_limit	= 0x0410,
+
 	i40e_aqc_opc_enable_switching_comp_ets			= 0x0413,
 	i40e_aqc_opc_modify_switching_comp_ets			= 0x0414,
 	i40e_aqc_opc_disable_switching_comp_ets			= 0x0415,
@@ -197,6 +214,7 @@ enum i40e_admin_queue_opc {
 	/* hmc */
 	i40e_aqc_opc_query_hmc_resource_profile	= 0x0500,
 	i40e_aqc_opc_set_hmc_resource_profile	= 0x0501,
+
 	/* phy commands*/
 
 	/* phy commands*/
@@ -216,6 +234,7 @@ enum i40e_admin_queue_opc {
 	i40e_aqc_opc_run_phy_activity		= 0x0626,
 	i40e_aqc_opc_set_phy_register		= 0x0628,
 	i40e_aqc_opc_get_phy_register		= 0x0629,
+
 	/* NVM commands */
 	i40e_aqc_opc_nvm_read			= 0x0701,
 	i40e_aqc_opc_nvm_erase			= 0x0702,
@@ -226,10 +245,12 @@ enum i40e_admin_queue_opc {
 	i40e_aqc_opc_rollback_revision_update	= 0x0707,
 	i40e_aqc_opc_oem_post_update		= 0x0720,
 	i40e_aqc_opc_thermal_sensor		= 0x0721,
+
 	/* virtualization commands */
 	i40e_aqc_opc_send_msg_to_pf		= 0x0801,
 	i40e_aqc_opc_send_msg_to_vf		= 0x0802,
 	i40e_aqc_opc_send_msg_to_peer		= 0x0803,
+
 	/* alternate structure */
 	i40e_aqc_opc_alternate_write		= 0x0900,
 	i40e_aqc_opc_alternate_write_indirect	= 0x0901,
@@ -238,6 +259,7 @@ enum i40e_admin_queue_opc {
 	i40e_aqc_opc_alternate_write_done	= 0x0904,
 	i40e_aqc_opc_alternate_set_mode		= 0x0905,
 	i40e_aqc_opc_alternate_clear_port	= 0x0906,
+
 	/* LLDP commands */
 	i40e_aqc_opc_lldp_get_mib	= 0x0A00,
 	i40e_aqc_opc_lldp_update_mib	= 0x0A01,
@@ -250,6 +272,7 @@ enum i40e_admin_queue_opc {
 	i40e_aqc_opc_lldp_set_local_mib	= 0x0A08,
 	i40e_aqc_opc_lldp_stop_start_spec_agent	= 0x0A09,
 	i40e_aqc_opc_lldp_restore		= 0x0A0A,
+
 	/* Tunnel commands */
 	i40e_aqc_opc_add_udp_tunnel	= 0x0B00,
 	i40e_aqc_opc_del_udp_tunnel	= 0x0B01,
@@ -257,13 +280,16 @@ enum i40e_admin_queue_opc {
 	i40e_aqc_opc_set_rss_lut	= 0x0B03,
 	i40e_aqc_opc_get_rss_key	= 0x0B04,
 	i40e_aqc_opc_get_rss_lut	= 0x0B05,
+
 	/* Async Events */
 	i40e_aqc_opc_event_lan_overflow		= 0x1001,
+
 	/* OEM commands */
 	i40e_aqc_opc_oem_parameter_change	= 0xFE00,
 	i40e_aqc_opc_oem_device_status_change	= 0xFE01,
 	i40e_aqc_opc_oem_ocsd_initialize	= 0xFE02,
 	i40e_aqc_opc_oem_ocbb_initialize	= 0xFE03,
+
 	/* debug commands */
 	i40e_aqc_opc_debug_read_reg		= 0xFF03,
 	i40e_aqc_opc_debug_write_reg		= 0xFF04,

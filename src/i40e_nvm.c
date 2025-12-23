@@ -103,6 +103,7 @@ i40e_i40e_acquire_nvm_exit:
 	return ret_code;
 }
 
+
 /**
  * i40e_acquire_nvm_ex - Specific request only for
  * OID_INTEL_FLASH_INFO_TIMEOUT for acquiring the NVM ownership
@@ -165,6 +166,7 @@ i40e_status i40e_acquire_nvm_ex(struct i40e_hw *hw,
 i40e_i40e_acquire_nvm_exit:
 	return ret_code;
 }
+
 
 /**
  * i40e_release_nvm - Generic request for releasing the NVM ownership

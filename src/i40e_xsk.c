@@ -1,6 +1,8 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
 /* Copyright (C) 2013-2025 Intel Corporation */
 
+#include "i40e.h"
+
 #ifdef HAVE_AF_XDP_ZC_SUPPORT
 #include <linux/bpf_trace.h>
 #ifdef HAVE_XSK_BATCHED_DESCRIPTOR_INTERFACES
@@ -13,9 +15,9 @@
 #endif
 #include <net/xdp.h>
 
-#include "i40e.h"
 #include "i40e_txrx_common.h"
 #include "i40e_xsk.h"
+
 
 #ifdef HAVE_MEM_TYPE_XSK_BUFF_POOL
 int i40e_alloc_rx_bi_zc(struct i40e_ring *rx_ring)
@@ -501,6 +503,7 @@ out_failure:
 	return result;
 }
 
+
 #ifndef HAVE_MEM_TYPE_XSK_BUFF_POOL
 /**
  * i40e_alloc_buffer_zc - Allocates an i40e_rx_buffer_zc
@@ -589,6 +592,7 @@ static bool i40e_alloc_buffer_slow_zc(struct i40e_ring *rx_ring,
 }
 
 #endif /* HAVE_MEM_TYPE_XSK_BUFF_POOL */
+
 
 #ifdef HAVE_MEM_TYPE_XSK_BUFF_POOL
 bool i40e_alloc_rx_buffers_zc(struct i40e_ring *rx_ring, u16 count)
