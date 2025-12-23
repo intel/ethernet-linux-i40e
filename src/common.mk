@@ -50,6 +50,7 @@ endif
 KSP :=  /lib/modules/${BUILD_KERNEL}/source \
         /lib/modules/${BUILD_KERNEL}/build \
         /usr/src/linux-${BUILD_KERNEL} \
+        /usr/src/linux-headers-${BUILD_KERNEL} \
         /usr/src/kernel-headers-${BUILD_KERNEL} \
         /usr/src/kernel-source-${BUILD_KERNEL} \
         /usr/src/linux \
