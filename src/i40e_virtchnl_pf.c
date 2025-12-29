@@ -6119,6 +6119,7 @@ int i40e_ndo_set_vf_port_vlan(struct net_device *netdev,
 	struct i40e_vf *vf;
 	__le16 *pvid;
 	int ret;
+	int i;
 
 	if (test_and_set_bit(__I40E_VIRTCHNL_OP_PENDING, pf->state)) {
 		dev_warn(&pf->pdev->dev, "Unable to configure VFs, other operation is pending.\n");
@@ -6145,6 +6146,20 @@ int i40e_ndo_set_vf_port_vlan(struct net_device *netdev,
 #endif
 
 	vf = &pf->vf[vf_id];
+	/* When the VF is resetting wait until it is done.
+	* It can take up to 200 milliseconds,
+	* but wait for up to 300 milliseconds to be safe.
+	* Acquire the vsi pointer only after the VF has been
+	* properly initialized.
+	*/
+	netdev_info(netdev, "Setting VF %d vlan %d\n", vf_id, vlan_id);
+	for (i = 0; i < 15; i++) {
+		if (test_bit(I40E_VF_STATE_INIT, &vf->vf_states))
+			break;
+		dev_info(&pf->pdev->dev, "VF %d is resetting when set vlan.\n",
+			vf_id);
+		msleep(20);
+	}
 	vsi = pf->vsi[vf->lan_vsi_idx];
 	if (!test_bit(I40E_VF_STATE_INIT, &vf->vf_states)) {
 		dev_err(&pf->pdev->dev, "VF %d still in reset. Try again.\n",
