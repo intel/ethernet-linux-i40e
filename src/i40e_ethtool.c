@@ -6509,6 +6509,17 @@ static int i40e_set_channels(struct net_device *dev,
 	if (count > i40e_max_channels(vsi))
 		return -EINVAL;
 
+	/* verify XDP program compatibility with requested channel count */
+	if (i40e_enabled_xdp_vsi(vsi) && count < num_online_cpus()) {
+		dev_warn(&pf->pdev->dev,
+			 "XDP enabled: reducing channels (%u) below online CPUs (%u) may cause performance issues\n",
+			 count, num_online_cpus());
+		dev_info(&pf->pdev->dev,
+			 "Consider using channels >= %u for optimal XDP performance\n",
+			 num_online_cpus());
+		/* Warning only - allow the configuration but inform user */
+	}
+
 	/* verify that the number of channels does not invalidate any current
 	 * flow director rules
 	 */
