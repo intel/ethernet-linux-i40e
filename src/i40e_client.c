@@ -288,7 +288,7 @@ static void i40e_auxiliary_dev_release(struct device *dev)
 	struct i40e_auxiliary_device *i40e_aux_dev =
 		container_of(aux_dev, struct i40e_auxiliary_device, aux_dev);
 
-	ida_simple_remove(&i40e_client_ida, aux_dev->id);
+	ida_free(&i40e_client_ida, aux_dev->id);
 	kfree(i40e_aux_dev);
 }
 
@@ -311,7 +311,7 @@ static int i40e_register_auxiliary_dev(struct i40e_info *ldev, const char *name)
 	aux_dev->dev.release = i40e_auxiliary_dev_release;
 	ldev->aux_dev = aux_dev;
 
-	ret = ida_simple_get(&i40e_client_ida, 0, 0, GFP_KERNEL);
+	ret = ida_alloc(&i40e_client_ida, GFP_KERNEL);
 	if (ret < 0) {
 		kfree(i40e_aux_dev);
 		return ret;
@@ -321,7 +321,7 @@ static int i40e_register_auxiliary_dev(struct i40e_info *ldev, const char *name)
 
 	ret = auxiliary_device_init(aux_dev);
 	if (ret < 0) {
-		ida_simple_remove(&i40e_client_ida, aux_dev->id);
+		ida_free(&i40e_client_ida, aux_dev->id);
 		kfree(i40e_aux_dev);
 		return ret;
 	}
