@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2025 Intel Corporation */
+/* Copyright (C) 2013-2026 Intel Corporation */
 
 #ifndef _I40E_TYPE_H_
 #define _I40E_TYPE_H_
@@ -381,7 +381,7 @@ enum i40e_aq_resource_access_type {
 struct i40e_nvm_info {
 	u32 hw_semaphore_timeout; /* usec global time (GTIME resolution) */
 	u32 timeout;              /* [ms] */
-	u16 sr_size;              /* Shadow RAM size in words */
+	u32 sr_size;              /* Shadow RAM size in words */
 	bool blank_nvm_mode;      /* is NVM empty (no FW present)*/
 	u16 version;              /* NVM package version */
 	u32 eetrack;              /* NVM data version */

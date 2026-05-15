@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
-# Copyright (C) 2013-2025 Intel Corporation
+# Copyright (C) 2013-2026 Intel Corporation
 
 #
 # common Makefile rules useful for out-of-tree Linux driver builds
@@ -347,8 +347,8 @@ ifeq (,${MANDIR})
   MANDIR := $(firstword ${MANDIR})
 endif
 ifeq (,${MANDIR})
-  # fallback to /usr/man
-  MANDIR := /usr/man
+  # fallback to /usr/share/man (FHS standard; legacy /usr/man not present on RHEL 9+)
+  MANDIR := /usr/share/man
 endif
 
 ####################

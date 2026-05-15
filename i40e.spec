@@ -1,6 +1,6 @@
 Name: i40e
 Summary: Intel(R) 40-10 Gigabit Ethernet Connection Network Driver
-Version: 2.28.16
+Version: 2.30.12
 Release: 1
 Source: %{name}-%{version}.tar.gz
 Vendor: Intel Corporation
@@ -95,7 +95,7 @@ cd %{buildroot}
 %{!?privkey: %define privkey %{_sysconfdir}/pki/SECURE-BOOT-KEY.priv}
 %{!?pubkey: %define pubkey %{_sysconfdir}/pki/SECURE-BOOT-KEY.der}
 %{!?_signfile: %define _signfile ${_ksrc}/scripts/sign-file}
-systemctl restart kerberos || echo Unable to restart kerberos >&2
+systemctl --no-ask-password restart kerberos || echo kerberos not restarted
 for module in `find . -type f -name \*.ko`; do
 	strip --strip-debug ${module}
 	KSRC=${_ksrc} %{_signfile} sha512 %{privkey} %{pubkey} ${module}

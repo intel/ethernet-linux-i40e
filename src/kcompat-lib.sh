@@ -1,6 +1,6 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-2.0-only
-# Copyright (C) 2013-2025 Intel Corporation
+# Copyright (C) 2013-2026 Intel Corporation
 
 # to be sourced
 
@@ -477,7 +477,8 @@ function find_config_file() {
 	CSP=(
 		"$KOBJ/include/generated/autoconf.h"
 		"$KOBJ/include/linux/autoconf.h"
-		"$KOBJ/.config")
+		"$KOBJ/.config"
+	)
 
 	for file in "${CSP[@]}"; do
 		if [ -f $file ]; then

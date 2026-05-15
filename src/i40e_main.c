@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2025 Intel Corporation */
+/* Copyright (C) 2013-2026 Intel Corporation */
 
 #include "kcompat_generated_defs.h"
 #include "i40e.h"
@@ -44,15 +44,15 @@ static const char i40e_driver_string[] =
 #define DRV_VERSION_DESC ""
 
 #define DRV_VERSION_MAJOR 2
-#define DRV_VERSION_MINOR 28
-#define DRV_VERSION_BUILD 16
+#define DRV_VERSION_MINOR 30
+#define DRV_VERSION_BUILD 12
 #define DRV_VERSION_SUBBUILD 0
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
 	__stringify(DRV_VERSION_BUILD) \
 	DRV_VERSION_DESC __stringify(DRV_VERSION_LOCAL)
 const char i40e_driver_version_str[] = DRV_VERSION;
-static const char i40e_copyright[] = "Copyright (C) 2013-2025 Intel Corporation";
+static const char i40e_copyright[] = "Copyright (C) 2013-2026 Intel Corporation";
 
 /* a bit of forward declarations */
 static void i40e_vsi_reinit_locked(struct i40e_vsi *vsi);
@@ -491,7 +491,7 @@ static void i40e_tx_timeout(struct net_device *netdev)
 	if (tx_ring) {
 		head = i40e_get_head(tx_ring);
 		/* Read interrupt register */
-		if (pf->flags & I40E_FLAG_MSIX_ENABLED)
+		if (tx_ring->q_vector && (pf->flags & I40E_FLAG_MSIX_ENABLED))
 			val = rd32(&pf->hw,
 			     I40E_PFINT_DYN_CTLN(tx_ring->q_vector->v_idx +
 						tx_ring->vsi->base_vector - 1));
@@ -671,6 +671,7 @@ void i40e_vsi_reset_stats(struct i40e_vsi *vsi)
 #else
 	struct net_device_stats *ns;
 #endif
+	u16 n;
 	int i;
 
 	if (!vsi)
@@ -681,8 +682,18 @@ void i40e_vsi_reset_stats(struct i40e_vsi *vsi)
 	memset(&vsi->net_stats_offsets, 0, sizeof(vsi->net_stats_offsets));
 	memset(&vsi->eth_stats, 0, sizeof(vsi->eth_stats));
 	memset(&vsi->eth_stats_offsets, 0, sizeof(vsi->eth_stats_offsets));
-	if (vsi->rx_rings && vsi->rx_rings[0]) {
-		for (i = 0; i < vsi->num_queue_pairs; i++) {
+
+	n = min_t(u16, vsi->num_queue_pairs, vsi->alloc_queue_pairs);
+	if (n != vsi->num_queue_pairs)
+		dev_warn_once(&vsi->back->pdev->dev,
+			      "vsi %d num_queue_pairs(%u) > alloc(%u); clamping in stats reset\n",
+			      vsi->idx, vsi->num_queue_pairs, vsi->alloc_queue_pairs);
+
+	/* RX (if present) */
+	if (vsi->rx_rings) {
+		for (i = 0; i < n; i++) {
+			if (!vsi->rx_rings[i])
+				continue;
 			memset(&vsi->rx_rings[i]->stats, 0,
 			       sizeof(vsi->rx_rings[i]->stats));
 			memset(&vsi->rx_rings[i]->rx_stats, 0,
@@ -691,12 +702,21 @@ void i40e_vsi_reset_stats(struct i40e_vsi *vsi)
 			memset(&vsi->rx_rings[i]->xdp_stats, 0,
 			       sizeof(vsi->rx_rings[i]->xdp_stats));
 #endif
+		}
+	}
+
+	/* TX (if present) */
+	if (vsi->tx_rings) {
+		for (i = 0; i < n; i++) {
+			if (!vsi->tx_rings[i])
+				continue;
 			memset(&vsi->tx_rings[i]->stats, 0,
 			       sizeof(vsi->tx_rings[i]->stats));
 			memset(&vsi->tx_rings[i]->tx_stats, 0,
 			       sizeof(vsi->tx_rings[i]->tx_stats));
 		}
 	}
+
 	vsi->stat_offsets_loaded = false;
 }
 
@@ -2270,8 +2290,10 @@ static void i40e_vsi_setup_queue_map(struct i40e_vsi *vsi,
 {
 	struct i40e_pf *pf = vsi->back;
 	u16 num_tc_qps = 0;
+	u16 rem_tc_qps = 0;
 	u16 sections = 0;
 	u8 netdev_tc = 0;
+	u16 rem_qps = 0;
 	u16 qcount = 0;
 	u16 numtc = 1;
 	u8 offset;
@@ -2317,15 +2339,58 @@ static void i40e_vsi_setup_queue_map(struct i40e_vsi *vsi,
 			dev_warn(&pf->pdev->dev, "DCB is enabled but no TC enabled, forcing TC0\n");
 			numtc = 1;
 		}
-		num_tc_qps = num_tc_qps / numtc;
-		num_tc_qps = min_t(int, num_tc_qps,
-				   i40e_pf_get_max_q_per_tc(pf));
+
+		if (numtc <= 1) {
+			num_tc_qps = min_t(int, num_tc_qps, i40e_pf_get_max_q_per_tc(pf));
+		} else {
+			u16 max_per_tc = i40e_pf_get_max_q_per_tc(pf);
+			u16 orig_total_qps = num_tc_qps;
+			u16 rss_cap;
+			u16 base;
+
+			base = orig_total_qps / numtc;
+			rem_tc_qps = orig_total_qps % numtc;
+
+			rss_cap = (vsi->type == I40E_VSI_MAIN) ?
+				pf->alloc_rss_size : max_per_tc;
+
+			if (!rss_cap)
+				rss_cap = max_per_tc;
+
+			/* Enforce HW per-TC cap */
+			if (base > max_per_tc) {
+				base = max_per_tc;
+				rem_tc_qps = 0;
+			}
+
+			if (orig_total_qps > vsi->alloc_queue_pairs) {
+				u16 max_total = vsi->alloc_queue_pairs;
+
+				if (base * numtc >= max_total) {
+					base = max_total / numtc;
+					rem_tc_qps = max_total % numtc;
+				} else {
+					rem_tc_qps = max_total - (base * numtc);
+				}
+			}
+
+			if (base >= rss_cap) {
+				base = rss_cap;
+				rem_tc_qps = 0;
+			} else if (base >= rss_cap - 1) {
+				rem_tc_qps = 0;
+			}
+			num_tc_qps = base;
+		}
 	}
 
 	vsi->tc_config.numtc = numtc;
 	vsi->tc_config.enabled_tc = enabled_tc ? enabled_tc : 1;
 
 	/* Setup queue offset/count for all TCs for given VSI */
+	rem_qps = (numtc > 1 && (vsi->back->flags & I40E_FLAG_DCB_ENABLED)) ?
+			rem_tc_qps : 0;
+
 	for (i = 0; i < I40E_MAX_TRAFFIC_CLASS; i++) {
 		/* See if the given TC is enabled for the given VSI */
 		if (vsi->tc_config.enabled_tc & BIT(i)) {
@@ -2336,8 +2401,15 @@ static void i40e_vsi_setup_queue_map(struct i40e_vsi *vsi,
 				if (!(pf->flags & (I40E_FLAG_FD_SB_ENABLED |
 				    I40E_FLAG_FD_ATR_ENABLED)) ||
 				    vsi->tc_config.enabled_tc != 1) {
-					qcount = min_t(int, pf->alloc_rss_size,
-						       num_tc_qps);
+					u16 hw_cap = i40e_pf_get_max_q_per_tc(pf);
+					u16 rss_cap = pf->alloc_rss_size ?
+						pf->alloc_rss_size : hw_cap;
+
+					qcount = min_t(int, min(rss_cap, hw_cap), num_tc_qps);
+					if (rem_qps && qcount < rss_cap && qcount < hw_cap) {
+						qcount++;
+						rem_qps--;
+					}
 					break;
 				}
 				fallthrough;
@@ -2346,6 +2418,10 @@ static void i40e_vsi_setup_queue_map(struct i40e_vsi *vsi,
 				 * queues anyway
 				 */
 				qcount = num_tc_qps;
+				if (rem_qps) {
+					qcount++;
+					rem_qps--;
+				}
 				break;
 			case I40E_VSI_FDIR:
 			case I40E_VSI_VMDQ2:
@@ -2386,11 +2462,23 @@ static void i40e_vsi_setup_queue_map(struct i40e_vsi *vsi,
 		ctxt->info.tc_mapping[i] = cpu_to_le16(qmap);
 	}
 
-	/* Do not change previously set num_queue_pairs for PFs and VFs*/
-	if ((vsi->type == I40E_VSI_MAIN && numtc != 1) ||
-	    (vsi->type == I40E_VSI_SRIOV && vsi->num_queue_pairs == 0) ||
-	    (vsi->type != I40E_VSI_MAIN && vsi->type != I40E_VSI_SRIOV))
-		vsi->num_queue_pairs = offset;
+	/* Unconditionally finalize logical queue count from constructed mapping.
+	 * 'offset' is the total queues actually assigned across enabled TCs.
+	 * Guarantee we never advertise more than we allocated and always at least 1.
+	 */
+	if (!offset)
+		offset = 1;
+	if (offset > vsi->alloc_queue_pairs) {
+		dev_warn_once(&pf->pdev->dev,
+			      "queue map offset %u > alloc %u, clamping\n",
+			      offset, vsi->alloc_queue_pairs);
+		offset = vsi->alloc_queue_pairs;
+	}
+	if (vsi->num_queue_pairs != offset && vsi->num_queue_pairs > vsi->alloc_queue_pairs)
+		dev_warn_once(&pf->pdev->dev,
+			      "vsi %d logical qps(%u) > alloc(%u) -> using %u\n",
+			      vsi->idx, vsi->num_queue_pairs, vsi->alloc_queue_pairs, offset);
+	vsi->num_queue_pairs = offset;
 
 	/* Scheduler section valid can only be set for ADD VSI */
 	if (is_add) {
@@ -4043,10 +4131,25 @@ static void i40e_vsi_free_tx_resources(struct i40e_vsi *vsi)
  **/
 int i40e_vsi_setup_rx_resources(struct i40e_vsi *vsi)
 {
+	u16 n = min_t(u16, vsi->num_queue_pairs, vsi->alloc_queue_pairs);
 	int i, err = 0;
 
-	for (i = 0; i < vsi->num_queue_pairs && !err; i++)
-		err = i40e_setup_rx_descriptors(vsi->rx_rings[i]);
+	if (unlikely(vsi->num_queue_pairs > vsi->alloc_queue_pairs))
+		dev_warn_once(&vsi->back->pdev->dev,
+			      "vsi %d num_queue_pairs(%u) > alloc(%u); clamping in rx setup\n",
+			      vsi->idx, vsi->num_queue_pairs, vsi->alloc_queue_pairs);
+
+	for (i = 0; i < n && !err; i++) {
+		struct i40e_ring *ring = vsi->rx_rings ? vsi->rx_rings[i] : NULL;
+
+		if (unlikely(!ring)) {
+			dev_warn_once(&vsi->back->pdev->dev,
+				      "vsi %d NULL rx_rings[%d] (num=%u alloc=%u)\n",
+				      vsi->idx, i, vsi->num_queue_pairs, vsi->alloc_queue_pairs);
+			continue; /* skip rather than crash; remaining rings still usable */
+		}
+		err = i40e_setup_rx_descriptors(ring);
+	}
 	return err;
 }
 
@@ -5486,7 +5589,7 @@ static bool i40e_clean_fdir_tx_irq(struct i40e_ring *tx_ring, int budget)
 	i += tx_ring->count;
 	tx_ring->next_to_clean = i;
 
-	if (vsi->back->flags & I40E_FLAG_MSIX_ENABLED)
+	if (tx_ring->q_vector && (vsi->back->flags & I40E_FLAG_MSIX_ENABLED))
 		i40e_irq_dynamic_enable(vsi, tx_ring->q_vector->v_idx);
 
 	return budget > 0;
@@ -6126,13 +6229,19 @@ static void i40e_reset_interrupt_capability(struct i40e_pf *pf)
 	/* If we're in Legacy mode, the interrupt was cleaned in vsi_close */
 	if (pf->flags & I40E_FLAG_MSIX_ENABLED) {
 		pci_disable_msix(pf->pdev);
-		kfree(pf->msix_entries);
-		pf->msix_entries = NULL;
-		kfree(pf->irq_pile);
-		pf->irq_pile = NULL;
 	} else if (pf->flags & I40E_FLAG_MSI_ENABLED) {
 		pci_disable_msi(pf->pdev);
 	}
+
+	/* Free interrupt resources unconditionally to prevent leaks.
+	 * These may be allocated regardless of interrupt mode.
+	 * kfree(NULL) is safe, so no need to check.
+	 */
+	kfree(pf->msix_entries);
+	pf->msix_entries = NULL;
+	kfree(pf->irq_pile);
+	pf->irq_pile = NULL;
+
 	pf->flags &= ~(I40E_FLAG_MSIX_ENABLED | I40E_FLAG_MSI_ENABLED);
 }
 
@@ -13570,7 +13679,7 @@ static int i40e_pf_config_rss(struct i40e_pf *pf)
 	/* By default we enable TCP/UDP with IPv4/IPv6 ptypes */
 	hena = (u64)i40e_read_rx_ctl(hw, I40E_PFQF_HENA(0)) |
 		((u64)i40e_read_rx_ctl(hw, I40E_PFQF_HENA(1)) << 32);
-	hena |= i40e_pf_get_default_rss_hena(pf);
+	hena |= i40e_pf_get_default_rss_hashcfg(pf);
 
 	i40e_write_rx_ctl(hw, I40E_PFQF_HENA(0), (u32)hena);
 	i40e_write_rx_ctl(hw, I40E_PFQF_HENA(1), (u32)(hena >> 32));
@@ -14806,7 +14915,7 @@ static void i40e_queue_pair_enable_irq(struct i40e_vsi *vsi, int queue_pair)
 	struct i40e_hw *hw = &pf->hw;
 
 	/* All rings in a qp belong to the same qvector. */
-	if (pf->flags & I40E_FLAG_MSIX_ENABLED)
+	if (rxr->q_vector && (pf->flags & I40E_FLAG_MSIX_ENABLED))
 		i40e_irq_dynamic_enable(vsi, rxr->q_vector->v_idx);
 	else
 		i40e_irq_dynamic_enable_icr0(pf);
@@ -14831,7 +14940,7 @@ static void i40e_queue_pair_disable_irq(struct i40e_vsi *vsi, int queue_pair)
 	 *
 	 * All rings in a qp belong to the same qvector.
 	 */
-	if (pf->flags & I40E_FLAG_MSIX_ENABLED) {
+	if (rxr->q_vector && (pf->flags & I40E_FLAG_MSIX_ENABLED)) {
 		u32 intpf = vsi->base_vector + rxr->q_vector->v_idx;
 
 		wr32(hw, I40E_PFINT_DYN_CTLN(intpf - 1), 0);
@@ -14964,11 +15073,12 @@ static int i40e_xdp_setup(struct i40e_vsi *vsi, struct bpf_prog *prog,
 
 	if (old_prog)
 		bpf_prog_put(old_prog);
-#ifdef HAVE_AF_XDP_ZC_SUPPORT
+
 	/* Kick start the NAPI context if there is an AF_XDP socket open
 	 * on that queue id. This so that receiving will start.
 	 */
 	if (need_reset && prog) {
+#ifdef HAVE_AF_XDP_ZC_SUPPORT
 		for (i = 0; i < vsi->num_queue_pairs; i++)
 #ifdef HAVE_NETDEV_BPF_XSK_POOL
 			if (vsi->xdp_rings[i]->xsk_pool)
@@ -14981,10 +15091,9 @@ static int i40e_xdp_setup(struct i40e_vsi *vsi, struct bpf_prog *prog,
 #else
 				(void)i40e_xsk_async_xmit(vsi->netdev, i);
 #endif /* HAVE_NDO_XSK_WAKEUP */
+#endif /* HAVE_AF_XDP_ZC_SUPPORT */
 		xdp_features_set_redirect_target(vsi->netdev, false);
 	}
-#endif /* HAVE_AF_XDP_ZC_SUPPORT */
-
 	return 0;
 }
 
@@ -18990,7 +19099,7 @@ static struct pci_driver_rh i40e_driver_rh = {
 #endif
 #endif /* HAVE_PCI_ERS */
 #if defined(CONFIG_PM) && !defined(USE_LEGACY_PM_SUPPORT)
-static SIMPLE_DEV_PM_OPS(i40e_pm_ops, i40e_suspend, i40e_resume);
+static DEFINE_SIMPLE_DEV_PM_OPS(i40e_pm_ops, i40e_suspend, i40e_resume);
 #endif /* CONFIG_PM && !USE_LEGACY_PM_SUPPORT */
 
 static struct pci_driver i40e_driver = {
@@ -19007,9 +19116,7 @@ static struct pci_driver i40e_driver = {
 	.suspend  = i40e_legacy_suspend,
 	.resume   = i40e_legacy_resume,
 #else /* USE_LEGACY_PM_SUPPORT */
-	.driver   = {
-		.pm = &i40e_pm_ops,
-	},
+	.driver.pm = pm_sleep_ptr(&i40e_pm_ops),
 #endif /* !USE_LEGACY_PM_SUPPORT */
 #endif /* CONFIG_PM */
 	.shutdown = i40e_shutdown,
