@@ -165,7 +165,7 @@ static int i40e_ptp_set_pins(struct i40e_pf *pf,
  *
  * Service for PTP external clock event
  **/
-static void i40e_ptp_extts0_work(struct work_struct *work)
+void i40e_ptp_extts0_work(struct work_struct *work)
 {
 	struct i40e_pf *pf = container_of(work, struct i40e_pf,
 					  ptp_extts0_work);
@@ -1370,8 +1370,6 @@ static int i40e_ptp_set_timestamp_mode(struct i40e_pf *pf,
 	regval |= 1 << I40E_PRTTSYN_CTL0_EVENT_INT_ENA_SHIFT;
 	wr32(hw, I40E_PRTTSYN_CTL0, regval);
 
-	INIT_WORK(&pf->ptp_extts0_work, i40e_ptp_extts0_work);
-
 	/* Reserved for future extensions. */
 	if (config->flags)
 		return -EINVAL;
@@ -1843,6 +1841,8 @@ void i40e_ptp_init(struct i40e_pf *pf)
 	} else {
 		u32 regval;
 
+		cancel_work_sync(&pf->ptp_extts0_work);
+
 		if (pf->hw.debug_mask & I40E_DEBUG_LAN)
 			dev_info(&pf->pdev->dev, "PHC enabled.\n");
 		pf->flags |= I40E_FLAG_PTP;
@@ -1889,6 +1889,13 @@ void i40e_ptp_stop(struct i40e_pf *pf)
 	pf->ptp_tx = false;
 	pf->ptp_rx = false;
 
+	/* Disable interrupts */
+	regval = rd32(hw, I40E_PRTTSYN_CTL0);
+	regval &= ~I40E_PRTTSYN_CTL0_EVENT_INT_ENA_MASK;
+	wr32(hw, I40E_PRTTSYN_CTL0, regval);
+
+	cancel_work_sync(&pf->ptp_extts0_work);
+
 	if (pf->ptp_tx_skb) {
 		struct sk_buff *skb = pf->ptp_tx_skb;
 
@@ -1900,8 +1907,7 @@ void i40e_ptp_stop(struct i40e_pf *pf)
 	if (pf->ptp_clock) {
 		ptp_clock_unregister(pf->ptp_clock);
 		pf->ptp_clock = NULL;
-		dev_info(&pf->pdev->dev, "removed PHC from %s.\n",
-			 main_vsi->netdev->name);
+		dev_info(&pf->pdev->dev, "removed PHC\n");
 	}
 
 	if (i40e_is_ptp_pin_dev(&pf->hw)) {
@@ -1913,11 +1919,6 @@ void i40e_ptp_stop(struct i40e_pf *pf)
 	regval = rd32(hw, I40E_PRTTSYN_AUX_0(0));
 	regval &= ~I40E_PRTTSYN_AUX_0_PTPFLAG_MASK;
 	wr32(hw, I40E_PRTTSYN_AUX_0(0), regval);
-
-	/* Disable interrupts */
-	regval = rd32(hw, I40E_PRTTSYN_CTL0);
-	regval &= ~I40E_PRTTSYN_CTL0_EVENT_INT_ENA_MASK;
-	wr32(hw, I40E_PRTTSYN_CTL0, regval);
 
 	i40e_ptp_free_pins(pf);
 }
