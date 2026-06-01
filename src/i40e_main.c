@@ -45,7 +45,7 @@ static const char i40e_driver_string[] =
 
 #define DRV_VERSION_MAJOR 2
 #define DRV_VERSION_MINOR 30
-#define DRV_VERSION_BUILD 12
+#define DRV_VERSION_BUILD 18
 #define DRV_VERSION_SUBBUILD 0
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
@@ -621,7 +621,10 @@ static struct rtnl_link_stats64 *i40e_get_netdev_stats_struct(
 			continue;
 
 		i40e_get_netdev_stats_struct_tx(tx_ring, stats);
-		rx_ring = &tx_ring[1];
+
+		rx_ring = READ_ONCE(vsi->rx_rings[i]);
+		if (!rx_ring)
+			continue;
 
 		do {
 			start = u64_stats_fetch_begin(&rx_ring->syncp);
@@ -632,8 +635,14 @@ static struct rtnl_link_stats64 *i40e_get_netdev_stats_struct(
 		stats->rx_packets += packets;
 		stats->rx_bytes   += bytes;
 
-		if (i40e_enabled_xdp_vsi(vsi))
-			i40e_get_netdev_stats_struct_tx(&rx_ring[1], stats);
+		if (i40e_enabled_xdp_vsi(vsi)) {
+			struct i40e_ring *xdp_ring;
+
+			xdp_ring = READ_ONCE(vsi->xdp_rings[i]);
+			if (xdp_ring)
+				i40e_get_netdev_stats_struct_tx(xdp_ring,
+								stats);
+		}
 	}
 	rcu_read_unlock();
 

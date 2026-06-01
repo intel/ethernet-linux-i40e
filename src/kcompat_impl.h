@@ -3153,20 +3153,24 @@ enum netdev_xdp_act {
 typedef u32 xdp_features_t;
 
 static inline void
-xdp_set_features_flag(struct net_device *dev, xdp_features_t val)
-{
-}
-
-static inline void xdp_clear_features_flag(struct net_device *dev)
+xdp_set_features_flag(struct net_device __always_unused *dev,
+		      xdp_features_t __always_unused val)
 {
 }
 
 static inline void
-xdp_features_set_redirect_target(struct net_device *dev, bool support_sg)
+xdp_clear_features_flag(struct net_device __always_unused *dev)
 {
 }
 
-static inline void xdp_features_clear_redirect_target(struct net_device *dev)
+static inline void
+xdp_features_set_redirect_target(struct net_device __always_unused *dev,
+				 bool __always_unused support_sg)
+{
+}
+
+static inline void
+xdp_features_clear_redirect_target(struct net_device __always_unused *dev)
 {
 }
 #endif /* NEED_XDP_FEATURES */

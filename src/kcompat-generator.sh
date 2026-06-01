@@ -2,6 +2,10 @@
 # SPDX-License-Identifier: GPL-2.0-only
 # Copyright (C) 2013-2026 Intel Corporation
 
+# SPDX-License-Identifier: GPL-2.0
+
+
+
 set -Eeuo pipefail
 
 # This file generates HAVE_ and NEED_ defines for current kernel
@@ -351,6 +355,7 @@ function gen-netdevice() {
 	gen HAVE_NDO_FDB_DEL_NOTIFIED if method ndo_fdb_del of net_device_ops matches 'bool \\*notified' in "$ndh"
 	gen HAVE_NDO_GET_DEVLINK_PORT if method ndo_get_devlink_port of net_device_ops in "$ndh"
 	gen HAVE_NDO_GET_TSTAMP if method ndo_get_tstamp of net_device_ops in "$ndh"
+	gen HAVE_NDO_HWTSTAMP if method ndo_hwtstamp_get of net_device_ops in "$ndh"
 	gen HAVE_NDO_SETUP_TC_CHAIN_INDEX if method ndo_setup_tc of net_device_ops matches 'u32 chain_index' in "$ndh"
 	gen HAVE_NDO_SETUP_TC_REMOVE_TC_TO_NETDEV if method '(ndo_setup_tc|ndo_setup_tc_rh)' of '(net_device_ops|netdevice_ops_extended)' matches 'void \\*type_data' in "$ndh"
 	gen HAVE_NDO_UDP_TUNNEL_CALLBACK if method ndo_udp_tunnel_add of net_device_ops in "$ndh"
@@ -472,6 +477,7 @@ function gen-other() {
 	pciaerh='include/linux/aer.h'
 	ush='include/linux/u64_stats_sync.h'
 	fsh='include/linux/fortify-string.h'
+	cah='include/linux/compiler_attributes.h'
 	cth='include/linux/compiler_types.h'
 	ch='include/linux/compiler.h'
 	gen HAVE_X86_STEPPING if struct cpuinfo_x86 matches x86_stepping in arch/x86/include/asm/processor.h
@@ -496,7 +502,7 @@ function gen-other() {
 	fi
 	gen NEED___STRUCT_SIZE if string "${__STRUCT_SIZE_NEEDED}" equals 1
 	gen HAVE_CONFIG_CC_HAS_COUNTED_BY if string "$(config_has CONFIG_CC_HAS_COUNTED_BY && echo 1)" equals 1
-	gen NEED___COUNTED_BY if macro __counted_by absent in "$cth"
+	gen NEED___COUNTED_BY if macro __counted_by absent in "$cth" "$cah"
 	gen HAVE_COMPLETION_RAW_SPINLOCK if struct completion matches 'struct swait_queue_head' in include/linux/completion.h
 	gen NEED_IS_CONSTEXPR if macro __is_constexpr absent in include/linux/const.h include/linux/minmax.h include/linux/kernel.h
 	gen NEED_DEBUGFS_LOOKUP if fun debugfs_lookup absent in include/linux/debugfs.h
