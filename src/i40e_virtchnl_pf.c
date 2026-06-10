@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2025 Intel Corporation */
+/* Copyright (C) 2013-2026 Intel Corporation */
 
 #include "i40e.h"
 
@@ -92,7 +92,7 @@ i40e_set_vf_link_state(struct i40e_vf *vf,
 		link_status = vf->link_up;
 #endif
 
-	if (vf->driver_caps & VIRTCHNL_VF_CAP_ADV_LINK_SPEED) {
+	if (test_bit(VIRTCHNL_VF_CAP_ADV_LINK_SPEED, vf->driver_caps)) {
 		pfe->event_data.link_event_adv.link_speed =
 			link_status ? i40e_vc_link_speed2mbps(ls->link_speed) :
 				0;
@@ -475,8 +475,8 @@ static void i40e_config_irq_link_list(struct i40e_vf *vf, u16 vsi_id,
 	/* if the vf is running in polling mode and using interrupt zero,
 	 * need to disable auto-mask on enabling zero interrupt for VFs.
 	 */
-	if ((vf->driver_caps & VIRTCHNL_VF_OFFLOAD_RX_POLLING) &&
-	    (vector_id == 0)) {
+	if (test_bit(VIRTCHNL_VF_OFFLOAD_RX_POLLING, vf->driver_caps) &&
+	    vector_id == 0) {
 		reg = rd32(hw, I40E_GLINT_CTL);
 		if (!(reg & I40E_GLINT_CTL_DIS_AUTOMASK_VF0_MASK)) {
 			reg |= I40E_GLINT_CTL_DIS_AUTOMASK_VF0_MASK;
@@ -1531,7 +1531,7 @@ static int i40e_alloc_vsi_res(struct i40e_vf *vf, u8 idx)
 	}
 
 	if (!idx) {
-		u64 hena = i40e_pf_get_default_rss_hena(pf);
+		u64 hashcfg = i40e_pf_get_default_rss_hashcfg(pf);
 		bool trunk_conf = false;
 		u8 broadcast[ETH_ALEN];
 		u16 vid;
@@ -1572,8 +1572,9 @@ static int i40e_alloc_vsi_res(struct i40e_vf *vf, u8 idx)
 		i40e_merge_macs(vf, vsi, &pf->mac_list[vf->vf_id], true);
 		i40e_free_macs(&pf->mac_list[vf->vf_id]);
 #endif /* HAVE_NDO_SET_VF_LINK_STATE */
-		wr32(&pf->hw, I40E_VFQF_HENA1(0, vf->vf_id), (u32)hena);
-		wr32(&pf->hw, I40E_VFQF_HENA1(1, vf->vf_id), (u32)(hena >> 32));
+		wr32(&pf->hw, I40E_VFQF_HENA1(0, vf->vf_id), (u32)hashcfg);
+		wr32(&pf->hw, I40E_VFQF_HENA1(1, vf->vf_id),
+		     (u32)(hashcfg >> 32));
 		/* program mac filter only for VF VSI */
 		ret = i40e_sync_vsi_filters(vsi);
 		if (ret)
@@ -2959,52 +2960,58 @@ static int i40e_vc_get_vf_resources_msg(struct i40e_vf *vf, u8 *msg)
 		len = 0;
 		goto err;
 	}
-	if (VF_IS_V11(&vf->vf_ver))
-		vf->driver_caps = *(u32 *)msg;
-	else
-		vf->driver_caps = VIRTCHNL_VF_OFFLOAD_L2 |
-				  VIRTCHNL_VF_OFFLOAD_RSS_REG |
-				  VIRTCHNL_VF_OFFLOAD_VLAN;
 
-	vfres->vf_cap_flags = VIRTCHNL_VF_OFFLOAD_L2;
-#ifdef VIRTCHNL_VF_CAP_ADV_LINK_SPEED
-	vfres->vf_cap_flags |= VIRTCHNL_VF_CAP_ADV_LINK_SPEED;
-#endif /* VIRTCHNL_VF_CAP_ADV_LINK_SPEED */
+	bitmap_zero(vf->driver_caps, VIRTCHNL_VF_CAPS_MAX);
+	if (VF_IS_V11(&vf->vf_ver)) {
+		/* VIRTCHNL_OP_GET_VF_RESOURCES only sends the first 32 flags.
+		 * If VIRTCHNL_VF_CAPS2 (bit 2) is set, then there are more
+		 * flags. A complete set (including the first 32) is then sent
+		 * via VIRTCHNL_OP_GET_VF_CAPS2.
+		 */
+		bitmap_from_arr32(vf->driver_caps, (u32 *)msg,
+				  BITS_PER_TYPE(u32));
+	} else {
+		__set_bit(VIRTCHNL_VF_OFFLOAD_L2, vf->driver_caps);
+		__set_bit(VIRTCHNL_VF_OFFLOAD_RSS_REG, vf->driver_caps);
+		__set_bit(VIRTCHNL_VF_OFFLOAD_VLAN, vf->driver_caps);
+	}
+
+	vfres->vf_cap_flags = BIT(VIRTCHNL_VF_OFFLOAD_L2);
+	vfres->vf_cap_flags |= BIT(VIRTCHNL_VF_CAP_ADV_LINK_SPEED);
 
 	vsi = pf->vsi[vf->lan_vsi_idx];
 
-	if (vf->driver_caps & VIRTCHNL_VF_OFFLOAD_VLAN_V2) {
+	if (test_bit(VIRTCHNL_VF_OFFLOAD_VLAN_V2, vf->driver_caps)) {
 		if (i40e_is_double_vlan(&pf->hw))
-			vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_VLAN_V2;
+			vfres->vf_cap_flags |= BIT(VIRTCHNL_VF_OFFLOAD_VLAN_V2);
 		else
-			vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_VLAN;
-	} else if (vf->driver_caps & VIRTCHNL_VF_OFFLOAD_VLAN) {
-		vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_VLAN;
+			vfres->vf_cap_flags |= BIT(VIRTCHNL_VF_OFFLOAD_VLAN);
+	} else if (test_bit(VIRTCHNL_VF_OFFLOAD_VLAN, vf->driver_caps)) {
+		vfres->vf_cap_flags |= BIT(VIRTCHNL_VF_OFFLOAD_VLAN);
 	}
 
-	if (vf->driver_caps & VIRTCHNL_VF_OFFLOAD_RSS_PF) {
-		vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_RSS_PF;
+	if (test_bit(VIRTCHNL_VF_OFFLOAD_RSS_PF, vf->driver_caps)) {
+		vfres->vf_cap_flags |= BIT(VIRTCHNL_VF_OFFLOAD_RSS_PF);
 	} else {
 		if ((pf->hw_features & I40E_HW_RSS_AQ_CAPABLE) &&
-		    (vf->driver_caps & VIRTCHNL_VF_OFFLOAD_RSS_AQ))
-			vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_RSS_AQ;
+		    test_bit(VIRTCHNL_VF_OFFLOAD_RSS_AQ, vf->driver_caps))
+			vfres->vf_cap_flags |= BIT(VIRTCHNL_VF_OFFLOAD_RSS_AQ);
 		else
-			vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_RSS_REG;
-	}
-	if (pf->hw_features & I40E_HW_MULTIPLE_TCP_UDP_RSS_PCTYPE) {
-		if (vf->driver_caps & VIRTCHNL_VF_OFFLOAD_RSS_PCTYPE_V2)
-			vfres->vf_cap_flags |=
-				VIRTCHNL_VF_OFFLOAD_RSS_PCTYPE_V2;
+			vfres->vf_cap_flags |= BIT(VIRTCHNL_VF_OFFLOAD_RSS_REG);
 	}
 
-	if (vf->driver_caps & VIRTCHNL_VF_OFFLOAD_ENCAP)
-		vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_ENCAP;
+	if ((pf->hw_features & I40E_HW_MULTIPLE_TCP_UDP_RSS_PCTYPE) &&
+	    test_bit(VIRTCHNL_VF_OFFLOAD_RSS_PCTYPE_V2, vf->driver_caps))
+		vfres->vf_cap_flags |= BIT(VIRTCHNL_VF_OFFLOAD_RSS_PCTYPE_V2);
+
+	if (test_bit(VIRTCHNL_VF_OFFLOAD_ENCAP, vf->driver_caps))
+		vfres->vf_cap_flags |= BIT(VIRTCHNL_VF_OFFLOAD_ENCAP);
 
 	if ((pf->hw_features & I40E_HW_OUTER_UDP_CSUM_CAPABLE) &&
-	    (vf->driver_caps & VIRTCHNL_VF_OFFLOAD_ENCAP_CSUM))
-		vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_ENCAP_CSUM;
+	    test_bit(VIRTCHNL_VF_OFFLOAD_ENCAP_CSUM, vf->driver_caps))
+		vfres->vf_cap_flags |= BIT(VIRTCHNL_VF_OFFLOAD_ENCAP_CSUM);
 
-	if (vf->driver_caps & VIRTCHNL_VF_OFFLOAD_RX_POLLING) {
+	if (test_bit(VIRTCHNL_VF_OFFLOAD_RX_POLLING, vf->driver_caps)) {
 		if (pf->flags & I40E_FLAG_MFP_ENABLED) {
 			dev_err(&pf->pdev->dev,
 				"VF %d requested polling mode: this feature is supported only when the device is running in single function per port (SFP) mode\n",
@@ -3012,25 +3019,27 @@ static int i40e_vc_get_vf_resources_msg(struct i40e_vf *vf, u8 *msg)
 			aq_ret = I40E_ERR_PARAM;
 			goto err;
 		}
-		vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_RX_POLLING;
+		vfres->vf_cap_flags |= BIT(VIRTCHNL_VF_OFFLOAD_RX_POLLING);
 	}
 
-	if (pf->hw_features & I40E_HW_WB_ON_ITR_CAPABLE) {
-		if (vf->driver_caps & VIRTCHNL_VF_OFFLOAD_WB_ON_ITR)
-			vfres->vf_cap_flags |=
-					VIRTCHNL_VF_OFFLOAD_WB_ON_ITR;
-	}
+	if ((pf->hw_features & I40E_HW_WB_ON_ITR_CAPABLE) &&
+	    test_bit(VIRTCHNL_VF_OFFLOAD_WB_ON_ITR, vf->driver_caps))
+		vfres->vf_cap_flags |= BIT(VIRTCHNL_VF_OFFLOAD_WB_ON_ITR);
 
-	if (vf->driver_caps & VIRTCHNL_VF_OFFLOAD_REQ_QUEUES)
-		vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_REQ_QUEUES;
+	if (test_bit(VIRTCHNL_VF_OFFLOAD_REQ_QUEUES, vf->driver_caps))
+		vfres->vf_cap_flags |= BIT(VIRTCHNL_VF_OFFLOAD_REQ_QUEUES);
 
 #ifdef __TC_MQPRIO_MODE_MAX
-	if (vf->driver_caps & VIRTCHNL_VF_OFFLOAD_ADQ)
-		vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_ADQ;
+	if (test_bit(VIRTCHNL_VF_OFFLOAD_ADQ, vf->driver_caps))
+		vfres->vf_cap_flags |= BIT(VIRTCHNL_VF_OFFLOAD_ADQ);
 #endif /* __TC_MQPRIO_MODE_MAX */
 
-	if (vf->driver_caps & VIRTCHNL_VF_OFFLOAD_USO)
-		vfres->vf_cap_flags |= VIRTCHNL_VF_OFFLOAD_USO;
+	if (test_bit(VIRTCHNL_VF_OFFLOAD_USO, vf->driver_caps))
+		vfres->vf_cap_flags |= BIT(VIRTCHNL_VF_OFFLOAD_USO);
+
+	/* Indicate that VF can send more flags in VIRTCHNL_OP_GET_VF_CAPS2 */
+	if (test_bit(VIRTCHNL_VF_CAPS2, vf->driver_caps))
+		vfres->vf_cap_flags |= BIT(VIRTCHNL_VF_CAPS2);
 
 	vfres->num_vsis = num_vsis;
 	vfres->num_queue_pairs = vf->num_queue_pairs;
@@ -3045,7 +3054,7 @@ static int i40e_vc_get_vf_resources_msg(struct i40e_vf *vf, u8 *msg)
 		/* VFs only use TC 0 */
 		vfres->vsi_res[0].qset_handle
 					  = LE16_TO_CPU(vsi->info.qs_handle[0]);
-		if (!(vf->driver_caps & VIRTCHNL_VF_OFFLOAD_USO ||
+		if (!(test_bit(VIRTCHNL_VF_OFFLOAD_USO, vf->driver_caps) ||
 		      vf->pf_set_mac)) {
 			spin_lock_bh(&vsi->mac_filter_hash_lock);
 			i40e_del_mac_filter(vsi, vf->default_lan_addr.addr);
@@ -4529,15 +4538,15 @@ err:
 }
 
 /**
- * i40e_vc_get_rss_hena
+ * i40e_vc_get_rss_hashcfg
  * @vf: pointer to the VF info
  * @msg: pointer to the msg buffer
  *
- * Return the RSS HENA bits allowed by the hardware
+ * Return the RSS Hash configuration bits allowed by the hardware
  **/
-static int i40e_vc_get_rss_hena(struct i40e_vf *vf, u8 *msg)
+static int i40e_vc_get_rss_hashcfg(struct i40e_vf *vf, u8 *msg)
 {
-	struct virtchnl_rss_hena *vrh = NULL;
+	struct virtchnl_rss_hashcfg *vrh = NULL;
 	i40e_status aq_ret = I40E_SUCCESS;
 	struct i40e_pf *pf = vf->pf;
 	int len = 0;
@@ -4546,35 +4555,35 @@ static int i40e_vc_get_rss_hena(struct i40e_vf *vf, u8 *msg)
 		aq_ret = I40E_ERR_PARAM;
 		goto err;
 	}
-	len = sizeof(struct virtchnl_rss_hena);
+	len = sizeof(struct virtchnl_rss_hashcfg);
 
-	vrh = (struct virtchnl_rss_hena *)kzalloc(len, GFP_KERNEL);
+	vrh = kzalloc(len, GFP_KERNEL);
 	if (!vrh) {
 		aq_ret = I40E_ERR_NO_MEMORY;
 		len = 0;
 		goto err;
 	}
-	vrh->hena = i40e_pf_get_default_rss_hena(pf);
+	vrh->hashcfg = i40e_pf_get_default_rss_hashcfg(pf);
 err:
 	/* send the response back to the VF */
 	aq_ret = 
-		i40e_vc_send_msg_to_vf(vf, VIRTCHNL_OP_GET_RSS_HENA_CAPS,
+		i40e_vc_send_msg_to_vf(vf, VIRTCHNL_OP_GET_RSS_HASHCFG_CAPS,
 				       aq_ret, (u8 *)vrh, len);
 	kfree(vrh);
 	return aq_ret;
 }
 
 /**
- * i40e_vc_set_rss_hena
+ * i40e_vc_set_rss_hashcfg
  * @vf: pointer to the VF info
  * @msg: pointer to the msg buffer
  *
- * Set the RSS HENA bits for the VF
+ * Set the RSS Hash configuration bits for the VF
  **/
-static int i40e_vc_set_rss_hena(struct i40e_vf *vf, u8 *msg)
+static int i40e_vc_set_rss_hashcfg(struct i40e_vf *vf, u8 *msg)
 {
-	struct virtchnl_rss_hena *vrh =
-		(struct virtchnl_rss_hena *)msg;
+	struct virtchnl_rss_hashcfg *vrh =
+		(struct virtchnl_rss_hashcfg *)msg;
 	i40e_status aq_ret = I40E_SUCCESS;
 	struct i40e_pf *pf = vf->pf;
 	struct i40e_hw *hw = &pf->hw;
@@ -4583,13 +4592,14 @@ static int i40e_vc_set_rss_hena(struct i40e_vf *vf, u8 *msg)
 		aq_ret = I40E_ERR_PARAM;
 		goto err;
 	}
-	i40e_write_rx_ctl(hw, I40E_VFQF_HENA1(0, vf->vf_id), (u32)vrh->hena);
+	i40e_write_rx_ctl(hw, I40E_VFQF_HENA1(0, vf->vf_id),
+			  (u32)vrh->hashcfg);
 	i40e_write_rx_ctl(hw, I40E_VFQF_HENA1(1, vf->vf_id),
-			  (u32)(vrh->hena >> 32));
+			  (u32)(vrh->hashcfg >> 32));
 
 	/* send the response to the VF */
 err:
-	return i40e_vc_send_resp_to_vf(vf, VIRTCHNL_OP_SET_RSS_HENA, aq_ret);
+	return i40e_vc_send_resp_to_vf(vf, VIRTCHNL_OP_SET_RSS_HASHCFG, aq_ret);
 }
 
 /**
@@ -5188,7 +5198,7 @@ static int i40e_vc_add_qch_msg(struct i40e_vf *vf, u8 *msg)
 		goto err;
 	}
 
-	if (!(vf->driver_caps & VIRTCHNL_VF_OFFLOAD_ADQ)) {
+	if (!test_bit(VIRTCHNL_VF_OFFLOAD_ADQ, vf->driver_caps)) {
 		dev_err(&pf->pdev->dev,
 			"VF %d attempting to enable ADq, but hasn't properly negotiated that capability\n",
 			vf->vf_id);
@@ -5325,6 +5335,80 @@ err:
 }
 
 #endif /* __TC_MQPRIO_MODE_MAX */
+
+/**
+ * i40e_vc_get_vf_caps2 - parse extended capability flags
+ * @vf: pointer to the VF info
+ * @msg: pointer to the msg buffer
+ *
+ * Called from the VF to negotiate extended capability flag set if
+ * VIRTCHNL_VF_CAPS2 was set in vf_cap_flags. The PF responds with the
+ * intersection of its supported flags and the VF's requested flags.
+ *
+ * Return: 0 on success, negative on failure
+ **/
+static int i40e_vc_get_vf_caps2(struct i40e_vf *vf, u8 *msg)
+{
+	struct virtchnl_vf_caps2 *vf_msg = (struct virtchnl_vf_caps2 *)msg;
+	DECLARE_BITMAP(msg_caps, VIRTCHNL_VF_CAPS_MAX);
+	struct virtchnl_vf_caps2 *caps2;
+	unsigned int nbits;
+	int aq_ret = 0;
+	int err;
+
+	caps2 = 
+			kzalloc(struct_size(caps2, vf_cap_flags,
+				BITS_TO_U32(VIRTCHNL_VF_CAPS_MAX)),
+				GFP_KERNEL);
+	if (!caps2)
+		return -ENOMEM;
+
+	if (!test_bit(I40E_VF_STATE_ACTIVE, &vf->vf_states)) {
+		aq_ret = -EINVAL;
+		goto send_msg;
+	}
+
+	if (!test_bit(VIRTCHNL_VF_CAPS2, vf->driver_caps)) {
+		aq_ret = -EINVAL;
+		goto send_msg;
+	}
+
+	caps2->flags_len = BITS_TO_U32(VIRTCHNL_VF_CAPS_MAX);
+
+	/* Set extended feature flags. The first 32 bits should be already set
+	 * in VIRTCHNL_OP_GET_VF_RESOURCES
+	 */
+
+	/* Make sure to not read after msg bitmap or local bitmap. The remaining
+	 * bits (if any) should be unset, since one side doesn't know about
+	 * them, therefore cannot support these capabilities.
+	 */
+	nbits = min_t(unsigned int, VIRTCHNL_VF_CAPS_MAX,
+		      BITS_PER_TYPE(u32) * vf_msg->flags_len);
+	bitmap_zero(msg_caps, VIRTCHNL_VF_CAPS_MAX);
+	bitmap_from_arr32(msg_caps, vf_msg->vf_cap_flags, nbits);
+
+	/* Note that msg->vf_cap_flags cannot be directly used, because then
+	 * we'd need to limit the operation range to nbits. If the local caps
+	 * is larger and has some flags set after nbits, then they would be
+	 * incorrectly left set.
+	 */
+	bitmap_and(vf->driver_caps, vf->driver_caps, msg_caps,
+		   VIRTCHNL_VF_CAPS_MAX);
+
+	bitmap_to_arr32(caps2->vf_cap_flags, vf->driver_caps,
+			VIRTCHNL_VF_CAPS_MAX);
+
+send_msg:
+	err = i40e_vc_send_msg_to_vf(vf, VIRTCHNL_OP_GET_VF_CAPS2, aq_ret,
+				     (u8 *)caps2,
+				     struct_size(caps2, vf_cap_flags,
+						 caps2->flags_len));
+
+	kfree(caps2);
+
+	return err;
+}
 
 /**
  * i40e_vc_set_dvm_caps - set VLAN capabilities when the device is in DVM
@@ -5853,11 +5937,11 @@ int i40e_vc_process_vf_msg(struct i40e_pf *pf, s16 vf_id, u32 v_opcode,
 	case VIRTCHNL_OP_CONFIG_RSS_LUT:
 		ret = i40e_vc_config_rss_lut(vf, msg);
 		break;
-	case VIRTCHNL_OP_GET_RSS_HENA_CAPS:
-		ret = i40e_vc_get_rss_hena(vf, msg);
+	case VIRTCHNL_OP_GET_RSS_HASHCFG_CAPS:
+		ret = i40e_vc_get_rss_hashcfg(vf, msg);
 		break;
-	case VIRTCHNL_OP_SET_RSS_HENA:
-		ret = i40e_vc_set_rss_hena(vf, msg);
+	case VIRTCHNL_OP_SET_RSS_HASHCFG:
+		ret = i40e_vc_set_rss_hashcfg(vf, msg);
 		break;
 	case VIRTCHNL_OP_ENABLE_VLAN_STRIPPING:
 		ret = i40e_vc_enable_vlan_stripping(vf, msg);
@@ -5906,6 +5990,9 @@ int i40e_vc_process_vf_msg(struct i40e_pf *pf, s16 vf_id, u32 v_opcode,
 	case VIRTCHNL_OP_DISABLE_VLAN_INSERTION_V2:
 		ret = i40e_vc_chng_vlan_insertion_v2_msg
 			(vf, msg, VIRTCHNL_OP_DISABLE_VLAN_INSERTION_V2);
+		break;
+	case VIRTCHNL_OP_GET_VF_CAPS2:
+		ret = i40e_vc_get_vf_caps2(vf, msg);
 		break;
 	case VIRTCHNL_OP_UNKNOWN:
 	default:
@@ -6473,6 +6560,7 @@ int i40e_ndo_set_vf_link_state(struct net_device *netdev, int vf_id, int link)
 	unsigned long q_map;
 	struct i40e_vf *vf;
 	int abs_vf_id;
+	int old_link;
 	int ret = 0;
 	int tmp;
 
@@ -6490,6 +6578,17 @@ int i40e_ndo_set_vf_link_state(struct net_device *netdev, int vf_id, int link)
 
 	vf = &pf->vf[vf_id];
 	abs_vf_id = vf->vf_id + hw->func_caps.vf_base_id;
+
+	/* skip VF link state change if requested state is already set */
+	if (!vf->link_forced)
+		old_link = IFLA_VF_LINK_STATE_AUTO;
+	else if (vf->link_up)
+		old_link = IFLA_VF_LINK_STATE_ENABLE;
+	else
+		old_link = IFLA_VF_LINK_STATE_DISABLE;
+
+	if (link == old_link)
+		goto error_out;
 
 	pfe.event = VIRTCHNL_EVENT_LINK_CHANGE;
 	pfe.severity = PF_EVENT_SEVERITY_INFO;

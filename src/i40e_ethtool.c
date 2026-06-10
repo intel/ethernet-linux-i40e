@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2025 Intel Corporation */
+/* Copyright (C) 2013-2026 Intel Corporation */
 
 /* ethtool support for i40e */
 
@@ -835,6 +835,26 @@ static void i40e_get_settings_link_up(struct i40e_hw *hw,
 		if (hw_link_info->requested_speeds & I40E_LINK_SPEED_10GB)
 			ethtool_link_ksettings_add_link_mode(ks, advertising,
 							     10000baseT_Full);
+		/* Some SFP+Cu modules support multi-rate (1G/10G).
+		 * Expose 1G modes if FW reports 1G in link_speed ability,
+		 * so ethtool shows the full capability instead of only 10G.
+		 */
+		if (hw_link_info->phy_type == I40E_PHY_TYPE_10GBASE_SFPP_CU &&
+		    (pf->hw.phy.link_info.link_speed & I40E_LINK_SPEED_1GB)) {
+#ifdef HAVE_ETHTOOL_NEW_10G_BITS
+			ethtool_link_ksettings_add_link_mode(ks, supported,
+							     1000baseX_Full);
+			if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
+				ethtool_link_ksettings_add_link_mode(ks, advertising,
+								     1000baseX_Full);
+#else
+			ethtool_link_ksettings_add_link_mode(ks, supported,
+							     1000baseT_Full);
+			if (hw_link_info->requested_speeds & I40E_LINK_SPEED_1GB)
+				ethtool_link_ksettings_add_link_mode(ks, advertising,
+								     1000baseT_Full);
+#endif /* HAVE_ETHTOOL_NEW_10G_BITS */
+		}
 #ifdef HAVE_ETHTOOL_25G_BITS
 		if (i40e_is_25G_device(hw->device_id)) {
 			ethtool_link_ksettings_add_link_mode(ks, supported,
@@ -3571,10 +3591,11 @@ static int i40e_get_per_queue_coalesce(struct net_device *netdev, u32 queue,
  * @queue: the queue to modify
  *
  * Change the ITR settings for a specific queue.
+ * Return 0 on success, negative on failure.
  **/
-static void i40e_set_itr_per_queue(struct i40e_vsi *vsi,
-				   struct ethtool_coalesce *ec,
-				   int queue)
+static int i40e_set_itr_per_queue(struct i40e_vsi *vsi,
+				  struct ethtool_coalesce *ec,
+				  int queue)
 {
 	struct i40e_ring *rx_ring = vsi->rx_rings[queue];
 	struct i40e_ring *tx_ring = vsi->tx_rings[queue];
@@ -3599,9 +3620,13 @@ static void i40e_set_itr_per_queue(struct i40e_vsi *vsi,
 		tx_ring->itr_setting &= ~I40E_ITR_DYNAMIC;
 
 	q_vector = rx_ring->q_vector;
+	if (!q_vector)
+		return -EINVAL;
 	q_vector->rx.target_itr = ITR_TO_REG(rx_ring->itr_setting);
 
 	q_vector = tx_ring->q_vector;
+	if (!q_vector)
+		return -EINVAL;
 	q_vector->tx.target_itr = ITR_TO_REG(tx_ring->itr_setting);
 
 	/* The interrupt handler itself will take care of programming
@@ -3611,6 +3636,8 @@ static void i40e_set_itr_per_queue(struct i40e_vsi *vsi,
 
 	wr32(hw, I40E_PFINT_RATEN(q_vector->reg_idx), intrl);
 	i40e_flush(hw);
+
+	return 0;
 }
 
 /**
@@ -3749,10 +3776,17 @@ static int __i40e_set_coalesce(struct net_device *netdev,
 	 * queue, apply to all queues.
 	 */
 	if (queue < 0) {
-		for (i = 0; i < vsi->num_queue_pairs; i++)
-			i40e_set_itr_per_queue(vsi, ec, i);
+		for (i = 0; i < vsi->num_queue_pairs; i++) {
+			int ret = i40e_set_itr_per_queue(vsi, ec, i);
+
+			if (ret)
+				return ret;
+		}
 	} else {
-		i40e_set_itr_per_queue(vsi, ec, queue);
+		int ret = i40e_set_itr_per_queue(vsi, ec, queue);
+
+		if (ret)
+			return ret;
 	}
 
 	return 0;

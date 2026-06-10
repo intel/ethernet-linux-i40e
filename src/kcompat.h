@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2025 Intel Corporation */
+/* Copyright (C) 2013-2026 Intel Corporation */
 
 #ifndef _KCOMPAT_H_
 #define _KCOMPAT_H_
@@ -58,7 +58,7 @@
 /* any of the features that need to alter module_init */
 #if !defined(HAVE_XARRAY_API)
 
-static int __init kc_module_init_impl(void)
+static inline int __init kc_module_init_impl(void)
 {
 #ifdef HAVE_XARRAY_API
 #else

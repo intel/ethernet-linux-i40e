@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2025 Intel Corporation */
+/* Copyright (C) 2013-2026 Intel Corporation */
 
 /* this lets the macros that return timespec64 or structs compile cleanly with
  * W=2
@@ -677,13 +677,24 @@ static int i40e_ptp_feature_enable(struct ptp_clock_info *ptp,
 	enum ptp_pin_function func;
 	unsigned int chan;
 
-	/* TODO: Implement flags handling for EXTTS and PEROUT */
 	switch (rq->type) {
 	case PTP_CLK_REQ_EXTTS:
+#ifndef HAVE_PTP_SUPPORTED_EXTTS_FLAGS
+	if (rq->extts.flags & ~(PTP_ENABLE_FEATURE |
+				PTP_RISING_EDGE |
+				PTP_FALLING_EDGE |
+				PTP_STRICT_FLAGS))
+		return -EOPNOTSUPP;
+#endif /* !HAVE_PTP_SUPPORTED_EXTTS_FLAGS */
 		func = PTP_PF_EXTTS;
 		chan = rq->extts.index;
 		break;
 	case PTP_CLK_REQ_PEROUT:
+#ifndef HAVE_PTP_SUPPORTED_PEROUT_FLAGS
+	/* Reject requests with flags - none are supported */
+	if (rq->perout.flags)
+		return -EOPNOTSUPP;
+#endif /* !HAVE_PTP_SUPPORTED_PEROUT_FLAGS */
 		func = PTP_PF_PEROUT;
 		chan = rq->perout.index;
 		break;
@@ -1531,7 +1542,11 @@ static int i40e_init_pin_config(struct i40e_pf *pf)
 	pf->ptp_caps.n_ext_ts = 2;
 	pf->ptp_caps.pps = 1;
 	pf->ptp_caps.n_per_out = 2;
-
+#ifdef HAVE_PTP_SUPPORTED_EXTTS_FLAGS
+	pf->ptp_caps.supported_extts_flags = PTP_RISING_EDGE |
+					     PTP_FALLING_EDGE |
+					     PTP_STRICT_FLAGS;
+#endif
 	pf->ptp_caps.pin_config = kcalloc(pf->ptp_caps.n_pins,
 					  sizeof(*pf->ptp_caps.pin_config),
 					  GFP_KERNEL);

@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-2.0-only */
-/* Copyright (C) 2013-2025 Intel Corporation */
+/* Copyright (C) 2013-2026 Intel Corporation */
 
 #include "i40e.h"
 #include <linux/prefetch.h>
@@ -942,7 +942,7 @@ void i40e_detect_recover_hung(struct i40e_pf *pf)
 
 	for (i = 0; i < vsi->num_queue_pairs; i++) {
 		tx_ring = vsi->tx_rings[i];
-		if (tx_ring && tx_ring->desc) {
+		if (tx_ring && tx_ring->desc && tx_ring->q_vector) {
 			/* If packet counter has not changed the queue is
 			 * likely stalled, so force an interrupt for this
 			 * queue.
@@ -1571,12 +1571,19 @@ struct i40e_rx_buffer *i40e_clean_programming_status
  **/
 int i40e_setup_tx_descriptors(struct i40e_ring *tx_ring)
 {
-	struct device *dev = tx_ring->dev;
+	struct device *dev;
 	int bi_size;
 
-	if (!dev)
-		return -ENOMEM;
+	if (!tx_ring) {
+		pr_err("i40e: Invalid tx_ring pointer\n");
+		return -EINVAL;
+	}
+	if (!tx_ring->dev) {
+		pr_err("i40e: Invalid device pointer in tx_ring\n");
+		return -EINVAL;
+	}
 
+	dev = tx_ring->dev;
 	/* warn if we are about to overwrite the pointer */
 	WARN_ON(tx_ring->tx_bi);
 	bi_size = sizeof(struct i40e_tx_buffer) * tx_ring->count;
@@ -1749,7 +1756,12 @@ void i40e_free_rx_resources(struct i40e_ring *rx_ring)
 {
 	i40e_clean_rx_ring(rx_ring);
 #ifdef HAVE_XDP_BUFF_RXQ
-	if (rx_ring->vsi->type == I40E_VSI_MAIN)
+	/* Only unregister XDP if it was actually registered.
+	 * During TC reconfiguration, rings may be allocated without q_vectors,
+	 * so XDP registration may have been skipped in i40e_setup_rx_descriptors().
+	 */
+	if (rx_ring->vsi->type == I40E_VSI_MAIN &&
+	    xdp_rxq_info_is_reg(&rx_ring->xdp_rxq))
 		xdp_rxq_info_unreg(&rx_ring->xdp_rxq);
 #endif
 	rx_ring->xdp_prog = NULL;
@@ -1771,11 +1783,25 @@ void i40e_free_rx_resources(struct i40e_ring *rx_ring)
  **/
 int i40e_setup_rx_descriptors(struct i40e_ring *rx_ring)
 {
-	struct device *dev = rx_ring->dev;
+	struct device *dev;
 #ifndef HAVE_MEM_TYPE_XSK_BUFF_POOL
 	int err = -ENOMEM;
 	int bi_size;
+#else
+	int err;
+#endif
 
+	if (!rx_ring) {
+		pr_err("i40e: Invalid rx_ring pointer\n");
+		return -EINVAL;
+	}
+	if (!rx_ring->dev) {
+		pr_err("i40e: Invalid device pointer in rx_ring\n");
+		return -EINVAL;
+	}
+
+	dev = rx_ring->dev;
+#ifndef HAVE_MEM_TYPE_XSK_BUFF_POOL
 	/* warn if we are about to overwrite the pointer */
 	WARN_ON(rx_ring->rx_bi);
 	bi_size = sizeof(struct i40e_rx_buffer) * rx_ring->count;
@@ -1783,10 +1809,8 @@ int i40e_setup_rx_descriptors(struct i40e_ring *rx_ring)
 	if (!rx_ring->rx_bi)
 		goto err;
 #else 
-	int err;
 #endif /* HAVE_MEM_TUPE_XSK_BUFF_POOL */
 #ifdef HAVE_NDO_GET_STATS64
-
 	u64_stats_init(&rx_ring->syncp);
 #endif /* HAVE_NDO_GET_STATS64 */
 
@@ -1811,7 +1835,7 @@ int i40e_setup_rx_descriptors(struct i40e_ring *rx_ring)
 	rx_ring->next_to_use = 0;
 #ifdef HAVE_XDP_BUFF_RXQ
 	/* XDP RX-queue info only needed for RX rings exposed to XDP */
-	if (rx_ring->vsi->type == I40E_VSI_MAIN) {
+	if (rx_ring->vsi->type == I40E_VSI_MAIN && rx_ring->q_vector) {
 		err = xdp_rxq_info_reg(&rx_ring->xdp_rxq, rx_ring->netdev,
 				       rx_ring->queue_index, rx_ring->q_vector->napi.napi_id);
 		if (err < 0)
