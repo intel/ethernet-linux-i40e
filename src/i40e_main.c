@@ -18035,6 +18035,7 @@ static int i40e_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 		pf->hw_features |= I40E_HW_PORT_ID_VALID;
 #ifdef HAVE_PTP_1588_CLOCK
 	i40e_ptp_alloc_pins(pf);
+	INIT_WORK(&pf->ptp_extts0_work, i40e_ptp_extts0_work);
 #endif /* HAVE_PTP_1588_CLOCK */
 
 #ifdef HAVE_PCI_ERS
@@ -18478,13 +18479,6 @@ static void i40e_remove(struct pci_dev *pdev)
 	int i;
 
 	i40e_dbg_pf_exit(pf);
-#ifdef HAVE_PTP_1588_CLOCK
-	i40e_ptp_stop(pf);
-
-	/* Disable RSS in hw */
-	i40e_write_rx_ctl(hw, I40E_PFQF_HENA(0), 0);
-	i40e_write_rx_ctl(hw, I40E_PFQF_HENA(1), 0);
-#endif /* HAVE_PTP_1588_CLOCK */
 
 	/* Grab __I40E_RESET_RECOVERY_PENDING and set __I40E_IN_REMOVE
 	 * flags, once they are set, i40e_rebuild should not be called as
@@ -18555,6 +18549,14 @@ static void i40e_remove(struct pci_dev *pdev)
 			i40e_vsi_release(pf->vsi[i]);
 			pf->vsi[i] = NULL;
 		}
+
+#ifdef HAVE_PTP_1588_CLOCK
+	i40e_ptp_stop(pf);
+
+	/* Disable RSS in hw */
+	i40e_write_rx_ctl(hw, I40E_PFQF_HENA(0), 0);
+	i40e_write_rx_ctl(hw, I40E_PFQF_HENA(1), 0);
+#endif /* HAVE_PTP_1588_CLOCK */
 
 	i40e_cloud_filter_exit(pf);
 
