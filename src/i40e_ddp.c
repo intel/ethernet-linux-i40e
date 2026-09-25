@@ -440,7 +440,7 @@ int i40e_ddp_flash(struct net_device *netdev, struct ethtool_flash *flash)
 		char profile_name[I40E_DDP_PROFILE_NAME_MAX];
 
 		profile_name[sizeof(profile_name) - 1] = 0;
-		strncpy(profile_name, I40E_DDP_PROFILE_PATH,
+		strscpy(profile_name, I40E_DDP_PROFILE_PATH,
 			sizeof(profile_name) - 1);
 		strncat(profile_name, flash->data, ETHTOOL_FLASH_MAX_FILENAME);
 		/* Load DDP recipe. */

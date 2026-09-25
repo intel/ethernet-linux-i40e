@@ -45,7 +45,7 @@ static const char i40e_driver_string[] =
 
 #define DRV_VERSION_MAJOR 2
 #define DRV_VERSION_MINOR 30
-#define DRV_VERSION_BUILD 18
+#define DRV_VERSION_BUILD 83
 #define DRV_VERSION_SUBBUILD 0
 #define DRV_VERSION __stringify(DRV_VERSION_MAJOR) "." \
 	__stringify(DRV_VERSION_MINOR) "." \
@@ -4767,10 +4767,13 @@ static void i40e_cloud_filter_restore(struct i40e_pf *pf)
 	hlist_for_each_entry_safe(filter, node,
 				  &pf->cloud_filter_list, cloud_node) {
 		if (filter->flags & I40E_CLOUD_FIELD_OIP1 ||
-		    filter->flags & I40E_CLOUD_FIELD_OIP2)
+		    filter->flags & I40E_CLOUD_FIELD_OIP2) {
 			i40e_add_del_custom_cloud_filter(vsi, filter, true);
-		else
+		} else {
+			set_bit(__I40E_CLOUD_FILTER_RESTORING, pf->state);
 			i40e_add_del_cloud_filter_ex(pf, filter, true);
+			clear_bit(__I40E_CLOUD_FILTER_RESTORING, pf->state);
+		}
 	}
 }
 /**
@@ -4835,6 +4838,7 @@ int i40e_add_del_cloud_filter_ex(struct i40e_pf *pf,
 				 bool add)
 {
 	struct i40e_aqc_cloud_filters_element_bb cld_filter;
+	enum i40e_admin_queue_err aq_status = I40E_AQ_RC_OK;
 	int ret;
 
 	/* Make sure port is specified, otherwise bail out, for channel
@@ -4861,19 +4865,30 @@ int i40e_add_del_cloud_filter_ex(struct i40e_pf *pf,
 	be16_to_cpu(filter->dst_port);
 
 	if (add)
-		ret = i40e_aq_add_cloud_filters_bb(&pf->hw,
-						   filter->seid,
-						   &cld_filter, 1);
+		ret = i40e_aq_add_cloud_filters_bb_v2(&pf->hw,
+						      filter->seid,
+						      &cld_filter, 1,
+						      &aq_status);
 	else
-		ret = i40e_aq_rem_cloud_filters_bb(&pf->hw,
-						   filter->seid,
-						   &cld_filter, 1);
+		ret = i40e_aq_rem_cloud_filters_bb_v2(&pf->hw,
+						      filter->seid,
+						      &cld_filter, 1,
+						      &aq_status);
 
-	if (ret)
-		dev_err(&pf->pdev->dev,
-			"fail to %s cloud filter err %d aq_err %d\n",
-			add ? "add" : "delete",
-			ret, pf->hw.aq.asq_last_status);
+	if (ret) {
+		if (add && test_bit(__I40E_CLOUD_FILTER_RESTORING, pf->state) &&
+		    aq_status == I40E_AQ_RC_EEXIST) {
+			dev_dbg(&pf->pdev->dev,
+				"cloud filter re-add returned EEXIST during restore, treating as refresh (VSI %d, L4 port %d)\n",
+				filter->seid, be16_to_cpu(filter->dst_port));
+			ret = 0;
+		} else {
+			dev_err(&pf->pdev->dev,
+				"fail to %s cloud filter err %d aq_err %d\n",
+				add ? "add" : "delete",
+				ret, aq_status);
+		}
+	}
 
 	dev_info(&pf->pdev->dev,
 		 "%s cloud filter for VSI: %d, L4 port: %d\n",

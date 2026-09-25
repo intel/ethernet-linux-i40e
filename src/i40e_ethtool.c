@@ -6775,6 +6775,15 @@ static int i40e_set_rxfh(struct net_device *netdev, const u32 *indir,
 }
 #endif /* ETHTOOL_GRSSH && ETHTOOL_SRSSH */
 
+#ifdef HAVE_ETHTOOL_GET_RX_RING_COUNT
+static u32 i40e_get_rx_ring_count(struct net_device *netdev)
+{
+	struct i40e_netdev_priv *np = netdev_priv(netdev);
+
+	return np->vsi->rss_size;
+}
+#endif /* HAVE_ETHTOOL_GET_RX_RING_COUNT */
+
 #ifdef HAVE_ETHTOOL_GET_SSET_COUNT
 /**
  * i40e_get_priv_flags - report device private flags
@@ -7548,6 +7557,9 @@ static const struct ethtool_ops i40e_ethtool_ops = {
 	.get_rxfh_indir_size	= i40e_get_rxfh_indir_size,
 	.get_rxfh		= i40e_get_rxfh,
 	.set_rxfh		= i40e_set_rxfh,
+#ifdef HAVE_ETHTOOL_GET_RX_RING_COUNT
+	.get_rx_ring_count	= i40e_get_rx_ring_count,
+#endif /* HAVE_ETHTOOL_GET_RX_RING_COUNT */
 #endif /* ETHTOOL_GRSSH && ETHTOOL_SRSSH */
 #ifdef ETHTOOL_SCHANNELS
 	.get_channels		= i40e_get_channels,

@@ -715,7 +715,7 @@ static int i40e_validate_vf(struct i40e_pf *pf, int vf_id)
 	struct i40e_vf *vf;
 	int ret = 0;
 
-	if (vf_id >= pf->num_alloc_vfs) {
+	if (vf_id < 0 || vf_id >= pf->num_alloc_vfs) {
 		dev_err(&pf->pdev->dev,
 			"Invalid VF Identifier %d\n", vf_id);
 		ret = -EINVAL;
@@ -4369,7 +4369,7 @@ static int i40e_vc_add_vlan_msg(struct i40e_vf *vf, u8 *msg)
 	struct virtchnl_vlan_filter_list *vfl =
 	    (struct virtchnl_vlan_filter_list *)msg;
 	struct i40e_pf *pf = vf->pf;
-	struct i40e_vsi *main_vsi = NULL;
+	struct i40e_vsi *vsi;
 
 	if (!i40e_sync_vf_state(vf, I40E_VF_STATE_ACTIVE) ||
 	    !i40e_vc_isvalid_vsi_id(vf, vfl->vsi_id)) {
@@ -4377,8 +4377,13 @@ static int i40e_vc_add_vlan_msg(struct i40e_vf *vf, u8 *msg)
 		goto error_param;
 	}
 
-	main_vsi = i40e_pf_get_main_vsi(pf);
-	if (i40e_vc_add_vlans_legacy(vfl, main_vsi, vf))
+	vsi = pf->vsi[vf->lan_vsi_idx];
+	if (!vsi) {
+		v_ret = I40E_ERR_PARAM;
+		goto error_param;
+	}
+
+	if (i40e_vc_add_vlans_legacy(vfl, vsi, vf))
 		v_ret = I40E_ERR_PARAM;
 
 error_param:

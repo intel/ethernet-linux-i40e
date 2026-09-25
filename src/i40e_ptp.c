@@ -1544,7 +1544,6 @@ static int i40e_init_pin_config(struct i40e_pf *pf)
 	pf->ptp_caps.n_per_out = 2;
 #ifdef HAVE_PTP_SUPPORTED_EXTTS_FLAGS
 	pf->ptp_caps.supported_extts_flags = PTP_RISING_EDGE |
-					     PTP_FALLING_EDGE |
 					     PTP_STRICT_FLAGS;
 #endif
 	pf->ptp_caps.pin_config = kcalloc(pf->ptp_caps.n_pins,
