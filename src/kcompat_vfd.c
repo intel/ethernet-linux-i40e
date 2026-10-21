@@ -2494,7 +2494,7 @@ static ssize_t pf_qos_tc_priority_store(struct kobject *kobj,
 	if (!str)
 		return -ENOMEM;
 
-	strncpy(str, buff, count);
+	strscpy(str, buff, count + 1);
 	ret = __get_pdev_tc(kobj, &pdev, &tc);
 	if (ret)
 		goto err;

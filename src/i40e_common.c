@@ -5120,21 +5120,24 @@ i40e_status i40e_aq_add_cloud_filters(struct i40e_hw *hw,
 }
 
 /**
- * i40e_aq_add_cloud_filters_bb
+ * i40e_aq_add_cloud_filters_bb_v2
  * @hw: pointer to the hardware structure
  * @seid: VSI seid to add cloud filters from
  * @filters: Buffer which contains the filters in big buffer to be added
  * @filter_count: number of filters contained in the buffer
+ * @aq_status: pointer to Admin Queue status return value
  *
  * Set the cloud filters for a given VSI.  The contents of the
  * i40e_aqc_cloud_filters_element_bb are filled in by the caller of the
- * the function.
+ * function. The _v2 version returns the last Admin Queue status in
+ * aq_status to avoid race conditions in access to hw->aq.asq_last_status.
  *
  **/
 enum i40e_status_code
-i40e_aq_add_cloud_filters_bb(struct i40e_hw *hw, u16 seid,
-			     struct i40e_aqc_cloud_filters_element_bb *filters,
-			     u8 filter_count)
+i40e_aq_add_cloud_filters_bb_v2(struct i40e_hw *hw, u16 seid,
+				struct i40e_aqc_cloud_filters_element_bb
+				*filters, u8 filter_count,
+				enum i40e_admin_queue_err *aq_status)
 {
 	struct i40e_aq_desc desc;
 	struct i40e_aqc_add_remove_cloud_filters *cmd =
@@ -5171,9 +5174,28 @@ i40e_aq_add_cloud_filters_bb(struct i40e_hw *hw, u16 seid,
 		}
 	}
 
-	status = i40e_asq_send_command(hw, &desc, filters, buff_len, NULL);
+	status = i40e_asq_send_command_atomic_v2(hw, &desc, filters, buff_len,
+						 NULL, true, aq_status);
 
 	return status;
+}
+
+/**
+ * i40e_aq_add_cloud_filters_bb
+ * @hw: pointer to the hardware structure
+ * @seid: VSI seid to add cloud filters from
+ * @filters: Buffer which contains the filters in big buffer to be added
+ * @filter_count: number of filters contained in the buffer
+ *
+ * Set the cloud filters for a given VSI.
+ **/
+enum i40e_status_code
+i40e_aq_add_cloud_filters_bb(struct i40e_hw *hw, u16 seid,
+			     struct i40e_aqc_cloud_filters_element_bb *filters,
+			     u8 filter_count)
+{
+	return i40e_aq_add_cloud_filters_bb_v2(hw, seid, filters,
+					       filter_count, NULL);
 }
 
 /**
@@ -5216,21 +5238,24 @@ i40e_aq_rem_cloud_filters(struct i40e_hw *hw, u16 seid,
 }
 
 /**
- * i40e_aq_rem_cloud_filters_bb
+ * i40e_aq_rem_cloud_filters_bb_v2
  * @hw: pointer to the hardware structure
  * @seid: VSI seid to remove cloud filters from
  * @filters: Buffer which contains the filters in big buffer to be removed
  * @filter_count: number of filters contained in the buffer
+ * @aq_status: pointer to Admin Queue status return value
  *
  * Remove the big buffer cloud filters for a given VSI.  The contents of the
  * i40e_aqc_cloud_filters_element_bb are filled in by the caller of the
- * function.
+ * function. The _v2 version returns the last Admin Queue status in
+ * aq_status to avoid race conditions in access to hw->aq.asq_last_status.
  *
  **/
 enum i40e_status_code
-i40e_aq_rem_cloud_filters_bb(struct i40e_hw *hw, u16 seid,
-			     struct i40e_aqc_cloud_filters_element_bb *filters,
-			     u8 filter_count)
+i40e_aq_rem_cloud_filters_bb_v2(struct i40e_hw *hw, u16 seid,
+				struct i40e_aqc_cloud_filters_element_bb
+				*filters, u8 filter_count,
+				enum i40e_admin_queue_err *aq_status)
 {
 	struct i40e_aq_desc desc;
 	struct i40e_aqc_add_remove_cloud_filters *cmd =
@@ -5267,9 +5292,28 @@ i40e_aq_rem_cloud_filters_bb(struct i40e_hw *hw, u16 seid,
 		}
 	}
 
-	status = i40e_asq_send_command(hw, &desc, filters, buff_len, NULL);
+	status = i40e_asq_send_command_atomic_v2(hw, &desc, filters, buff_len,
+						 NULL, true, aq_status);
 
 	return status;
+}
+
+/**
+ * i40e_aq_rem_cloud_filters_bb
+ * @hw: pointer to the hardware structure
+ * @seid: VSI seid to remove cloud filters from
+ * @filters: Buffer which contains the filters in big buffer to be removed
+ * @filter_count: number of filters contained in the buffer
+ *
+ * Remove the big buffer cloud filters for a given VSI.
+ **/
+enum i40e_status_code
+i40e_aq_rem_cloud_filters_bb(struct i40e_hw *hw, u16 seid,
+			     struct i40e_aqc_cloud_filters_element_bb *filters,
+			     u8 filter_count)
+{
+	return i40e_aq_rem_cloud_filters_bb_v2(hw, seid, filters,
+					       filter_count, NULL);
 }
 
 /**
